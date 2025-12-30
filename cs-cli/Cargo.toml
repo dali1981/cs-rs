@@ -1,0 +1,22 @@
+[package]
+name = "cs-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "cs"
+path = "src/main.rs"
+
+[dependencies]
+cs-analytics = { workspace = true }
+cs-domain = { workspace = true }
+cs-backtest = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+tabled = { workspace = true }
+indicatif = { workspace = true }
+console = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }

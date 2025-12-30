@@ -1,0 +1,20 @@
+[package]
+name = "cs-python"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "cs_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+cs-analytics = { workspace = true }
+cs-domain = { workspace = true }
+cs-backtest = { workspace = true }
+pyo3 = { workspace = true }
+tokio = { workspace = true }
+rust_decimal = { workspace = true }
+chrono = { workspace = true }
+
+[build-dependencies]
+pyo3-build-config = "0.20"

@@ -1,0 +1,24 @@
+[package]
+name = "cs-backtest"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cs-analytics = { workspace = true }
+cs-domain = { workspace = true }
+finq-core = { workspace = true }
+finq-flatfiles = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+rayon = { workspace = true }
+polars = { workspace = true }
+rust_decimal = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+parquet = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }

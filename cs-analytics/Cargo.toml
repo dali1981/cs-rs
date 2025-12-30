@@ -1,0 +1,20 @@
+[package]
+name = "cs-analytics"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rust_decimal = { workspace = true }
+chrono = { workspace = true }
+polars = { workspace = true }
+statrs = { workspace = true }
+roots = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+approx = { workspace = true }
+
+[[bench]]
+name = "black_scholes"
+harness = false
