@@ -10,11 +10,13 @@ polars = { workspace = true }
 statrs = { workspace = true }
 roots = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
 approx = { workspace = true }
 
-[[bench]]
-name = "black_scholes"
-harness = false
+# Benchmarks will be added in Phase 1
+# [[bench]]
+# name = "black_scholes"
+# harness = false
