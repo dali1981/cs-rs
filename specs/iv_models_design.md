@@ -749,14 +749,34 @@ and K/S-space produces the same weights:
 K₁ < K₂ < K₃  ⟺  K₁/S < K₂/S < K₃/S  (when S is constant)
 ```
 
-**The models would differ if:**
-- Surface is built at one spot, then reused when spot has moved
-- Stress testing: shock spot while keeping the same smile
-- EOD pricing with stale surface from market open
-
 **For our use case:** Only `sticky_delta` produces different results because it uses
 the Black-Scholes delta formula with iterative solving, which captures the non-linear
 relationship between strike and delta.
+
+### When Sticky Moneyness Would Matter
+
+To use sticky moneyness effectively, you would need to:
+
+1. **Build the surface once** (e.g., from EOD option data or market open snapshot)
+2. **Keep the surface fixed** while spot moves throughout the day
+3. **Price with current spot** against the stale surface
+
+```
+Example:
+  - Build surface at close: spot = $100, ATM IV = 30%
+  - Next morning spot gaps to $110
+  - Price K=110 call (now ATM):
+    - Sticky Strike: looks up K=110 → gets OTM call IV from yesterday (~28%)
+    - Sticky Moneyness: looks up K/S = 110/110 = 1.0 → gets ATM IV (30%)
+```
+
+This would require a different architecture:
+- Load EOD vol surface once per symbol
+- Pass current spot separately from surface spot
+- Surface becomes a "reference smile" that floats with spot
+
+**Not implemented currently** - we rebuild surface at each pricing time with fresh
+minute-level option data, making sticky moneyness redundant.
 
 ### Key Insight
 
