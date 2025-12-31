@@ -28,6 +28,9 @@ finq-rest = { path = "../finq-rs/crates/finq-rest" }
 finq-websocket = { path = "../finq-rs/crates/finq-websocket" }
 finq-sdk = { path = "../finq-rs/crates/finq-sdk" }
 
+# External: earnings-rs
+earnings-rs = { path = "../trading_project/earnings-rs" }
+
 # Async runtime
 tokio = { version = "1.35", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tokio-stream = "0.1"
@@ -43,9 +46,13 @@ parquet = { version = "53", features = ["async"] }
 rust_decimal = { version = "1.33", features = ["serde", "serde-with-str"] }
 statrs = "0.16"
 roots = "0.0.8"
+nalgebra = "0.33"
+argmin = "0.10"
+argmin-math = { version = "0.5", features = ["nalgebra_v0_33"] }
 
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -63,13 +70,14 @@ clap = { version = "4.4", features = ["derive", "env"] }
 tabled = "0.15"
 indicatif = "0.17"
 console = "0.15"
+dirs = "5.0"
 
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Python bindings
-pyo3 = { version = "0.20", features = ["extension-module"] }
+pyo3 = { version = "0.22", features = ["extension-module"] }
 
 # Testing
 tokio-test = "0.4"

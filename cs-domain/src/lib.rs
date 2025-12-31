@@ -2,26 +2,21 @@
 //
 // Calendar spreads, trading strategies, repositories, domain services.
 
+pub mod datetime;
 pub mod value_objects;
 pub mod entities;
-pub mod trading_session;
 pub mod strategies;
 pub mod repositories;
 pub mod services;
+pub mod infrastructure;
 
-// Re-exports
+// Re-exports for convenience
+pub use datetime::{TradingDate, TradingTimestamp, MarketTime};
 pub use value_objects::*;
 pub use entities::*;
-pub use strategies::*;
+pub use strategies::{
+    TradingStrategy, StrategyError, TradeSelectionCriteria, OptionChainData,
+    ATMStrategy, DeltaStrategy, DeltaScanMode,
+};
 pub use repositories::*;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_placeholder() {
-        // TODO: Implement when modules are ready
-        assert!(true);
-    }
-}
+pub use services::*;

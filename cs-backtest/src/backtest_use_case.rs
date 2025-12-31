@@ -4,8 +4,10 @@ use tracing::{info, debug};
 
 use cs_domain::*;
 use cs_domain::services::EarningsTradeTiming;
+use cs_domain::DeltaStrategy;
 use crate::config::{BacktestConfig, StrategyType};
 use crate::trade_executor::TradeExecutor;
+use crate::iv_surface_builder::build_iv_surface;
 
 /// Backtest execution result
 #[derive(Debug)]
@@ -324,6 +326,15 @@ where
             StrategyType::ATM => Box::new(ATMStrategy {
                 criteria: self.config.selection.clone(),
             }),
+            StrategyType::Delta => Box::new(DeltaStrategy::fixed(
+                self.config.target_delta,
+                self.config.selection.clone(),
+            )),
+            StrategyType::DeltaScan => Box::new(DeltaStrategy::scanning(
+                self.config.delta_range,
+                self.config.delta_scan_steps,
+                self.config.selection.clone(),
+            )),
         }
     }
 
@@ -354,7 +365,7 @@ where
         };
 
         // Get option chain data (validate it exists)
-        let _chain_df = match self.options_repo.get_option_bars(&event.symbol, session_date).await {
+        let chain_df = match self.options_repo.get_option_bars(&event.symbol, session_date).await {
             Ok(df) => df,
             Err(_) => {
                 return Err(TradeGenerationError {
@@ -367,6 +378,14 @@ where
                 });
             }
         };
+
+        // Build IV surface once for strategy selection
+        let iv_surface = build_iv_surface(
+            &chain_df,
+            spot.to_f64(),
+            entry_time,
+            &event.symbol,
+        );
 
         // Get available expirations and strikes
         let expirations = self.options_repo
@@ -394,13 +413,14 @@ where
             });
         }
 
-        // Build chain data for strategy
+        // Build chain data for strategy with pre-computed IV surface
         let chain_data = OptionChainData {
             expirations,
             strikes,
             deltas: None,
             volumes: None,
             iv_ratios: None,
+            iv_surface,
         };
 
         // Select spread using strategy

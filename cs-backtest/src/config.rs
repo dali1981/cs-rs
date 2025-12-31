@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
-use cs_analytics::IVModel;
+use cs_analytics::{IVModel, InterpolationMode};
 use cs_domain::{TimingConfig, TradeSelectionCriteria};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,11 +15,51 @@ pub struct BacktestConfig {
     /// IV interpolation model for pricing
     #[serde(default)]
     pub iv_model: IVModel,
+    /// Target delta for delta strategies (default: 0.50)
+    #[serde(default = "default_target_delta")]
+    pub target_delta: f64,
+    /// Delta range for scanning strategies (min, max)
+    #[serde(default = "default_delta_range")]
+    pub delta_range: (f64, f64),
+    /// Number of steps for delta scanning
+    #[serde(default = "default_delta_scan_steps")]
+    pub delta_scan_steps: usize,
+    /// Volatility interpolation mode (linear or svi)
+    #[serde(default)]
+    pub vol_model: InterpolationMode,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+fn default_target_delta() -> f64 {
+    0.50
+}
+
+fn default_delta_range() -> (f64, f64) {
+    (0.25, 0.75)
+}
+
+fn default_delta_scan_steps() -> usize {
+    5
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum StrategyType {
+    #[default]
     ATM,
+    /// Fixed delta strategy (uses target_delta)
+    Delta,
+    /// Scanning delta strategy (scans delta_range for best opportunity)
+    DeltaScan,
+}
+
+impl StrategyType {
+    pub fn from_string(s: &str) -> Self {
+        match s.to_lowercase().replace('-', "_").as_str() {
+            "delta" => StrategyType::Delta,
+            "delta_scan" | "deltascan" => StrategyType::DeltaScan,
+            _ => StrategyType::ATM,
+        }
+    }
 }
 
 impl Default for BacktestConfig {
@@ -33,6 +73,10 @@ impl Default for BacktestConfig {
             min_market_cap: None,
             parallel: true,
             iv_model: IVModel::default(),
+            target_delta: default_target_delta(),
+            delta_range: default_delta_range(),
+            delta_scan_steps: default_delta_scan_steps(),
+            vol_model: InterpolationMode::default(),
         }
     }
 }

@@ -247,7 +247,10 @@ impl SpreadPricer {
     }
 
     /// Build an IV surface from option chain data for interpolation
-    fn build_iv_surface(
+    ///
+    /// This method is public so callers can pre-build the surface and pass it
+    /// to strategies that need delta-space analysis.
+    pub fn build_iv_surface(
         &self,
         chain_df: &DataFrame,
         spot_price: f64,

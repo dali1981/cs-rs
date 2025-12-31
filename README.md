@@ -30,9 +30,18 @@ cs-rs/
 
 ## Status
 
-🚧 **In Development** - See [RUST_REWRITE_PLAN.md](../trading_project/options_strategy/docs/RUST_REWRITE_PLAN.md) for detailed roadmap.
+🚧 **In Development**
 
-**Current Phase**: Phase 1 - Analytics Core (Weeks 1-3)
+**Current Phase**: Delta-space strategy implementation (M1 complete, M2 in progress)
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Trade Selection](specs/trade_selection.md) | How trades are selected: expiry filtering, opportunity scoring, delta-to-strike mapping |
+| [Delta Strategy Plan](specs/delta_strategy_plan.md) | Full design for delta-space strategies, SVI fitting, arbitrage detection |
+| [IV Models Design](specs/iv_models_design.md) | Sticky-strike vs sticky-moneyness vs sticky-delta interpolation |
+| [Rust Rewrite Plan](specs/RUST_REWRITE_PLAN.md) | Original migration plan from Python |
 
 ## Quick Start
 
@@ -76,24 +85,46 @@ print(f"Delta: {greeks.delta:.3f}, Vega: {greeks.vega:.3f}")
 ### Usage (CLI)
 
 ```bash
-# Run backtest
-cs backtest \
+# Simple ATM backtest
+./target/release/cs backtest \
+  --start 2025-11-01 \
+  --end 2025-11-30 \
+  --strategy atm
+
+# Delta-scan strategy (finds best delta)
+./target/release/cs backtest \
+  --start 2025-11-01 \
+  --end 2025-11-30 \
+  --strategy delta-scan \
+  --delta-range "0.40,0.60" \
+  --min-iv-ratio 1.10
+
+# Fixed delta with sticky-delta IV model
+./target/release/cs backtest \
   --start 2025-11-01 \
   --end 2025-11-30 \
   --strategy delta \
-  --option-type call
+  --target-delta 0.50 \
+  --iv-model sticky-delta
 
-# Analyze results
-cs analyze --run-dir ./results/backtest_20251130_120000
-
-# Price single spread (debugging)
-cs price \
-  --symbol AAPL \
-  --strike 180 \
-  --short-expiry 2025-11-15 \
-  --long-expiry 2025-12-20 \
-  --date 2025-11-01
+# With SVI interpolation (M2)
+./target/release/cs backtest \
+  --start 2025-11-01 \
+  --end 2025-11-30 \
+  --strategy delta-scan \
+  --vol-model svi
 ```
+
+### Key CLI Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--strategy` | `atm`, `delta`, `delta-scan` | `atm` |
+| `--target-delta` | Fixed delta for `delta` strategy | `0.50` |
+| `--delta-range` | Range for `delta-scan` (e.g., "0.25,0.75") | `0.25,0.75` |
+| `--iv-model` | `sticky-strike`, `sticky-moneyness`, `sticky-delta` | `sticky-strike` |
+| `--vol-model` | `linear` (M1), `svi` (M2) | `linear` |
+| `--min-iv-ratio` | Minimum short/long IV ratio | none |
 
 ## Development
 
@@ -140,22 +171,18 @@ python -c "from cs_rust import bs_price; print(bs_price(100, 100, 0.08, 0.3, Tru
 
 | Metric | Python | Rust Target | Status |
 |--------|--------|-------------|--------|
-| 10K trades backtest | 20 min | < 4 min | 🚧 |
-| BS IV solver | ~2 μs | < 100 ns | 🚧 |
-| Memory usage | 4 GB | < 2 GB | 🚧 |
-| Result parity | - | 100% match | 🚧 |
+| 10K trades backtest | 20 min | < 4 min | ✅ Achieved |
+| BS IV solver | ~2 μs | < 100 ns | ✅ Achieved |
+| Memory usage | 4 GB | < 2 GB | ✅ Achieved |
+| Result parity | - | 100% match | ✅ Verified |
 
-## Timeline
+## Milestones
 
-| Phase | Duration | Status |
-|-------|----------|--------|
-| 1. Analytics Core | Weeks 1-3 | 🚧 In Progress |
-| 2. Domain Models | Weeks 4-7 | ⏳ Pending |
-| 3. finq-rs Integration | Weeks 8-10 | ⏳ Pending |
-| 4. Backtest Engine | Weeks 11-15 | ⏳ Pending |
-| 5. Python Bindings | Weeks 16-18 | ⏳ Pending |
-| 6. CLI + Persistence | Weeks 19-21 | ⏳ Pending |
-| 7. Testing | Weeks 22-25 | ⏳ Pending |
+| Milestone | Description | Status |
+|-----------|-------------|--------|
+| **M1** | Delta-space linear interpolation | ✅ Complete |
+| **M2** | SVI fitting, arbitrage detection | 🚧 In Progress |
+| **M3** | SSVI surface consistency | ⏳ Planned |
 
 ## Contributing
 

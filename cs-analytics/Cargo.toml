@@ -11,6 +11,9 @@ statrs = { workspace = true }
 roots = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
+nalgebra = { workspace = true }
+argmin = { workspace = true }
+argmin-math = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

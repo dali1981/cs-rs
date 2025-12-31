@@ -11,7 +11,7 @@ use tabled::{Table, Tabled};
 use tracing::{info, Level};
 use tracing_subscriber;
 
-use cs_backtest::{BacktestConfig, BacktestUseCase, StrategyType, IVModel};
+use cs_backtest::{BacktestConfig, BacktestUseCase, StrategyType, IVModel, InterpolationMode};
 use cs_domain::{
     infrastructure::{
         EarningsReaderAdapter, FinqEquityRepository, FinqOptionsRepository,
@@ -51,9 +51,15 @@ enum Commands {
         /// Option type (call/put)
         #[arg(long, default_value = "call")]
         option_type: String,
-        /// Strategy type (atm)
+        /// Strategy type (atm, delta, delta-scan)
         #[arg(long, default_value = "atm")]
         strategy: String,
+        /// Delta range for delta-scan strategy (format: "0.25,0.75")
+        #[arg(long)]
+        delta_range: Option<String>,
+        /// Number of delta steps for delta-scan strategy
+        #[arg(long, default_value = "5")]
+        delta_scan_steps: usize,
         /// Filter to specific symbols
         #[arg(long)]
         symbols: Option<Vec<String>>,
@@ -99,6 +105,9 @@ enum Commands {
         /// IV interpolation model (sticky-strike, sticky-moneyness, sticky-delta)
         #[arg(long, default_value = "sticky-strike")]
         iv_model: String,
+        /// Volatility interpolation mode (linear, svi)
+        #[arg(long, default_value = "linear")]
+        vol_model: String,
     },
 
     /// Analyze results from a run
@@ -150,6 +159,8 @@ async fn main() -> Result<()> {
             end,
             option_type,
             strategy,
+            delta_range,
+            delta_scan_steps,
             symbols,
             output,
             entry_hour,
@@ -165,6 +176,7 @@ async fn main() -> Result<()> {
             min_iv_ratio,
             no_parallel,
             iv_model,
+            vol_model,
         } => {
             run_backtest(
                 cli.data_dir,
@@ -172,6 +184,8 @@ async fn main() -> Result<()> {
                 &end,
                 &option_type,
                 &strategy,
+                delta_range,
+                delta_scan_steps,
                 symbols,
                 output,
                 entry_hour,
@@ -187,6 +201,7 @@ async fn main() -> Result<()> {
                 min_iv_ratio,
                 !no_parallel,
                 &iv_model,
+                &vol_model,
             )
             .await?;
         }
@@ -216,6 +231,8 @@ async fn run_backtest(
     end_str: &str,
     option_type_str: &str,
     strategy_str: &str,
+    delta_range_str: Option<String>,
+    delta_scan_steps: usize,
     symbols: Option<Vec<String>>,
     output: Option<PathBuf>,
     entry_hour: u32,
@@ -231,6 +248,7 @@ async fn run_backtest(
     min_iv_ratio: Option<f64>,
     parallel: bool,
     iv_model_str: &str,
+    vol_model_str: &str,
 ) -> Result<()> {
     // Parse dates
     let start_date = NaiveDate::parse_from_str(start_str, "%Y-%m-%d")
@@ -246,13 +264,28 @@ async fn run_backtest(
     };
 
     // Parse strategy
-    let strategy = match strategy_str.to_lowercase().as_str() {
-        "atm" => StrategyType::ATM,
-        _ => anyhow::bail!("Invalid strategy: {}. Must be 'atm'", strategy_str),
+    let strategy = StrategyType::from_string(strategy_str);
+
+    // Parse delta range if provided
+    let delta_range = if let Some(ref range_str) = delta_range_str {
+        let parts: Vec<&str> = range_str.split(',').collect();
+        if parts.len() != 2 {
+            anyhow::bail!("Invalid delta range format. Use: --delta-range '0.25,0.75'");
+        }
+        let min: f64 = parts[0].trim().parse()
+            .with_context(|| format!("Invalid delta range min: {}", parts[0]))?;
+        let max: f64 = parts[1].trim().parse()
+            .with_context(|| format!("Invalid delta range max: {}", parts[1]))?;
+        (min, max)
+    } else {
+        (0.25, 0.75)
     };
 
     // Parse IV model
     let iv_model = IVModel::from_string(iv_model_str);
+
+    // Parse vol model (linear/svi interpolation)
+    let vol_model = InterpolationMode::from_string(vol_model_str);
 
     // Get data directory and expand tilde
     let data_dir = data_dir
@@ -285,6 +318,15 @@ async fn run_backtest(
     if let Some(delta) = target_delta {
         println!("  Target delta:  {:.3}", delta);
     }
+    match strategy {
+        StrategyType::Delta | StrategyType::DeltaScan => {
+            println!("  Delta range:   {:.2}-{:.2}", delta_range.0, delta_range.1);
+            if matches!(strategy, StrategyType::DeltaScan) {
+                println!("  Scan steps:    {}", delta_scan_steps);
+            }
+        }
+        _ => {}
+    }
     if let Some(iv) = min_iv_ratio {
         println!("  Min IV ratio:  {:.3}", iv);
     }
@@ -296,6 +338,7 @@ async fn run_backtest(
     }
     println!("  Parallel:      {}", parallel);
     println!("  IV model:      {}", iv_model);
+    println!("  Vol model:     {:?}", vol_model);
     println!();
 
     // Create repositories
@@ -339,6 +382,10 @@ async fn run_backtest(
         min_market_cap,
         parallel,
         iv_model,
+        target_delta: target_delta.unwrap_or(0.50),
+        delta_range,
+        delta_scan_steps,
+        vol_model,
     };
 
     // Create backtest use case

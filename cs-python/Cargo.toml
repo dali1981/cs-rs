@@ -15,6 +15,7 @@ pyo3 = { workspace = true }
 tokio = { workspace = true }
 rust_decimal = { workspace = true }
 chrono = { workspace = true }
+finq-core = { workspace = true }
 
 [build-dependencies]
-pyo3-build-config = "0.20"
+pyo3-build-config = "0.22"
