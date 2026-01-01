@@ -11,15 +11,19 @@ use tabled::{Table, Tabled};
 use tracing::{info, Level};
 use tracing_subscriber;
 
-use cs_backtest::{BacktestConfig, BacktestUseCase, StrategyType, IVModel, InterpolationMode};
+use cs_backtest::{BacktestUseCase, StrategyType};
 use cs_domain::{
     infrastructure::{
         EarningsReaderAdapter, FinqEquityRepository, FinqOptionsRepository,
         ParquetResultsRepository,
     },
     ResultsRepository,
-    TimingConfig, TradeSelectionCriteria,
 };
+
+mod config;
+mod cli_args;
+
+use cli_args::*;
 
 #[derive(Parser)]
 #[command(name = "cs")]
@@ -42,6 +46,12 @@ pub struct Cli {
 enum Commands {
     /// Run backtest
     Backtest {
+        /// Configuration file(s) - can specify multiple, each merges on top of previous
+        #[arg(long, short = 'c')]
+        conf: Vec<PathBuf>,
+        /// Earnings data directory
+        #[arg(long, env = "EARNINGS_DATA_DIR")]
+        earnings_dir: Option<PathBuf>,
         /// Start date (YYYY-MM-DD)
         #[arg(long)]
         start: String,
@@ -52,14 +62,14 @@ enum Commands {
         #[arg(long, default_value = "call")]
         option_type: String,
         /// Strategy type (atm, delta, delta-scan)
-        #[arg(long, default_value = "atm")]
-        strategy: String,
+        #[arg(long)]
+        strategy: Option<String>,
         /// Delta range for delta-scan strategy (format: "0.25,0.75")
         #[arg(long)]
         delta_range: Option<String>,
         /// Number of delta steps for delta-scan strategy
-        #[arg(long, default_value = "5")]
-        delta_scan_steps: usize,
+        #[arg(long)]
+        delta_scan_steps: Option<usize>,
         /// Filter to specific symbols
         #[arg(long)]
         symbols: Option<Vec<String>>,
@@ -67,32 +77,32 @@ enum Commands {
         #[arg(long)]
         output: Option<PathBuf>,
         /// Entry hour (0-23)
-        #[arg(long, default_value = "9")]
-        entry_hour: u32,
+        #[arg(long)]
+        entry_hour: Option<u32>,
         /// Entry minute (0-59)
-        #[arg(long, default_value = "35")]
-        entry_minute: u32,
+        #[arg(long)]
+        entry_minute: Option<u32>,
         /// Exit hour (0-23)
-        #[arg(long, default_value = "15")]
-        exit_hour: u32,
+        #[arg(long)]
+        exit_hour: Option<u32>,
         /// Exit minute (0-59)
-        #[arg(long, default_value = "55")]
-        exit_minute: u32,
+        #[arg(long)]
+        exit_minute: Option<u32>,
         /// Minimum market cap filter
         #[arg(long)]
         min_market_cap: Option<u64>,
         /// Minimum short DTE
-        #[arg(long, default_value = "3")]
-        min_short_dte: i32,
+        #[arg(long)]
+        min_short_dte: Option<i32>,
         /// Maximum short DTE
-        #[arg(long, default_value = "45")]
-        max_short_dte: i32,
+        #[arg(long)]
+        max_short_dte: Option<i32>,
         /// Minimum long DTE
-        #[arg(long, default_value = "14")]
-        min_long_dte: i32,
+        #[arg(long)]
+        min_long_dte: Option<i32>,
         /// Maximum long DTE
-        #[arg(long, default_value = "90")]
-        max_long_dte: i32,
+        #[arg(long)]
+        max_long_dte: Option<i32>,
         /// Target delta
         #[arg(long)]
         target_delta: Option<f64>,
@@ -102,12 +112,12 @@ enum Commands {
         /// Disable parallel processing
         #[arg(long)]
         no_parallel: bool,
-        /// IV interpolation model (sticky-strike, sticky-moneyness, sticky-delta)
-        #[arg(long, default_value = "sticky-strike")]
-        iv_model: String,
+        /// Pricing IV interpolation model (sticky-strike, sticky-moneyness, sticky-delta)
+        #[arg(long)]
+        pricing_model: Option<String>,
         /// Volatility interpolation mode (linear, svi)
-        #[arg(long, default_value = "linear")]
-        vol_model: String,
+        #[arg(long)]
+        vol_model: Option<String>,
     },
 
     /// Analyze results from a run
@@ -155,6 +165,8 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Backtest {
+            conf,
+            earnings_dir,
             start,
             end,
             option_type,
@@ -175,15 +187,17 @@ async fn main() -> Result<()> {
             target_delta,
             min_iv_ratio,
             no_parallel,
-            iv_model,
+            pricing_model,
             vol_model,
         } => {
             run_backtest(
+                conf,
                 cli.data_dir,
+                earnings_dir,
                 &start,
                 &end,
                 &option_type,
-                &strategy,
+                strategy,
                 delta_range,
                 delta_scan_steps,
                 symbols,
@@ -200,8 +214,8 @@ async fn main() -> Result<()> {
                 target_delta,
                 min_iv_ratio,
                 !no_parallel,
-                &iv_model,
-                &vol_model,
+                pricing_model,
+                vol_model,
             )
             .await?;
         }
@@ -225,30 +239,122 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_backtest(
+/// Build CLI overrides from command-line arguments
+fn build_cli_overrides(
     data_dir: Option<PathBuf>,
+    earnings_dir: Option<PathBuf>,
+    strategy_str: Option<String>,
+    delta_range_str: Option<String>,
+    delta_scan_steps: Option<usize>,
+    symbols: Option<Vec<String>>,
+    entry_hour: Option<u32>,
+    entry_minute: Option<u32>,
+    exit_hour: Option<u32>,
+    exit_minute: Option<u32>,
+    min_market_cap: Option<u64>,
+    min_short_dte: Option<i32>,
+    max_short_dte: Option<i32>,
+    min_long_dte: Option<i32>,
+    max_long_dte: Option<i32>,
+    target_delta: Option<f64>,
+    min_iv_ratio: Option<f64>,
+    no_parallel: bool,
+    pricing_model_str: Option<String>,
+    vol_model_str: Option<String>,
+) -> Result<CliOverrides> {
+    // Parse delta range if provided
+    let delta_range = if let Some(ref range_str) = delta_range_str {
+        let parts: Vec<&str> = range_str.split(',').collect();
+        if parts.len() != 2 {
+            anyhow::bail!("Invalid delta range format. Use: --delta-range '0.25,0.75'");
+        }
+        let min: f64 = parts[0].trim().parse()
+            .with_context(|| format!("Invalid delta range min: {}", parts[0]))?;
+        let max: f64 = parts[1].trim().parse()
+            .with_context(|| format!("Invalid delta range max: {}", parts[1]))?;
+        Some((min, max))
+    } else {
+        None
+    };
+
+    Ok(CliOverrides {
+        paths: if data_dir.is_some() || earnings_dir.is_some() {
+            Some(CliPaths { data_dir, earnings_dir })
+        } else {
+            None
+        },
+        timing: if entry_hour.is_some() || entry_minute.is_some() || exit_hour.is_some() || exit_minute.is_some() {
+            Some(CliTiming {
+                entry_hour,
+                entry_minute,
+                exit_hour,
+                exit_minute,
+            })
+        } else {
+            None
+        },
+        selection: if min_short_dte.is_some() || max_short_dte.is_some() || min_long_dte.is_some() || max_long_dte.is_some() || target_delta.is_some() || min_iv_ratio.is_some() {
+            Some(CliSelection {
+                min_short_dte,
+                max_short_dte,
+                min_long_dte,
+                max_long_dte,
+                target_delta,
+                min_iv_ratio,
+            })
+        } else {
+            None
+        },
+        strategy: if strategy_str.is_some() || delta_range.is_some() || delta_scan_steps.is_some() {
+            Some(CliStrategy {
+                strategy_type: strategy_str,
+                target_delta: None,
+                delta_range,
+                delta_scan_steps,
+            })
+        } else {
+            None
+        },
+        pricing: if pricing_model_str.is_some() || vol_model_str.is_some() {
+            Some(CliPricing {
+                model: pricing_model_str,
+                vol_model: vol_model_str,
+            })
+        } else {
+            None
+        },
+        symbols,
+        min_market_cap,
+        parallel: if no_parallel { Some(false) } else { None },
+    })
+}
+
+async fn run_backtest(
+    conf: Vec<PathBuf>,
+    data_dir: Option<PathBuf>,
+    earnings_dir: Option<PathBuf>,
     start_str: &str,
     end_str: &str,
     option_type_str: &str,
-    strategy_str: &str,
+    strategy_str: Option<String>,
     delta_range_str: Option<String>,
-    delta_scan_steps: usize,
+    delta_scan_steps: Option<usize>,
     symbols: Option<Vec<String>>,
     output: Option<PathBuf>,
-    entry_hour: u32,
-    entry_minute: u32,
-    exit_hour: u32,
-    exit_minute: u32,
+    entry_hour: Option<u32>,
+    entry_minute: Option<u32>,
+    exit_hour: Option<u32>,
+    exit_minute: Option<u32>,
     min_market_cap: Option<u64>,
-    min_short_dte: i32,
-    max_short_dte: i32,
-    min_long_dte: i32,
-    max_long_dte: i32,
+    min_short_dte: Option<i32>,
+    max_short_dte: Option<i32>,
+    min_long_dte: Option<i32>,
+    max_long_dte: Option<i32>,
     target_delta: Option<f64>,
     min_iv_ratio: Option<f64>,
-    parallel: bool,
-    iv_model_str: &str,
-    vol_model_str: &str,
+    no_parallel: bool,
+    pricing_model_str: Option<String>,
+    vol_model_str: Option<String>,
 ) -> Result<()> {
     // Parse dates
     let start_date = NaiveDate::parse_from_str(start_str, "%Y-%m-%d")
@@ -263,137 +369,92 @@ async fn run_backtest(
         _ => anyhow::bail!("Invalid option type: {}. Must be 'call' or 'put'", option_type_str),
     };
 
-    // Parse strategy
-    let strategy = StrategyType::from_string(strategy_str);
+    // Build CLI overrides
+    let cli_overrides = build_cli_overrides(
+        data_dir,
+        earnings_dir,
+        strategy_str,
+        delta_range_str,
+        delta_scan_steps,
+        symbols,
+        entry_hour,
+        entry_minute,
+        exit_hour,
+        exit_minute,
+        min_market_cap,
+        min_short_dte,
+        max_short_dte,
+        min_long_dte,
+        max_long_dte,
+        target_delta,
+        min_iv_ratio,
+        no_parallel,
+        pricing_model_str,
+        vol_model_str,
+    )?;
 
-    // Parse delta range if provided
-    let delta_range = if let Some(ref range_str) = delta_range_str {
-        let parts: Vec<&str> = range_str.split(',').collect();
-        if parts.len() != 2 {
-            anyhow::bail!("Invalid delta range format. Use: --delta-range '0.25,0.75'");
-        }
-        let min: f64 = parts[0].trim().parse()
-            .with_context(|| format!("Invalid delta range min: {}", parts[0]))?;
-        let max: f64 = parts[1].trim().parse()
-            .with_context(|| format!("Invalid delta range max: {}", parts[1]))?;
-        (min, max)
-    } else {
-        (0.25, 0.75)
-    };
+    // Load configuration with layering
+    let app_config = config::load_config(&conf, cli_overrides)?;
 
-    // Parse IV model
-    let iv_model = IVModel::from_string(iv_model_str);
+    // Convert to backtest config
+    let backtest_config = app_config.to_backtest_config();
 
-    // Parse vol model (linear/svi interpolation)
-    let vol_model = InterpolationMode::from_string(vol_model_str);
-
-    // Get data directory and expand tilde
-    let data_dir = data_dir
-        .or_else(|| std::env::var("FINQ_DATA_DIR").ok().map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("data"));
-
-    // Expand tilde in path
-    let data_dir = if data_dir.starts_with("~") {
-        if let Some(home) = dirs::home_dir() {
-            let path_str = data_dir.to_string_lossy();
-            let without_tilde = path_str.strip_prefix("~").unwrap_or(&path_str);
-            let without_tilde = without_tilde.strip_prefix("/").unwrap_or(without_tilde);
-            home.join(without_tilde)
-        } else {
-            data_dir
-        }
-    } else {
-        data_dir
-    };
+    let data_dir = backtest_config.data_dir.clone();
+    let earnings_data_dir = backtest_config.earnings_dir.clone();
+    let strategy = backtest_config.strategy;
 
     println!("{}", style("Configuration:").bold());
     println!("  Data dir:      {:?}", data_dir);
+    println!("  Earnings dir:  {:?}", earnings_data_dir);
     println!("  Date range:    {} to {}", start_date, end_date);
     println!("  Option type:   {:?}", option_type);
     println!("  Strategy:      {:?}", strategy);
-    println!("  Entry time:    {:02}:{:02}", entry_hour, entry_minute);
-    println!("  Exit time:     {:02}:{:02}", exit_hour, exit_minute);
-    println!("  Short DTE:     {}-{}", min_short_dte, max_short_dte);
-    println!("  Long DTE:      {}-{}", min_long_dte, max_long_dte);
-    if let Some(delta) = target_delta {
+    println!("  Entry time:    {:02}:{:02}", backtest_config.timing.entry_hour, backtest_config.timing.entry_minute);
+    println!("  Exit time:     {:02}:{:02}", backtest_config.timing.exit_hour, backtest_config.timing.exit_minute);
+    println!("  Short DTE:     {}-{}", backtest_config.selection.min_short_dte, backtest_config.selection.max_short_dte);
+    println!("  Long DTE:      {}-{}", backtest_config.selection.min_long_dte, backtest_config.selection.max_long_dte);
+    if let Some(delta) = backtest_config.selection.target_delta {
         println!("  Target delta:  {:.3}", delta);
     }
     match strategy {
         StrategyType::Delta | StrategyType::DeltaScan => {
-            println!("  Delta range:   {:.2}-{:.2}", delta_range.0, delta_range.1);
+            println!("  Delta range:   {:.2}-{:.2}", backtest_config.delta_range.0, backtest_config.delta_range.1);
             if matches!(strategy, StrategyType::DeltaScan) {
-                println!("  Scan steps:    {}", delta_scan_steps);
+                println!("  Scan steps:    {}", backtest_config.delta_scan_steps);
             }
         }
         _ => {}
     }
-    if let Some(iv) = min_iv_ratio {
+    if let Some(iv) = backtest_config.selection.min_iv_ratio {
         println!("  Min IV ratio:  {:.3}", iv);
     }
-    if let Some(cap) = min_market_cap {
+    if let Some(cap) = backtest_config.min_market_cap {
         println!("  Min mkt cap:   ${}", cap);
     }
-    if let Some(ref syms) = symbols {
+    if let Some(ref syms) = backtest_config.symbols {
         println!("  Symbols:       {:?}", syms);
     }
-    println!("  Parallel:      {}", parallel);
-    println!("  IV model:      {}", iv_model);
-    println!("  Vol model:     {:?}", vol_model);
+    println!("  Parallel:      {}", backtest_config.parallel);
+    println!("  Pricing model: {}", backtest_config.pricing_model);
+    println!("  Vol model:     {:?}", backtest_config.vol_model);
     println!();
 
     // Create repositories
     info!("Initializing repositories...");
 
-    // Earnings data from nasdaq_earnings (earnings-rs)
-    let earnings_data_dir = std::env::var("EARNINGS_DATA_DIR")
-        .unwrap_or_else(|_| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("trading_project/nasdaq_earnings/data")
-                .to_string_lossy()
-                .to_string()
-        });
-    let earnings_repo = EarningsReaderAdapter::new(PathBuf::from(earnings_data_dir));
+    // Earnings data repository
+    let earnings_repo = EarningsReaderAdapter::new(earnings_data_dir.clone());
 
     // Options and equity data from FINQ_DATA_DIR
     let options_repo = FinqOptionsRepository::new(data_dir.clone());
     let equity_repo = FinqEquityRepository::new(data_dir.clone());
-
-    // Create backtest config
-    let config = BacktestConfig {
-        data_dir: data_dir.clone(),
-        timing: TimingConfig {
-            entry_hour,
-            entry_minute,
-            exit_hour,
-            exit_minute,
-        },
-        selection: TradeSelectionCriteria {
-            min_short_dte,
-            max_short_dte,
-            min_long_dte,
-            max_long_dte,
-            target_delta,
-            min_iv_ratio,
-            max_bid_ask_spread_pct: None,
-        },
-        strategy,
-        symbols,
-        min_market_cap,
-        parallel,
-        iv_model,
-        target_delta: target_delta.unwrap_or(0.50),
-        delta_range,
-        delta_scan_steps,
-        vol_model,
-    };
 
     // Create backtest use case
     let backtest = BacktestUseCase::new(
         earnings_repo,
         options_repo,
         equity_repo,
-        config,
+        backtest_config,
     );
 
     // Progress bar

@@ -19,6 +19,7 @@ tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 parquet = { workspace = true }
+dirs = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }

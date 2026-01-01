@@ -1,0 +1,225 @@
+//! Layered configuration loading for cs-cli
+//!
+//! Configuration priority (highest to lowest):
+//! 1. CLI arguments
+//! 2. Strategy config file (--conf)
+//! 3. System config (~/.config/cs/system.toml)
+//! 4. Code defaults
+
+use figment::{Figment, providers::{Format, Toml, Serialized}};
+use serde::{Serialize, Deserialize};
+use std::path::PathBuf;
+use anyhow::Result;
+
+use crate::cli_args::CliOverrides;
+
+/// Full layered configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppConfig {
+    pub paths: PathsConfig,
+    pub timing: TimingConfig,
+    pub selection: SelectionConfig,
+    pub strategy: StrategyConfig,
+    pub pricing: PricingConfig,
+    pub symbols: Option<Vec<String>>,
+    pub min_market_cap: Option<u64>,
+    pub parallel: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PathsConfig {
+    pub data_dir: PathBuf,
+    pub earnings_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TimingConfig {
+    pub entry_hour: u32,
+    pub entry_minute: u32,
+    pub exit_hour: u32,
+    pub exit_minute: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SelectionConfig {
+    pub min_short_dte: i32,
+    pub max_short_dte: i32,
+    pub min_long_dte: i32,
+    pub max_long_dte: i32,
+    pub target_delta: Option<f64>,
+    pub min_iv_ratio: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StrategyConfig {
+    #[serde(rename = "type")]
+    pub strategy_type: String,
+    pub target_delta: f64,
+    pub delta_range: (f64, f64),
+    pub delta_scan_steps: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PricingConfig {
+    pub model: String,
+    pub vol_model: String,
+}
+
+// Default implementations
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            paths: PathsConfig::default(),
+            timing: TimingConfig::default(),
+            selection: SelectionConfig::default(),
+            strategy: StrategyConfig::default(),
+            pricing: PricingConfig::default(),
+            symbols: None,
+            min_market_cap: None,
+            parallel: true,
+        }
+    }
+}
+
+impl Default for PathsConfig {
+    fn default() -> Self {
+        Self {
+            data_dir: PathBuf::from("data"),
+            earnings_dir: dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("trading_project/nasdaq_earnings/data"),
+        }
+    }
+}
+
+impl Default for TimingConfig {
+    fn default() -> Self {
+        Self {
+            entry_hour: 9,
+            entry_minute: 35,
+            exit_hour: 15,
+            exit_minute: 55,
+        }
+    }
+}
+
+impl Default for SelectionConfig {
+    fn default() -> Self {
+        Self {
+            min_short_dte: 3,
+            max_short_dte: 45,
+            min_long_dte: 14,
+            max_long_dte: 90,
+            target_delta: None,
+            min_iv_ratio: None,
+        }
+    }
+}
+
+impl Default for StrategyConfig {
+    fn default() -> Self {
+        Self {
+            strategy_type: "atm".to_string(),
+            target_delta: 0.50,
+            delta_range: (0.25, 0.75),
+            delta_scan_steps: 5,
+        }
+    }
+}
+
+impl Default for PricingConfig {
+    fn default() -> Self {
+        Self {
+            model: "sticky_strike".to_string(),
+            vol_model: "linear".to_string(),
+        }
+    }
+}
+
+/// Load configuration with full layering
+pub fn load_config(
+    conf_files: &[PathBuf],
+    cli_overrides: CliOverrides,
+) -> Result<AppConfig> {
+    let system_config = dirs::config_dir()
+        .map(|p| p.join("cs/system.toml"))
+        .unwrap_or_else(|| PathBuf::from("~/.config/cs/system.toml"));
+
+    let mut figment = Figment::new()
+        // 1. Code defaults (lowest priority)
+        .merge(Serialized::defaults(AppConfig::default()));
+
+    // 2. System config (if exists)
+    if system_config.exists() {
+        figment = figment.merge(Toml::file(&system_config));
+    }
+
+    // 3. Strategy config files (in order, each merges on top)
+    for conf_path in conf_files {
+        figment = figment.merge(Toml::file(conf_path));
+    }
+
+    // 4. CLI overrides (highest priority)
+    figment = figment.merge(Serialized::defaults(cli_overrides));
+
+    // Extract and post-process
+    let mut config: AppConfig = figment.extract()?;
+
+    // Expand tilde in paths
+    config.paths.data_dir = expand_tilde(&config.paths.data_dir);
+    config.paths.earnings_dir = expand_tilde(&config.paths.earnings_dir);
+
+    Ok(config)
+}
+
+fn expand_tilde(path: &PathBuf) -> PathBuf {
+    if path.starts_with("~") {
+        if let Some(home) = dirs::home_dir() {
+            let path_str = path.to_string_lossy();
+            let without_tilde = path_str.strip_prefix("~").unwrap_or(&path_str);
+            let without_tilde = without_tilde.strip_prefix("/").unwrap_or(without_tilde);
+            return home.join(without_tilde);
+        }
+    }
+    path.clone()
+}
+
+impl AppConfig {
+    /// Convert to BacktestConfig for use by backtest use case
+    pub fn to_backtest_config(&self) -> cs_backtest::BacktestConfig {
+        cs_backtest::BacktestConfig {
+            data_dir: self.paths.data_dir.clone(),
+            earnings_dir: self.paths.earnings_dir.clone(),
+            timing: cs_domain::TimingConfig {
+                entry_hour: self.timing.entry_hour,
+                entry_minute: self.timing.entry_minute,
+                exit_hour: self.timing.exit_hour,
+                exit_minute: self.timing.exit_minute,
+            },
+            selection: cs_domain::TradeSelectionCriteria {
+                min_short_dte: self.selection.min_short_dte,
+                max_short_dte: self.selection.max_short_dte,
+                min_long_dte: self.selection.min_long_dte,
+                max_long_dte: self.selection.max_long_dte,
+                target_delta: self.selection.target_delta,
+                min_iv_ratio: self.selection.min_iv_ratio,
+                max_bid_ask_spread_pct: None,
+            },
+            strategy: cs_backtest::StrategyType::from_string(&self.strategy.strategy_type),
+            symbols: self.symbols.clone(),
+            min_market_cap: self.min_market_cap,
+            parallel: self.parallel,
+            pricing_model: cs_analytics::PricingModel::from_string(&self.pricing.model),
+            target_delta: self.strategy.target_delta,
+            delta_range: self.strategy.delta_range,
+            delta_scan_steps: self.strategy.delta_scan_steps,
+            vol_model: cs_analytics::InterpolationMode::from_string(&self.pricing.vol_model),
+        }
+    }
+}

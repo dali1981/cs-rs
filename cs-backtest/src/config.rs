@@ -1,20 +1,21 @@
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
-use cs_analytics::{IVModel, InterpolationMode};
+use cs_analytics::{PricingModel, InterpolationMode};
 use cs_domain::{TimingConfig, TradeSelectionCriteria};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestConfig {
     pub data_dir: PathBuf,
+    pub earnings_dir: PathBuf,
     pub timing: TimingConfig,
     pub selection: TradeSelectionCriteria,
     pub strategy: StrategyType,
     pub symbols: Option<Vec<String>>,
     pub min_market_cap: Option<u64>,
     pub parallel: bool,
-    /// IV interpolation model for pricing
+    /// Pricing IV interpolation model
     #[serde(default)]
-    pub iv_model: IVModel,
+    pub pricing_model: PricingModel,
     /// Target delta for delta strategies (default: 0.50)
     #[serde(default = "default_target_delta")]
     pub target_delta: f64,
@@ -66,13 +67,16 @@ impl Default for BacktestConfig {
     fn default() -> Self {
         Self {
             data_dir: PathBuf::from("data"),
+            earnings_dir: dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("trading_project/nasdaq_earnings/data"),
             timing: TimingConfig::default(),
             selection: TradeSelectionCriteria::default(),
             strategy: StrategyType::ATM,
             symbols: None,
             min_market_cap: None,
             parallel: true,
-            iv_model: IVModel::default(),
+            pricing_model: PricingModel::default(),
             target_delta: default_target_delta(),
             delta_range: default_delta_range(),
             delta_scan_steps: default_delta_scan_steps(),

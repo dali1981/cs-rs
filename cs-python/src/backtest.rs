@@ -235,6 +235,7 @@ impl PyBacktestUseCase {
         let data_dir = PathBuf::from(&self.config.data_dir);
         let rust_config = BacktestConfig {
             data_dir: data_dir.clone(),
+            earnings_dir: data_dir.clone(),  // Use same directory for earnings in Python
             timing: TimingConfig {
                 entry_hour: self.config.entry_hour,
                 entry_minute: self.config.entry_minute,
@@ -254,7 +255,7 @@ impl PyBacktestUseCase {
             symbols: self.config.symbols.clone(),
             min_market_cap: self.config.min_market_cap,
             parallel: self.config.parallel,
-            iv_model: cs_analytics::IVModel::default(),
+            pricing_model: cs_analytics::PricingModel::default(),
             target_delta: self.config.target_delta.unwrap_or(0.50),
             delta_range: (0.25, 0.75),
             delta_scan_steps: 5,

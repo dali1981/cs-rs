@@ -25,3 +25,5 @@ chrono = { workspace = true }
 finq-core = { workspace = true }
 rust_decimal = { workspace = true }
 polars = { workspace = true }
+figment = { version = "0.10", features = ["toml", "env"] }
+serde = { workspace = true }
