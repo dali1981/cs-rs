@@ -323,18 +323,25 @@ where
 
     fn create_strategy(&self) -> Box<dyn TradingStrategy> {
         match self.config.strategy {
-            StrategyType::ATM => Box::new(ATMStrategy {
-                criteria: self.config.selection.clone(),
-            }),
-            StrategyType::Delta => Box::new(DeltaStrategy::fixed(
-                self.config.target_delta,
-                self.config.selection.clone(),
-            )),
-            StrategyType::DeltaScan => Box::new(DeltaStrategy::scanning(
-                self.config.delta_range,
-                self.config.delta_scan_steps,
-                self.config.selection.clone(),
-            )),
+            StrategyType::ATM => Box::new(
+                ATMStrategy::new(self.config.selection.clone())
+                    .with_strike_match_mode(self.config.strike_match_mode)
+            ),
+            StrategyType::Delta => Box::new(
+                DeltaStrategy::fixed(
+                    self.config.target_delta,
+                    self.config.selection.clone(),
+                )
+                .with_strike_match_mode(self.config.strike_match_mode)
+            ),
+            StrategyType::DeltaScan => Box::new(
+                DeltaStrategy::scanning(
+                    self.config.delta_range,
+                    self.config.delta_scan_steps,
+                    self.config.selection.clone(),
+                )
+                .with_strike_match_mode(self.config.strike_match_mode)
+            ),
         }
     }
 
@@ -445,7 +452,8 @@ where
             self.options_repo.clone(),
             self.equity_repo.clone(),
         )
-        .with_iv_model(self.config.iv_model);
+        .with_pricing_model(self.config.pricing_model)
+        .with_max_entry_iv(self.config.max_entry_iv);
 
         let result = executor.execute_trade(&spread, event, entry_time, exit_time).await;
 

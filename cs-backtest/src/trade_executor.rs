@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use std::sync::Arc;
 
-use cs_analytics::IVModel;
+use cs_analytics::PricingModel;
 use cs_domain::{
     CalendarSpread, CalendarSpreadResult, EarningsEvent, FailureReason,
     EquityDataRepository, OptionsDataRepository, RepositoryError, MarketTime,
@@ -31,6 +31,7 @@ where
     options_repo: Arc<O>,
     equity_repo: Arc<E>,
     pricer: SpreadPricer,
+    max_entry_iv: Option<f64>,
 }
 
 impl<O, E> TradeExecutor<O, E>
@@ -43,6 +44,7 @@ where
             options_repo,
             equity_repo,
             pricer: SpreadPricer::new(),
+            max_entry_iv: None,
         }
     }
 
@@ -51,19 +53,25 @@ where
         self
     }
 
-    /// Set the IV interpolation model for pricing
+    /// Set the pricing IV interpolation model
     ///
     /// - `StickyStrike`: IV indexed by absolute strike K (default)
     /// - `StickyMoneyness`: IV indexed by K/S (floats with spot)
     /// - `StickyDelta`: IV indexed by delta (iterative, most accurate floating smile)
-    pub fn with_iv_model(mut self, iv_model: IVModel) -> Self {
-        self.pricer = self.pricer.with_iv_model(iv_model);
+    pub fn with_pricing_model(mut self, pricing_model: PricingModel) -> Self {
+        self.pricer = self.pricer.with_pricing_model(pricing_model);
         self
     }
 
-    /// Get the current IV model
-    pub fn iv_model(&self) -> IVModel {
-        self.pricer.iv_model()
+    /// Get the current pricing model
+    pub fn pricing_model(&self) -> PricingModel {
+        self.pricer.pricing_model()
+    }
+
+    /// Set maximum allowed IV at entry (filters trades with unreliable pricing)
+    pub fn with_max_entry_iv(mut self, max_entry_iv: Option<f64>) -> Self {
+        self.max_entry_iv = max_entry_iv;
+        self
     }
 
     /// Execute a complete trade (entry + exit)
@@ -116,6 +124,28 @@ where
             entry_time,
         )?;
 
+        // Validate: Filter trades with extreme IV at entry (unreliable pricing/greeks)
+        if let Some(max_iv) = self.max_entry_iv {
+            if let Some(short_iv) = entry_pricing.short_leg.iv {
+                if short_iv > max_iv {
+                    return Err(ExecutionError::InvalidSpread(format!(
+                        "Short leg IV too high: {:.1}% > {:.1}% (unreliable pricing)",
+                        short_iv * 100.0,
+                        max_iv * 100.0,
+                    )));
+                }
+            }
+            if let Some(long_iv) = entry_pricing.long_leg.iv {
+                if long_iv > max_iv {
+                    return Err(ExecutionError::InvalidSpread(format!(
+                        "Long leg IV too high: {:.1}% > {:.1}% (unreliable pricing)",
+                        long_iv * 100.0,
+                        max_iv * 100.0,
+                    )));
+                }
+            }
+        }
+
         // Validate: Calendar spread must have positive entry cost (long > short)
         if entry_pricing.net_cost <= Decimal::ZERO {
             return Err(ExecutionError::InvalidSpread(format!(
@@ -159,21 +189,34 @@ where
             if let (Some(entry_greeks_short), Some(entry_greeks_long)) =
                 (entry_pricing.short_leg.greeks, entry_pricing.long_leg.greeks)
             {
-                let spread_greeks = entry_greeks_long - entry_greeks_short;
                 let spot_change = exit_spot.to_f64() - entry_spot.to_f64();
-                let iv_change = match (
+
+                // Calculate IV changes for BOTH legs
+                let short_iv_change = match (
                     exit_pricing.short_leg.iv,
                     entry_pricing.short_leg.iv,
                 ) {
                     (Some(exit_iv), Some(entry_iv)) => exit_iv - entry_iv,
                     _ => 0.0,
                 };
+
+                let long_iv_change = match (
+                    exit_pricing.long_leg.iv,
+                    entry_pricing.long_leg.iv,
+                ) {
+                    (Some(exit_iv), Some(entry_iv)) => exit_iv - entry_iv,
+                    _ => 0.0,
+                };
+
                 let days_held = (exit_time - entry_time).num_hours() as f64 / 24.0;
 
-                let attribution = cs_domain::calculate_pnl_attribution(
-                    &spread_greeks,
+                // Use the corrected spread attribution function
+                let attribution = cs_domain::calculate_spread_pnl_attribution(
+                    &entry_greeks_short,
+                    &entry_greeks_long,
                     spot_change,
-                    iv_change,
+                    short_iv_change,
+                    long_iv_change,
                     days_held,
                     pnl,
                 );
@@ -194,6 +237,11 @@ where
             earnings_date: event.earnings_date,
             earnings_time: event.earnings_time,
             strike: spread.strike(),
+            long_strike: if spread.short_leg.strike != spread.long_leg.strike {
+                Some(spread.long_leg.strike)
+            } else {
+                None
+            },
             option_type: spread.option_type(),
             short_expiry: spread.short_expiry(),
             long_expiry: spread.long_expiry(),
@@ -252,6 +300,11 @@ where
             earnings_date: event.earnings_date,
             earnings_time: event.earnings_time,
             strike: spread.strike(),
+            long_strike: if spread.short_leg.strike != spread.long_leg.strike {
+                Some(spread.long_leg.strike)
+            } else {
+                None
+            },
             option_type: spread.option_type(),
             short_expiry: spread.short_expiry(),
             long_expiry: spread.long_expiry(),

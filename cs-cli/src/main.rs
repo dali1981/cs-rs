@@ -118,6 +118,12 @@ enum Commands {
         /// Volatility interpolation mode (linear, svi)
         #[arg(long)]
         vol_model: Option<String>,
+        /// Strike matching mode (same-strike, same-delta)
+        #[arg(long)]
+        strike_match_mode: Option<String>,
+        /// Maximum allowed IV at entry (filters trades with unreliable pricing, e.g., 1.5 for 150%)
+        #[arg(long)]
+        max_entry_iv: Option<f64>,
     },
 
     /// Analyze results from a run
@@ -189,6 +195,8 @@ async fn main() -> Result<()> {
             no_parallel,
             pricing_model,
             vol_model,
+            strike_match_mode,
+            max_entry_iv,
         } => {
             run_backtest(
                 conf,
@@ -216,6 +224,8 @@ async fn main() -> Result<()> {
                 !no_parallel,
                 pricing_model,
                 vol_model,
+                strike_match_mode,
+                max_entry_iv,
             )
             .await?;
         }
@@ -261,6 +271,8 @@ fn build_cli_overrides(
     no_parallel: bool,
     pricing_model_str: Option<String>,
     vol_model_str: Option<String>,
+    strike_match_mode_str: Option<String>,
+    max_entry_iv: Option<f64>,
 ) -> Result<CliOverrides> {
     // Parse delta range if provided
     let delta_range = if let Some(ref range_str) = delta_range_str {
@@ -323,9 +335,11 @@ fn build_cli_overrides(
         } else {
             None
         },
+        strike_match_mode: strike_match_mode_str,
         symbols,
         min_market_cap,
         parallel: if no_parallel { Some(false) } else { None },
+        max_entry_iv,
     })
 }
 
@@ -355,6 +369,8 @@ async fn run_backtest(
     no_parallel: bool,
     pricing_model_str: Option<String>,
     vol_model_str: Option<String>,
+    strike_match_mode_str: Option<String>,
+    max_entry_iv: Option<f64>,
 ) -> Result<()> {
     // Parse dates
     let start_date = NaiveDate::parse_from_str(start_str, "%Y-%m-%d")
@@ -391,6 +407,8 @@ async fn run_backtest(
         no_parallel,
         pricing_model_str,
         vol_model_str,
+        strike_match_mode_str,
+        max_entry_iv,
     )?;
 
     // Load configuration with layering
@@ -417,14 +435,17 @@ async fn run_backtest(
         println!("  Target delta:  {:.3}", delta);
     }
     match strategy {
-        StrategyType::Delta | StrategyType::DeltaScan => {
+        StrategyType::DeltaScan => {
             println!("  Delta range:   {:.2}-{:.2}", backtest_config.delta_range.0, backtest_config.delta_range.1);
-            if matches!(strategy, StrategyType::DeltaScan) {
-                println!("  Scan steps:    {}", backtest_config.delta_scan_steps);
-            }
+            println!("  Scan steps:    {}", backtest_config.delta_scan_steps);
         }
         _ => {}
     }
+    let strike_mode = match backtest_config.strike_match_mode {
+        cs_domain::StrikeMatchMode::SameStrike => "same-strike (calendar)",
+        cs_domain::StrikeMatchMode::SameDelta => "same-delta (diagonal)",
+    };
+    println!("  Strike match:  {}", strike_mode);
     if let Some(iv) = backtest_config.selection.min_iv_ratio {
         println!("  Min IV ratio:  {:.3}", iv);
     }

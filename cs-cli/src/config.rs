@@ -22,9 +22,11 @@ pub struct AppConfig {
     pub selection: SelectionConfig,
     pub strategy: StrategyConfig,
     pub pricing: PricingConfig,
+    pub strike_match_mode: String,
     pub symbols: Option<Vec<String>>,
     pub min_market_cap: Option<u64>,
     pub parallel: bool,
+    pub max_entry_iv: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,9 +82,11 @@ impl Default for AppConfig {
             selection: SelectionConfig::default(),
             strategy: StrategyConfig::default(),
             pricing: PricingConfig::default(),
+            strike_match_mode: "same-strike".to_string(),
             symbols: None,
             min_market_cap: None,
             parallel: true,
+            max_entry_iv: None,
         }
     }
 }
@@ -220,6 +224,9 @@ impl AppConfig {
             delta_range: self.strategy.delta_range,
             delta_scan_steps: self.strategy.delta_scan_steps,
             vol_model: cs_analytics::InterpolationMode::from_string(&self.pricing.vol_model),
+            strike_match_mode: cs_domain::StrikeMatchMode::from_str(&self.strike_match_mode)
+                .unwrap_or(cs_domain::StrikeMatchMode::SameStrike),
+            max_entry_iv: self.max_entry_iv,
         }
     }
 }

@@ -21,11 +21,15 @@ pub struct CliOverrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pricing: Option<CliPricing>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub strike_match_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub symbols: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_market_cap: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_entry_iv: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

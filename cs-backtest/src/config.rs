@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 use cs_analytics::{PricingModel, InterpolationMode};
-use cs_domain::{TimingConfig, TradeSelectionCriteria};
+use cs_domain::{TimingConfig, TradeSelectionCriteria, StrikeMatchMode};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestConfig {
@@ -28,6 +28,13 @@ pub struct BacktestConfig {
     /// Volatility interpolation mode (linear or svi)
     #[serde(default)]
     pub vol_model: InterpolationMode,
+    /// Strike matching mode for calendar/diagonal spreads
+    #[serde(default)]
+    pub strike_match_mode: StrikeMatchMode,
+    /// Maximum allowed IV at entry (filters out trades with unreliable pricing)
+    /// Set to None to disable filtering. Common values: 1.5 (150%), 2.0 (200%)
+    #[serde(default)]
+    pub max_entry_iv: Option<f64>,
 }
 
 fn default_target_delta() -> f64 {
@@ -81,6 +88,8 @@ impl Default for BacktestConfig {
             delta_range: default_delta_range(),
             delta_scan_steps: default_delta_scan_steps(),
             vol_model: InterpolationMode::default(),
+            strike_match_mode: StrikeMatchMode::default(),
+            max_entry_iv: None, // No filtering by default
         }
     }
 }
