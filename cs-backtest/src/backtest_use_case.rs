@@ -5,7 +5,7 @@ use tracing::{info, debug};
 use cs_domain::*;
 use cs_domain::services::EarningsTradeTiming;
 use cs_domain::strategies::{DeltaStrategy, IronButterflyStrategy};
-use crate::config::{BacktestConfig, StrategyType};
+use crate::config::{BacktestConfig, SpreadType, SelectionType};
 use crate::trade_executor::TradeExecutor;
 use crate::iron_butterfly_executor::IronButterflyExecutor;
 use crate::iv_surface_builder::build_iv_surface;
@@ -280,16 +280,17 @@ where
             start_date = %start_date,
             end_date = %end_date,
             option_type = ?option_type,
-            strategy = ?self.config.strategy,
+            spread = ?self.config.spread,
+            selection = ?self.config.selection_strategy,
             "Starting backtest"
         );
 
-        // Branch based on strategy type
-        match self.config.strategy {
-            StrategyType::IronButterfly => {
+        // Branch based on spread type
+        match self.config.spread {
+            SpreadType::IronButterfly => {
                 self.execute_iron_butterfly(start_date, end_date, on_progress).await
             }
-            _ => {
+            SpreadType::Calendar => {
                 self.execute_calendar_spread(start_date, end_date, option_type, on_progress).await
             }
         }
@@ -420,13 +421,7 @@ where
         let mut total_opportunities = 0;
 
         // Create iron butterfly strategy
-        let wing_width = rust_decimal::Decimal::try_from(self.config.wing_width)
-            .unwrap_or(rust_decimal::Decimal::new(10, 0));
-        let strategy = IronButterflyStrategy::new(
-            wing_width,
-            self.config.selection.min_short_dte,
-            self.config.selection.max_short_dte,
-        );
+        let strategy = self.create_iron_butterfly_strategy();
 
         for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
             sessions_processed += 1;
@@ -516,19 +511,19 @@ where
     }
 
     fn create_strategy(&self) -> Box<dyn SelectionStrategy> {
-        match self.config.strategy {
-            StrategyType::ATM => Box::new(
+        match self.config.selection_strategy {
+            SelectionType::ATM => Box::new(
                 ATMStrategy::new(self.config.selection.clone())
                     .with_strike_match_mode(self.config.strike_match_mode)
             ),
-            StrategyType::Delta => Box::new(
+            SelectionType::Delta => Box::new(
                 DeltaStrategy::fixed(
                     self.config.target_delta,
                     self.config.selection.clone(),
                 )
                 .with_strike_match_mode(self.config.strike_match_mode)
             ),
-            StrategyType::DeltaScan => Box::new(
+            SelectionType::DeltaScan => Box::new(
                 DeltaStrategy::scanning(
                     self.config.delta_range,
                     self.config.delta_scan_steps,
@@ -536,14 +531,15 @@ where
                 )
                 .with_strike_match_mode(self.config.strike_match_mode)
             ),
-            StrategyType::IronButterfly => Box::new(
-                IronButterflyStrategy::new(
-                    rust_decimal::Decimal::try_from(self.config.wing_width).unwrap_or(rust_decimal::Decimal::new(10, 0)),
-                    self.config.selection.min_short_dte,
-                    self.config.selection.max_short_dte,
-                )
-            ),
         }
+    }
+
+    fn create_iron_butterfly_strategy(&self) -> IronButterflyStrategy {
+        IronButterflyStrategy::new(
+            rust_decimal::Decimal::try_from(self.config.wing_width).unwrap_or(rust_decimal::Decimal::new(10, 0)),
+            self.config.selection.min_short_dte,
+            self.config.selection.max_short_dte,
+        )
     }
 
     /// Unified earnings event processor - handles both calendar spreads and iron butterflies

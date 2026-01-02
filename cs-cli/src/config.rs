@@ -59,8 +59,8 @@ pub struct SelectionConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StrategyConfig {
-    #[serde(rename = "type")]
-    pub strategy_type: String,
+    pub spread_type: String,
+    pub selection_type: String,
     pub target_delta: f64,
     pub delta_range: (f64, f64),
     pub delta_scan_steps: usize,
@@ -130,7 +130,8 @@ impl Default for SelectionConfig {
 impl Default for StrategyConfig {
     fn default() -> Self {
         Self {
-            strategy_type: "atm".to_string(),
+            spread_type: "calendar".to_string(),
+            selection_type: "atm".to_string(),
             target_delta: 0.50,
             delta_range: (0.25, 0.75),
             delta_scan_steps: 5,
@@ -217,7 +218,8 @@ impl AppConfig {
                 min_iv_ratio: self.selection.min_iv_ratio,
                 max_bid_ask_spread_pct: None,
             },
-            strategy: cs_backtest::StrategyType::from_string(&self.strategy.strategy_type),
+            spread: cs_backtest::SpreadType::from_string(&self.strategy.spread_type),
+            selection_strategy: cs_backtest::SelectionType::from_string(&self.strategy.selection_type),
             symbols: self.symbols.clone(),
             min_market_cap: self.min_market_cap,
             parallel: self.parallel,

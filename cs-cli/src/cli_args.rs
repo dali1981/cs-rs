@@ -74,8 +74,10 @@ pub struct CliSelection {
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(default)]
 pub struct CliStrategy {
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub strategy_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spread_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_delta: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]

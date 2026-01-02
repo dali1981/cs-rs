@@ -11,7 +11,7 @@ use tabled::{Table, Tabled};
 use tracing::{info, Level};
 use tracing_subscriber;
 
-use cs_backtest::{BacktestUseCase, StrategyType};
+use cs_backtest::{BacktestUseCase, SpreadType, SelectionType};
 use cs_domain::{
     infrastructure::{
         EarningsReaderAdapter, FinqEquityRepository, FinqOptionsRepository,
@@ -58,12 +58,15 @@ enum Commands {
         /// End date (YYYY-MM-DD)
         #[arg(long)]
         end: String,
-        /// Option type (call/put)
-        #[arg(long, default_value = "call")]
-        option_type: String,
-        /// Strategy type (atm, delta, delta-scan)
+        /// Trade structure (calendar, iron-butterfly)
         #[arg(long)]
-        strategy: Option<String>,
+        spread: Option<String>,
+        /// Strike selection method (atm, delta, delta-scan)
+        #[arg(long)]
+        selection: Option<String>,
+        /// Option type (call/put) - required for calendar spreads only
+        #[arg(long)]
+        option_type: Option<String>,
         /// Delta range for delta-scan strategy (format: "0.25,0.75")
         #[arg(long)]
         delta_range: Option<String>,
@@ -178,8 +181,9 @@ async fn main() -> Result<()> {
             earnings_dir,
             start,
             end,
+            spread,
+            selection,
             option_type,
-            strategy,
             delta_range,
             delta_scan_steps,
             symbols,
@@ -208,8 +212,9 @@ async fn main() -> Result<()> {
                 earnings_dir,
                 &start,
                 &end,
-                &option_type,
-                strategy,
+                spread.as_deref(),
+                selection.as_deref(),
+                option_type.as_deref(),
                 delta_range,
                 delta_scan_steps,
                 symbols,
@@ -258,7 +263,8 @@ async fn main() -> Result<()> {
 fn build_cli_overrides(
     data_dir: Option<PathBuf>,
     earnings_dir: Option<PathBuf>,
-    strategy_str: Option<String>,
+    spread: Option<&str>,
+    selection: Option<&str>,
     delta_range_str: Option<String>,
     delta_scan_steps: Option<usize>,
     symbols: Option<Vec<String>>,
@@ -323,9 +329,10 @@ fn build_cli_overrides(
         } else {
             None
         },
-        strategy: if strategy_str.is_some() || delta_range.is_some() || delta_scan_steps.is_some() || wing_width.is_some() {
+        strategy: if spread.is_some() || selection.is_some() || delta_range.is_some() || delta_scan_steps.is_some() || wing_width.is_some() {
             Some(CliStrategy {
-                strategy_type: strategy_str,
+                spread_type: spread.map(|s| s.to_string()),
+                selection_type: selection.map(|s| s.to_string()),
                 target_delta: None,
                 delta_range,
                 delta_scan_steps,
@@ -356,8 +363,9 @@ async fn run_backtest(
     earnings_dir: Option<PathBuf>,
     start_str: &str,
     end_str: &str,
-    option_type_str: &str,
-    strategy_str: Option<String>,
+    spread_str: Option<&str>,
+    selection_str: Option<&str>,
+    option_type_str: Option<&str>,
     delta_range_str: Option<String>,
     delta_scan_steps: Option<usize>,
     symbols: Option<Vec<String>>,
@@ -386,18 +394,97 @@ async fn run_backtest(
     let end_date = NaiveDate::parse_from_str(end_str, "%Y-%m-%d")
         .with_context(|| format!("Invalid end date: {}", end_str))?;
 
-    // Parse option type
-    let option_type = match option_type_str.to_lowercase().as_str() {
-        "call" => finq_core::OptionType::Call,
-        "put" => finq_core::OptionType::Put,
-        _ => anyhow::bail!("Invalid option type: {}. Must be 'call' or 'put'", option_type_str),
+    // Parse and validate spread/selection if provided
+    let (spread_opt, selection_opt, option_type) = if let Some(spread_str) = spread_str {
+        // Parse spread type
+        let spread = match spread_str.to_lowercase().replace('-', "_").as_str() {
+            "calendar" => "calendar",
+            "iron_butterfly" | "ironbutterfly" | "butterfly" => "iron_butterfly",
+            _ => anyhow::bail!("Invalid spread type: {}. Must be 'calendar' or 'iron-butterfly'", spread_str),
+        };
+
+        // Validate arguments based on spread type
+        let option_type = match spread {
+            "calendar" => {
+                // Calendar spreads REQUIRE option-type
+                match option_type_str {
+                    Some(ot) => match ot.to_lowercase().as_str() {
+                        "call" => finq_core::OptionType::Call,
+                        "put" => finq_core::OptionType::Put,
+                        _ => anyhow::bail!("Invalid option type: {}. Must be 'call' or 'put'", ot),
+                    },
+                    None => anyhow::bail!("--option-type is required for calendar spreads"),
+                }
+            }
+            "iron_butterfly" => {
+                // Iron butterfly FORBIDS option-type
+                if option_type_str.is_some() {
+                    anyhow::bail!("--option-type is invalid for iron-butterfly (uses both calls and puts)");
+                }
+                // Default to Call for iron butterfly (will be ignored in execution)
+                finq_core::OptionType::Call
+            }
+            _ => unreachable!(),
+        };
+
+        // Additional validation for iron butterfly
+        if spread == "iron_butterfly" && strike_match_mode_str.is_some() {
+            anyhow::bail!("--strike-match-mode is only valid for calendar spreads");
+        }
+
+        // Additional validation for calendar
+        if spread == "calendar" && wing_width.is_some() {
+            anyhow::bail!("--wing-width is only valid for iron-butterfly spreads");
+        }
+
+        // Parse selection type if provided
+        let selection = if let Some(sel_str) = selection_str {
+            Some(match sel_str.to_lowercase().replace('-', "_").as_str() {
+                "atm" => "atm",
+                "delta" => "delta",
+                "delta_scan" | "deltascan" => "delta_scan",
+                _ => anyhow::bail!("Invalid selection type: {}. Must be 'atm', 'delta', or 'delta-scan'", sel_str),
+            })
+        } else {
+            None
+        };
+
+        (Some(spread), selection, option_type)
+    } else {
+        // No spread specified - will use config file
+        // Parse selection if provided
+        let selection = if let Some(sel_str) = selection_str {
+            Some(match sel_str.to_lowercase().replace('-', "_").as_str() {
+                "atm" => "atm",
+                "delta" => "delta",
+                "delta_scan" | "deltascan" => "delta_scan",
+                _ => anyhow::bail!("Invalid selection type: {}. Must be 'atm', 'delta', or 'delta-scan'", sel_str),
+            })
+        } else {
+            None
+        };
+
+        // Parse option-type if provided (validation will happen after config load)
+        let option_type = if let Some(ot) = option_type_str {
+            match ot.to_lowercase().as_str() {
+                "call" => finq_core::OptionType::Call,
+                "put" => finq_core::OptionType::Put,
+                _ => anyhow::bail!("Invalid option type: {}. Must be 'call' or 'put'", ot),
+            }
+        } else {
+            // Default to Call if not specified (may be overridden by validation after config load)
+            finq_core::OptionType::Call
+        };
+
+        (None, selection, option_type)
     };
 
     // Build CLI overrides
     let cli_overrides = build_cli_overrides(
         data_dir,
         earnings_dir,
-        strategy_str,
+        spread_opt,
+        selection_opt,
         delta_range_str,
         delta_scan_steps,
         symbols,
@@ -428,36 +515,54 @@ async fn run_backtest(
 
     let data_dir = backtest_config.data_dir.clone();
     let earnings_data_dir = backtest_config.earnings_dir.clone();
-    let strategy = backtest_config.strategy;
+    let spread = backtest_config.spread;
+    let selection = backtest_config.selection_strategy;
 
     println!("{}", style("Configuration:").bold());
     println!("  Data dir:      {:?}", data_dir);
     println!("  Earnings dir:  {:?}", earnings_data_dir);
     println!("  Date range:    {} to {}", start_date, end_date);
-    println!("  Option type:   {:?}", option_type);
-    println!("  Strategy:      {:?}", strategy);
+
+    // Display spread and selection
+    match spread {
+        cs_backtest::SpreadType::Calendar => {
+            println!("  Spread:        Calendar");
+            println!("  Option type:   {:?}", option_type);
+        }
+        cs_backtest::SpreadType::IronButterfly => {
+            println!("  Spread:        Iron Butterfly");
+            println!("  Wing width:    ${:.2}", backtest_config.wing_width);
+        }
+    }
+
+    // Display selection strategy
+    match selection {
+        cs_backtest::SelectionType::ATM => {
+            println!("  Selection:     ATM");
+        }
+        cs_backtest::SelectionType::Delta => {
+            println!("  Selection:     Delta (target: {:.2})", backtest_config.target_delta);
+        }
+        cs_backtest::SelectionType::DeltaScan => {
+            println!("  Selection:     Delta Scan");
+            println!("  Delta range:   {:.2}-{:.2}", backtest_config.delta_range.0, backtest_config.delta_range.1);
+            println!("  Scan steps:    {}", backtest_config.delta_scan_steps);
+        }
+    }
+
     println!("  Entry time:    {:02}:{:02}", backtest_config.timing.entry_hour, backtest_config.timing.entry_minute);
     println!("  Exit time:     {:02}:{:02}", backtest_config.timing.exit_hour, backtest_config.timing.exit_minute);
     println!("  Short DTE:     {}-{}", backtest_config.selection.min_short_dte, backtest_config.selection.max_short_dte);
     println!("  Long DTE:      {}-{}", backtest_config.selection.min_long_dte, backtest_config.selection.max_long_dte);
-    if let Some(delta) = backtest_config.selection.target_delta {
-        println!("  Target delta:  {:.3}", delta);
+
+    // Only show strike match mode for calendar spreads
+    if matches!(spread, cs_backtest::SpreadType::Calendar) {
+        let strike_mode = match backtest_config.strike_match_mode {
+            cs_domain::StrikeMatchMode::SameStrike => "same-strike (calendar)",
+            cs_domain::StrikeMatchMode::SameDelta => "same-delta (diagonal)",
+        };
+        println!("  Strike match:  {}", strike_mode);
     }
-    match strategy {
-        StrategyType::DeltaScan => {
-            println!("  Delta range:   {:.2}-{:.2}", backtest_config.delta_range.0, backtest_config.delta_range.1);
-            println!("  Scan steps:    {}", backtest_config.delta_scan_steps);
-        }
-        StrategyType::IronButterfly => {
-            println!("  Wing width:    ${:.2}", backtest_config.wing_width);
-        }
-        _ => {}
-    }
-    let strike_mode = match backtest_config.strike_match_mode {
-        cs_domain::StrikeMatchMode::SameStrike => "same-strike (calendar)",
-        cs_domain::StrikeMatchMode::SameDelta => "same-delta (diagonal)",
-    };
-    println!("  Strike match:  {}", strike_mode);
     if let Some(iv) = backtest_config.selection.min_iv_ratio {
         println!("  Min IV ratio:  {:.3}", iv);
     }

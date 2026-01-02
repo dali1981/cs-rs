@@ -9,7 +9,8 @@ pub struct BacktestConfig {
     pub earnings_dir: PathBuf,
     pub timing: TimingConfig,
     pub selection: TradeSelectionCriteria,
-    pub strategy: StrategyType,
+    pub spread: SpreadType,
+    pub selection_strategy: SelectionType,
     pub symbols: Option<Vec<String>>,
     pub min_market_cap: Option<u64>,
     pub parallel: bool,
@@ -56,26 +57,42 @@ fn default_delta_scan_steps() -> usize {
     5
 }
 
+/// Trade structure - WHAT to trade
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum StrategyType {
+pub enum SpreadType {
+    #[default]
+    Calendar,
+    IronButterfly,
+}
+
+impl SpreadType {
+    pub fn from_string(s: &str) -> Self {
+        match s.to_lowercase().replace('-', "_").as_str() {
+            "iron_butterfly" | "ironbutterfly" | "butterfly" => SpreadType::IronButterfly,
+            _ => SpreadType::Calendar,
+        }
+    }
+}
+
+/// Selection method - HOW to select strikes/expirations
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectionType {
     #[default]
     ATM,
     /// Fixed delta strategy (uses target_delta)
     Delta,
     /// Scanning delta strategy (scans delta_range for best opportunity)
     DeltaScan,
-    /// Iron butterfly strategy (short straddle + protective wings)
-    IronButterfly,
 }
 
-impl StrategyType {
+impl SelectionType {
     pub fn from_string(s: &str) -> Self {
         match s.to_lowercase().replace('-', "_").as_str() {
-            "delta" => StrategyType::Delta,
-            "delta_scan" | "deltascan" => StrategyType::DeltaScan,
-            "iron_butterfly" | "ironbutterfly" | "butterfly" => StrategyType::IronButterfly,
-            _ => StrategyType::ATM,
+            "delta" => SelectionType::Delta,
+            "delta_scan" | "deltascan" => SelectionType::DeltaScan,
+            _ => SelectionType::ATM,
         }
     }
 }
@@ -89,7 +106,8 @@ impl Default for BacktestConfig {
                 .join("trading_project/nasdaq_earnings/data"),
             timing: TimingConfig::default(),
             selection: TradeSelectionCriteria::default(),
-            strategy: StrategyType::ATM,
+            spread: SpreadType::Calendar,
+            selection_strategy: SelectionType::ATM,
             symbols: None,
             min_market_cap: None,
             parallel: true,
@@ -114,7 +132,8 @@ mod tests {
         let config = BacktestConfig::default();
         assert_eq!(config.data_dir, PathBuf::from("data"));
         assert!(config.parallel);
-        assert!(matches!(config.strategy, StrategyType::ATM));
+        assert!(matches!(config.spread, SpreadType::Calendar));
+        assert!(matches!(config.selection_strategy, SelectionType::ATM));
     }
 
     #[test]

@@ -10,7 +10,7 @@ pub mod iron_butterfly_pricer;
 pub mod iron_butterfly_executor;
 pub mod backtest_use_case;
 
-pub use config::{BacktestConfig, StrategyType};
+pub use config::{BacktestConfig, SpreadType, SelectionType};
 pub use backtest_use_case::{BacktestUseCase, BacktestResult, SessionProgress, TradeGenerationError, TradeResult};
 pub use trade_executor::{TradeExecutor, ExecutionError};
 pub use spread_pricer::{SpreadPricer, SpreadPricing, LegPricing, PricingError};
