@@ -338,7 +338,7 @@ where
                 // Use futures::future::join_all for concurrent async processing
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_event(event, session_date, &*strategy, option_type))
+                    .map(|event| self.process_earnings_event(event, &*strategy, OptionStrategy::CalendarSpread, Some(option_type)))
                     .collect();
 
                 futures::future::join_all(futures).await
@@ -346,7 +346,7 @@ where
                 let mut results = Vec::new();
                 for event in &to_enter {
                     results.push(
-                        self.process_event(event, session_date, &*strategy, option_type).await
+                        self.process_earnings_event(event, &*strategy, OptionStrategy::CalendarSpread, Some(option_type)).await
                     );
                 }
                 results
@@ -357,7 +357,7 @@ where
             for result in session_results {
                 total_opportunities += 1;
                 match result {
-                    Ok(trade_result) => {
+                    Ok(TradeResult::CalendarSpread(trade_result)) => {
                         if self.passes_iv_filter(&trade_result) {
                             all_results.push(TradeResult::CalendarSpread(trade_result));
                             session_entries += 1;
@@ -371,6 +371,10 @@ where
                                 phase: "filter".into(),
                             });
                         }
+                    }
+                    Ok(TradeResult::IronButterfly(_)) => {
+                        // This should never happen when processing calendar spreads
+                        unreachable!("Got iron butterfly result when processing calendar spread");
                     }
                     Err(e) => dropped_events.push(e),
                 }
@@ -452,7 +456,7 @@ where
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_iron_butterfly_event(event, session_date, &strategy))
+                    .map(|event| self.process_earnings_event(event, &strategy, OptionStrategy::IronButterfly, None))
                     .collect();
 
                 futures::future::join_all(futures).await
@@ -460,7 +464,7 @@ where
                 let mut results = Vec::new();
                 for event in &to_enter {
                     results.push(
-                        self.process_iron_butterfly_event(event, session_date, &strategy).await
+                        self.process_earnings_event(event, &strategy, OptionStrategy::IronButterfly, None).await
                     );
                 }
                 results
@@ -471,9 +475,13 @@ where
             for result in session_results {
                 total_opportunities += 1;
                 match result {
-                    Ok(trade_result) => {
+                    Ok(TradeResult::IronButterfly(trade_result)) => {
                         all_results.push(TradeResult::IronButterfly(trade_result));
                         session_entries += 1;
+                    }
+                    Ok(TradeResult::CalendarSpread(_)) => {
+                        // This should never happen when processing iron butterflies
+                        unreachable!("Got calendar spread result when processing iron butterfly");
                     }
                     Err(e) => dropped_events.push(e),
                 }
@@ -507,137 +515,6 @@ where
         })
     }
 
-    async fn process_iron_butterfly_event(
-        &self,
-        event: &EarningsEvent,
-        _session_date: NaiveDate,
-        strategy: &IronButterflyStrategy,
-    ) -> Result<IronButterflyResult, TradeGenerationError> {
-        // Use event-based timing for entry/exit
-        let entry_time = self.earnings_timing.entry_datetime(event);
-        let spot_result = self.equity_repo.get_spot_price(&event.symbol, entry_time).await;
-
-        let spot = match spot_result {
-            Ok(s) => s,
-            Err(_) => {
-                return Err(TradeGenerationError {
-                    symbol: event.symbol.clone(),
-                    earnings_date: event.earnings_date,
-                    earnings_time: event.earnings_time,
-                    reason: "NO_SPOT_PRICE".into(),
-                    details: Some(format!("No spot price at {}", entry_time)),
-                    phase: "spot_price".into(),
-                });
-            }
-        };
-
-        // Get option chain data
-        let chain_result = self.options_repo
-            .get_option_bars(&event.symbol, entry_time.date_naive())
-            .await;
-
-        let chain_df = match chain_result {
-            Ok(df) => df,
-            Err(_) => {
-                return Err(TradeGenerationError {
-                    symbol: event.symbol.clone(),
-                    earnings_date: event.earnings_date,
-                    earnings_time: event.earnings_time,
-                    reason: "NO_OPTIONS_DATA".into(),
-                    details: Some(format!("No option chain at {}", entry_time)),
-                    phase: "option_chain".into(),
-                });
-            }
-        };
-
-        // Get available expirations and strikes
-        let expirations_result = self.options_repo
-            .get_available_expirations(&event.symbol, entry_time.date_naive())
-            .await;
-
-        let expirations = match expirations_result {
-            Ok(exp) => exp,
-            Err(_) => {
-                return Err(TradeGenerationError {
-                    symbol: event.symbol.clone(),
-                    earnings_date: event.earnings_date,
-                    earnings_time: event.earnings_time,
-                    reason: "NO_EXPIRATIONS".into(),
-                    details: None,
-                    phase: "expirations".into(),
-                });
-            }
-        };
-
-        // Get all available strikes (we'll filter for the expiration we selected)
-        let strikes_result = self.options_repo
-            .get_available_strikes(&event.symbol, expirations[0], entry_time.date_naive())
-            .await;
-
-        let strikes = match strikes_result {
-            Ok(strk) => strk,
-            Err(_) => {
-                return Err(TradeGenerationError {
-                    symbol: event.symbol.clone(),
-                    earnings_date: event.earnings_date,
-                    earnings_time: event.earnings_time,
-                    reason: "NO_STRIKES".into(),
-                    details: None,
-                    phase: "strikes".into(),
-                });
-            }
-        };
-
-        // Create option chain data
-        let chain_data = OptionChainData {
-            expirations,
-            strikes,
-            deltas: None,
-            volumes: None,
-            iv_ratios: None,
-            iv_surface: None,
-        };
-
-        // Select iron butterfly
-        let butterfly = match strategy.select_iron_butterfly(event, &spot, &chain_data) {
-            Ok(bf) => bf,
-            Err(e) => {
-                return Err(TradeGenerationError {
-                    symbol: event.symbol.clone(),
-                    earnings_date: event.earnings_date,
-                    earnings_time: event.earnings_time,
-                    reason: "STRATEGY_ERROR".into(),
-                    details: Some(e.to_string()),
-                    phase: "strategy".into(),
-                });
-            }
-        };
-
-        // Execute trade
-        let exit_time = self.earnings_timing.exit_datetime(event);
-        let executor = IronButterflyExecutor::new(
-            self.options_repo.clone(),
-            self.equity_repo.clone(),
-        )
-        .with_pricing_model(self.config.pricing_model)
-        .with_max_entry_iv(self.config.max_entry_iv);
-
-        let result = executor.execute_trade(&butterfly, event, entry_time, exit_time).await;
-
-        if !result.success {
-            return Err(TradeGenerationError {
-                symbol: result.symbol,
-                earnings_date: result.earnings_date,
-                earnings_time: result.earnings_time,
-                reason: result.failure_reason.map(|r| format!("{:?}", r)).unwrap_or_else(|| "UNKNOWN".into()),
-                details: None,
-                phase: "execution".into(),
-            });
-        }
-
-        Ok(result)
-    }
-
     fn create_strategy(&self) -> Box<dyn SelectionStrategy> {
         match self.config.strategy {
             StrategyType::ATM => Box::new(
@@ -659,68 +536,66 @@ where
                 )
                 .with_strike_match_mode(self.config.strike_match_mode)
             ),
-            StrategyType::IronButterfly => {
-                // Iron butterfly uses a different execution path - see execute_iron_butterfly()
-                // For now, return ATM as a placeholder since this method is only called for calendar spreads
-                Box::new(
-                    ATMStrategy::new(self.config.selection.clone())
-                        .with_strike_match_mode(self.config.strike_match_mode)
+            StrategyType::IronButterfly => Box::new(
+                IronButterflyStrategy::new(
+                    rust_decimal::Decimal::try_from(self.config.wing_width).unwrap_or(rust_decimal::Decimal::new(10, 0)),
+                    self.config.selection.min_short_dte,
+                    self.config.selection.max_short_dte,
                 )
-            }
+            ),
         }
     }
 
-    async fn process_event(
+    /// Unified earnings event processor - handles both calendar spreads and iron butterflies
+    async fn process_earnings_event(
         &self,
         event: &EarningsEvent,
-        session_date: NaiveDate,
         strategy: &dyn SelectionStrategy,
-        option_type: finq_core::OptionType,
-    ) -> Result<CalendarSpreadResult, TradeGenerationError> {
-        // Use event-based timing for entry/exit, not session_date
-        // This ensures trades hold overnight through earnings
+        option_strategy: OptionStrategy,
+        option_type: Option<finq_core::OptionType>,
+    ) -> Result<TradeResult, TradeGenerationError> {
+        // Use event-based timing for entry/exit
         let entry_time = self.earnings_timing.entry_datetime(event);
-        let spot_result = self.equity_repo.get_spot_price(&event.symbol, entry_time).await;
-
-        let spot = match spot_result {
-            Ok(s) => s,
-            Err(_) => {
-                return Err(TradeGenerationError {
-                    symbol: event.symbol.clone(),
-                    earnings_date: event.earnings_date,
-                    earnings_time: event.earnings_time,
-                    reason: "NO_SPOT_PRICE".into(),
-                    details: Some(format!("No spot price at {}", entry_time)),
-                    phase: "spot_price".into(),
-                });
-            }
-        };
-
-        // Get option chain data using entry_time (not session_date) for consistency
         let entry_date = entry_time.date_naive();
-        let chain_df = match self.options_repo.get_option_bars(&event.symbol, entry_date).await {
-            Ok(df) => df,
-            Err(_) => {
-                return Err(TradeGenerationError {
-                    symbol: event.symbol.clone(),
-                    earnings_date: event.earnings_date,
-                    earnings_time: event.earnings_time,
-                    reason: "NO_OPTIONS_DATA".into(),
-                    details: Some(format!("No option data on {}", entry_date)),
-                    phase: "option_data".into(),
-                });
-            }
+
+        // Get spot price
+        let spot = self.equity_repo
+            .get_spot_price(&event.symbol, entry_time)
+            .await
+            .map_err(|_| TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "NO_SPOT_PRICE".into(),
+                details: Some(format!("No spot price at {}", entry_time)),
+                phase: "spot_price".into(),
+            })?;
+
+        // Get option chain data
+        let chain_df = self.options_repo
+            .get_option_bars(&event.symbol, entry_date)
+            .await
+            .map_err(|_| TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "NO_OPTIONS_DATA".into(),
+                details: Some(format!("No option data on {}", entry_date)),
+                phase: "option_data".into(),
+            })?;
+
+        // Build IV surface for strategy selection (calendar spreads need this)
+        let iv_surface = match option_strategy {
+            OptionStrategy::CalendarSpread => build_iv_surface(
+                &chain_df,
+                spot.to_f64(),
+                entry_time,
+                &event.symbol,
+            ),
+            OptionStrategy::IronButterfly => None,
         };
 
-        // Build IV surface once for strategy selection
-        let iv_surface = build_iv_surface(
-            &chain_df,
-            spot.to_f64(),
-            entry_time,
-            &event.symbol,
-        );
-
-        // Get available expirations and strikes using entry_date
+        // Get available expirations and strikes
         let expirations = self.options_repo
             .get_available_expirations(&event.symbol, entry_date)
             .await
@@ -746,7 +621,7 @@ where
             });
         }
 
-        // Build chain data for strategy with pre-computed IV surface
+        // Build chain data for strategy
         let chain_data = OptionChainData {
             expirations,
             strikes,
@@ -756,34 +631,84 @@ where
             iv_surface,
         };
 
-        // Select spread using strategy
-        let spread = match strategy.select_calendar_spread(event, &spot, &chain_data, option_type) {
-            Ok(s) => s,
-            Err(e) => {
-                return Err(TradeGenerationError {
-                    symbol: event.symbol.clone(),
-                    earnings_date: event.earnings_date,
-                    earnings_time: event.earnings_time,
-                    reason: "STRATEGY_SELECTION_FAILED".into(),
-                    details: Some(e.to_string()),
-                    phase: "strategy".into(),
-                });
-            }
-        };
-
-        // Execute trade
-        // Use event-based exit timing - this will be on a DIFFERENT date for earnings trades
         let exit_time = self.earnings_timing.exit_datetime(event);
-        let executor = TradeExecutor::new(
-            self.options_repo.clone(),
-            self.equity_repo.clone(),
-        )
-        .with_pricing_model(self.config.pricing_model)
-        .with_max_entry_iv(self.config.max_entry_iv);
 
-        let result = executor.execute_trade(&spread, event, entry_time, exit_time).await;
+        // Execute based on option strategy type
+        match option_strategy {
+            OptionStrategy::CalendarSpread => {
+                let option_type = option_type.expect("CalendarSpread requires option_type");
 
-        Ok(result)
+                // Select spread
+                let spread = strategy.select_calendar_spread(event, &spot, &chain_data, option_type)
+                    .map_err(|e| TradeGenerationError {
+                        symbol: event.symbol.clone(),
+                        earnings_date: event.earnings_date,
+                        earnings_time: event.earnings_time,
+                        reason: "STRATEGY_SELECTION_FAILED".into(),
+                        details: Some(e.to_string()),
+                        phase: "strategy".into(),
+                    })?;
+
+                // Execute trade
+                let executor = TradeExecutor::new(
+                    self.options_repo.clone(),
+                    self.equity_repo.clone(),
+                )
+                .with_pricing_model(self.config.pricing_model)
+                .with_max_entry_iv(self.config.max_entry_iv);
+
+                let result = executor.execute_trade(&spread, event, entry_time, exit_time).await;
+
+                // Apply IV filter
+                if !self.passes_iv_filter(&result) {
+                    return Err(TradeGenerationError {
+                        symbol: result.symbol.clone(),
+                        earnings_date: result.earnings_date,
+                        earnings_time: result.earnings_time,
+                        reason: "IV_RATIO_FILTER".into(),
+                        details: result.iv_ratio().map(|r| format!("IV ratio: {:.2}", r)),
+                        phase: "filter".into(),
+                    });
+                }
+
+                Ok(TradeResult::CalendarSpread(result))
+            }
+            OptionStrategy::IronButterfly => {
+                // Select iron butterfly
+                let butterfly = strategy.select_iron_butterfly(event, &spot, &chain_data)
+                    .map_err(|e| TradeGenerationError {
+                        symbol: event.symbol.clone(),
+                        earnings_date: event.earnings_date,
+                        earnings_time: event.earnings_time,
+                        reason: "STRATEGY_ERROR".into(),
+                        details: Some(e.to_string()),
+                        phase: "strategy".into(),
+                    })?;
+
+                // Execute trade
+                let executor = IronButterflyExecutor::new(
+                    self.options_repo.clone(),
+                    self.equity_repo.clone(),
+                )
+                .with_pricing_model(self.config.pricing_model)
+                .with_max_entry_iv(self.config.max_entry_iv);
+
+                let result = executor.execute_trade(&butterfly, event, entry_time, exit_time).await;
+
+                if !result.success {
+                    return Err(TradeGenerationError {
+                        symbol: result.symbol,
+                        earnings_date: result.earnings_date,
+                        earnings_time: result.earnings_time,
+                        reason: result.failure_reason.map(|r| format!("{:?}", r)).unwrap_or_else(|| "UNKNOWN".into()),
+                        details: None,
+                        phase: "execution".into(),
+                    });
+                }
+
+                Ok(TradeResult::IronButterfly(result))
+            }
+        }
     }
 
     fn passes_iv_filter(&self, result: &CalendarSpreadResult) -> bool {
