@@ -599,7 +599,7 @@ where
         };
 
         // Select iron butterfly
-        let butterfly = match strategy.select(event, &spot, &chain_data) {
+        let butterfly = match strategy.select_iron_butterfly(event, &spot, &chain_data) {
             Ok(bf) => bf,
             Err(e) => {
                 return Err(TradeGenerationError {
@@ -696,8 +696,9 @@ where
             }
         };
 
-        // Get option chain data (validate it exists)
-        let chain_df = match self.options_repo.get_option_bars(&event.symbol, session_date).await {
+        // Get option chain data using entry_time (not session_date) for consistency
+        let entry_date = entry_time.date_naive();
+        let chain_df = match self.options_repo.get_option_bars(&event.symbol, entry_date).await {
             Ok(df) => df,
             Err(_) => {
                 return Err(TradeGenerationError {
@@ -705,7 +706,7 @@ where
                     earnings_date: event.earnings_date,
                     earnings_time: event.earnings_time,
                     reason: "NO_OPTIONS_DATA".into(),
-                    details: Some(format!("No option data on {}", session_date)),
+                    details: Some(format!("No option data on {}", entry_date)),
                     phase: "option_data".into(),
                 });
             }
@@ -719,15 +720,15 @@ where
             &event.symbol,
         );
 
-        // Get available expirations and strikes
+        // Get available expirations and strikes using entry_date
         let expirations = self.options_repo
-            .get_available_expirations(&event.symbol, session_date)
+            .get_available_expirations(&event.symbol, entry_date)
             .await
             .unwrap_or_default();
 
         let strikes = if !expirations.is_empty() {
             self.options_repo
-                .get_available_strikes(&event.symbol, expirations[0], session_date)
+                .get_available_strikes(&event.symbol, expirations[0], entry_date)
                 .await
                 .unwrap_or_default()
         } else {

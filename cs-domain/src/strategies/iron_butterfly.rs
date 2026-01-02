@@ -1,6 +1,6 @@
 use crate::entities::*;
 use crate::value_objects::*;
-use super::{StrategyError, OptionChainData};
+use super::{StrategyError, OptionChainData, SelectionStrategy};
 use chrono::NaiveDate;
 use finq_core::OptionType;
 use rust_decimal::Decimal;
@@ -21,8 +21,22 @@ impl IronButterflyStrategy {
             max_dte,
         }
     }
+}
 
-    pub fn select(
+impl SelectionStrategy for IronButterflyStrategy {
+    fn select_calendar_spread(
+        &self,
+        _event: &EarningsEvent,
+        _spot: &SpotPrice,
+        _chain_data: &OptionChainData,
+        _option_type: OptionType,
+    ) -> Result<CalendarSpread, StrategyError> {
+        Err(StrategyError::UnsupportedStrategy(
+            "IronButterflyStrategy only supports iron butterfly selection, not calendar spreads".to_string()
+        ))
+    }
+
+    fn select_iron_butterfly(
         &self,
         event: &EarningsEvent,
         spot: &SpotPrice,
@@ -73,7 +87,9 @@ impl IronButterflyStrategy {
         IronButterfly::new(short_call, short_put, long_call, long_put)
             .map_err(Into::into)
     }
+}
 
+impl IronButterflyStrategy {
     fn select_expiration(
         &self,
         event: &EarningsEvent,
