@@ -44,8 +44,8 @@ impl ATMStrategy {
     }
 }
 
-impl TradingStrategy for ATMStrategy {
-    fn select(
+impl SelectionStrategy for ATMStrategy {
+    fn select_calendar_spread(
         &self,
         event: &EarningsEvent,
         spot: &SpotPrice,
@@ -231,7 +231,7 @@ mod tests {
         let spot = SpotPrice::new(Decimal::new(100, 0), Utc::now());
         let chain_data = create_test_chain_data();
 
-        let result = strategy.select(&event, &spot, &chain_data, OptionType::Call);
+        let result = strategy.select_calendar_spread(&event, &spot, &chain_data, OptionType::Call);
         assert!(result.is_ok());
 
         let spread = result.unwrap();
@@ -249,7 +249,7 @@ mod tests {
         let spot = SpotPrice::new(Decimal::new(102, 0), Utc::now());
         let chain_data = create_test_chain_data();
 
-        let result = strategy.select(&event, &spot, &chain_data, OptionType::Call);
+        let result = strategy.select_calendar_spread(&event, &spot, &chain_data, OptionType::Call);
         assert!(result.is_ok());
 
         let spread = result.unwrap();
@@ -269,7 +269,7 @@ mod tests {
         let mut chain_data = create_test_chain_data();
         chain_data.strikes.clear();
 
-        let result = strategy.select(&event, &spot, &chain_data, OptionType::Call);
+        let result = strategy.select_calendar_spread(&event, &spot, &chain_data, OptionType::Call);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), StrategyError::NoStrikes));
     }

@@ -27,6 +27,8 @@ pub enum StrategyError {
     NoLiquidityData,
     #[error("Spread creation failed: {0}")]
     SpreadCreation(#[from] ValidationError),
+    #[error("Unsupported strategy: {0}")]
+    UnsupportedStrategy(String),
 }
 
 /// Trade selection criteria
@@ -93,13 +95,52 @@ pub struct OptionChainData {
     pub iv_surface: Option<IVSurface>,
 }
 
-/// Strategy trait for strike selection
-pub trait TradingStrategy: Send + Sync {
-    fn select(
+/// Option strategy type (the trade structure)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OptionStrategy {
+    /// Calendar spread (or diagonal spread if using same-delta matching)
+    CalendarSpread,
+    /// Iron butterfly (short straddle with protective wings)
+    IronButterfly,
+}
+
+impl Default for OptionStrategy {
+    fn default() -> Self {
+        Self::CalendarSpread
+    }
+}
+
+/// Selection strategy trait - determines HOW to select strikes/expirations
+///
+/// This was previously called "TradingStrategy" but renamed to clarify that
+/// it's about SELECTION logic, not the trade structure itself.
+pub trait SelectionStrategy: Send + Sync {
+    /// Select a calendar spread opportunity
+    fn select_calendar_spread(
         &self,
         event: &EarningsEvent,
         spot: &SpotPrice,
         chain_data: &OptionChainData,
         option_type: OptionType,
     ) -> Result<CalendarSpread, StrategyError>;
+
+    /// Select an iron butterfly opportunity
+    ///
+    /// Not all selection strategies need to support iron butterfly.
+    /// Default implementation returns an error.
+    fn select_iron_butterfly(
+        &self,
+        event: &EarningsEvent,
+        spot: &SpotPrice,
+        chain_data: &OptionChainData,
+    ) -> Result<IronButterfly, StrategyError> {
+        Err(StrategyError::UnsupportedStrategy(
+            "Iron butterfly not supported by this selection strategy".to_string()
+        ))
+    }
 }
+
+// Backwards compatibility: TradingStrategy is an alias for SelectionStrategy
+#[deprecated(since = "0.2.0", note = "Use SelectionStrategy instead")]
+pub trait TradingStrategy: SelectionStrategy {}

@@ -15,8 +15,12 @@ pub use datetime::{TradingDate, TradingTimestamp, MarketTime};
 pub use value_objects::*;
 pub use entities::*;
 pub use strategies::{
-    TradingStrategy, StrategyError, TradeSelectionCriteria, OptionChainData,
+    SelectionStrategy, OptionStrategy, StrategyError, TradeSelectionCriteria, OptionChainData,
     ATMStrategy, DeltaStrategy, DeltaScanMode, StrikeMatchMode,
 };
+
+// Re-export deprecated trait for backwards compatibility
+#[allow(deprecated)]
+pub use strategies::TradingStrategy;
 pub use repositories::*;
 pub use services::*;

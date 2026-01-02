@@ -9,7 +9,7 @@ use cs_analytics::{
     linspace,
 };
 
-use super::{OptionChainData, StrategyError, TradeSelectionCriteria, TradingStrategy, StrikeMatchMode};
+use super::{OptionChainData, StrategyError, TradeSelectionCriteria, SelectionStrategy, StrikeMatchMode};
 use crate::entities::{CalendarSpread, EarningsEvent, OptionLeg};
 use crate::value_objects::{SpotPrice, Strike};
 
@@ -106,8 +106,8 @@ impl DeltaStrategy {
     }
 }
 
-impl TradingStrategy for DeltaStrategy {
-    fn select(
+impl SelectionStrategy for DeltaStrategy {
+    fn select_calendar_spread(
         &self,
         event: &EarningsEvent,
         _spot: &SpotPrice,
@@ -361,7 +361,7 @@ mod tests {
         let spot = SpotPrice::new(Decimal::new(100, 0), Utc::now());
         let chain_data = create_test_chain_data();
 
-        let result = strategy.select(&event, &spot, &chain_data, OptionType::Call);
+        let result = strategy.select_calendar_spread(&event, &spot, &chain_data, OptionType::Call);
         assert!(result.is_ok(), "Strategy should select successfully: {:?}", result);
 
         let spread = result.unwrap();
@@ -386,7 +386,7 @@ mod tests {
         let spot = SpotPrice::new(Decimal::new(100, 0), Utc::now());
         let chain_data = create_test_chain_data();
 
-        let result = strategy.select(&event, &spot, &chain_data, OptionType::Call);
+        let result = strategy.select_calendar_spread(&event, &spot, &chain_data, OptionType::Call);
         assert!(result.is_ok(), "Scan strategy should select successfully: {:?}", result);
     }
 
@@ -415,7 +415,7 @@ mod tests {
             iv_surface: None,
         };
 
-        let result = strategy.select(&event, &spot, &chain_data, OptionType::Call);
+        let result = strategy.select_calendar_spread(&event, &spot, &chain_data, OptionType::Call);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), StrategyError::NoDeltaData));
     }

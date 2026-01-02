@@ -638,7 +638,7 @@ where
         Ok(result)
     }
 
-    fn create_strategy(&self) -> Box<dyn TradingStrategy> {
+    fn create_strategy(&self) -> Box<dyn SelectionStrategy> {
         match self.config.strategy {
             StrategyType::ATM => Box::new(
                 ATMStrategy::new(self.config.selection.clone())
@@ -674,7 +674,7 @@ where
         &self,
         event: &EarningsEvent,
         session_date: NaiveDate,
-        strategy: &dyn TradingStrategy,
+        strategy: &dyn SelectionStrategy,
         option_type: finq_core::OptionType,
     ) -> Result<CalendarSpreadResult, TradeGenerationError> {
         // Use event-based timing for entry/exit, not session_date
@@ -756,7 +756,7 @@ where
         };
 
         // Select spread using strategy
-        let spread = match strategy.select(event, &spot, &chain_data, option_type) {
+        let spread = match strategy.select_calendar_spread(event, &spot, &chain_data, option_type) {
             Ok(s) => s,
             Err(e) => {
                 return Err(TradeGenerationError {
