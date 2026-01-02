@@ -44,10 +44,14 @@ impl EquityDataRepository for FinqEquityRepository {
         let target_ts = TradingTimestamp::from_datetime_utc(target_time);
         let target_nanos = target_ts.to_nanos();
 
+        // Note: DataFrame timestamps are in milliseconds (Datetime[ms])
+        // Convert target to milliseconds for comparison
+        let target_millis = target_nanos / 1_000_000;
+
         // Filter to bars at or before target time
         let filtered = df
             .lazy()
-            .filter(col("timestamp").lt_eq(lit(target_nanos)))
+            .filter(col("timestamp").lt_eq(lit(target_millis)))
             .sort(
                 ["timestamp"],
                 SortMultipleOptions::default().with_order_descending(true),
@@ -80,8 +84,11 @@ impl EquityDataRepository for FinqEquityRepository {
             i64_series.get(0)
                 .ok_or_else(|| RepositoryError::NotFound("Empty timestamp column".into()))?
         } else if let Ok(datetime_series) = timestamp_col.datetime() {
-            datetime_series.get(0)
-                .ok_or_else(|| RepositoryError::NotFound("Empty timestamp column".into()))?
+            // Datetime column stores values in its time_unit (milliseconds in this case)
+            // Convert to nanoseconds: ms * 1_000_000 = ns
+            let timestamp_ms = datetime_series.get(0)
+                .ok_or_else(|| RepositoryError::NotFound("Empty timestamp column".into()))?;
+            timestamp_ms * 1_000_000
         } else {
             return Err(RepositoryError::Parse("Unsupported timestamp column type".into()));
         };

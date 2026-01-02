@@ -4,7 +4,6 @@ members = [
     "cs-analytics",
     "cs-domain",
     "cs-backtest",
-    "cs-python",
     "cs-cli",
 ]
 

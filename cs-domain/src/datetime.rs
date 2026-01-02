@@ -98,9 +98,11 @@ impl TradingDate {
 
     /// Combine with time to create timestamp
     pub fn with_time(&self, time: &MarketTime) -> TradingTimestamp {
-        let day_nanos = (self.0 as i64) * NANOS_PER_DAY;
-        let time_nanos = (time.hour as i64 * 3600 + time.minute as i64 * 60) * NANOS_PER_SECOND;
-        TradingTimestamp(day_nanos + time_nanos)
+        // Convert MarketTime (Eastern) to UTC
+        let naive_time = NaiveTime::from_hms_opt(time.hour, time.minute, 0)
+            .expect("Valid market time");
+        let utc_datetime = eastern_to_utc(self.to_naive_date(), naive_time);
+        TradingTimestamp::from_datetime_utc(utc_datetime)
     }
 
     /// Combine with NaiveTime to create timestamp
