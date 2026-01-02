@@ -60,6 +60,9 @@ pub struct PyBacktestConfig {
     /// Enable parallel processing
     #[pyo3(get, set)]
     pub parallel: bool,
+    /// Wing width for iron butterfly (distance from ATM to wings)
+    #[pyo3(get, set)]
+    pub wing_width: f64,
 }
 
 #[pymethods]
@@ -80,7 +83,8 @@ impl PyBacktestConfig {
         strategy="atm".to_string(),
         symbols=None,
         min_market_cap=None,
-        parallel=true
+        parallel=true,
+        wing_width=10.0
     ))]
     fn new(
         data_dir: String,
@@ -98,6 +102,7 @@ impl PyBacktestConfig {
         symbols: Option<Vec<String>>,
         min_market_cap: Option<u64>,
         parallel: bool,
+        wing_width: f64,
     ) -> Self {
         Self {
             data_dir,
@@ -115,6 +120,7 @@ impl PyBacktestConfig {
             symbols,
             min_market_cap,
             parallel,
+            wing_width,
         }
     }
 
@@ -260,6 +266,9 @@ impl PyBacktestUseCase {
             delta_range: (0.25, 0.75),
             delta_scan_steps: 5,
             vol_model: cs_analytics::InterpolationMode::default(),
+            strike_match_mode: cs_domain::StrikeMatchMode::default(),
+            max_entry_iv: None,
+            wing_width: self.config.wing_width,
         };
 
         // Create repositories
@@ -289,8 +298,14 @@ impl PyBacktestUseCase {
         ))?;
 
         // Convert to Python result
+        // Filter to only CalendarSpread results (Python bindings don't support IronButterfly yet)
         Ok(PyBacktestResult {
-            results: result.results.into_iter().map(PyCalendarSpreadResult::from).collect(),
+            results: result.results.into_iter()
+                .filter_map(|r| match r {
+                    cs_backtest::TradeResult::CalendarSpread(cs) => Some(PyCalendarSpreadResult::from(cs)),
+                    cs_backtest::TradeResult::IronButterfly(_) => None,
+                })
+                .collect(),
             sessions_processed: result.sessions_processed,
             total_entries: result.total_entries,
             total_opportunities: result.total_opportunities,
