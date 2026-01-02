@@ -11,12 +11,13 @@ use tabled::{Table, Tabled};
 use tracing::{info, Level};
 use tracing_subscriber;
 
-use cs_backtest::{BacktestUseCase, SpreadType, SelectionType};
+use cs_backtest::{BacktestUseCase, GenerateIvTimeSeriesUseCase};
 use cs_domain::{
     infrastructure::{
         EarningsReaderAdapter, FinqEquityRepository, FinqOptionsRepository,
         ParquetResultsRepository,
     },
+    value_objects::AtmIvConfig,
     ResultsRepository,
 };
 
@@ -151,6 +152,31 @@ enum Commands {
         #[arg(long)]
         date: String,
     },
+
+    /// Generate ATM IV time series for earnings detection
+    AtmIv {
+        /// Symbol(s) to analyze (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        symbols: Vec<String>,
+        /// Start date (YYYY-MM-DD)
+        #[arg(long)]
+        start: String,
+        /// End date (YYYY-MM-DD)
+        #[arg(long)]
+        end: String,
+        /// Target maturities in days (default: 30,60,90)
+        #[arg(long, value_delimiter = ',')]
+        maturities: Option<Vec<u32>>,
+        /// Maturity tolerance in days (default: 7)
+        #[arg(long)]
+        tolerance: Option<u32>,
+        /// Output directory for parquet files and plots
+        #[arg(long)]
+        output: PathBuf,
+        /// Generate plots
+        #[arg(long)]
+        plot: bool,
+    },
 }
 
 #[derive(Tabled)]
@@ -253,6 +279,27 @@ async fn main() -> Result<()> {
             println!("Price command not yet implemented");
             println!("Symbol: {}, Strike: {}, Short: {}, Long: {}, Date: {}",
                 symbol, strike, short_expiry, long_expiry, date);
+        }
+        Commands::AtmIv {
+            symbols,
+            start,
+            end,
+            maturities,
+            tolerance,
+            output,
+            plot,
+        } => {
+            run_atm_iv_command(
+                cli.data_dir.as_ref(),
+                symbols,
+                &start,
+                &end,
+                maturities,
+                tolerance,
+                output,
+                plot,
+            )
+            .await?;
         }
     }
 
@@ -747,6 +794,98 @@ async fn run_backtest(
             }
         }
     }
+
+    Ok(())
+}
+
+/// Run ATM IV time series generation command
+async fn run_atm_iv_command(
+    data_dir: Option<&PathBuf>,
+    symbols: Vec<String>,
+    start: &str,
+    end: &str,
+    maturities: Option<Vec<u32>>,
+    tolerance: Option<u32>,
+    output: PathBuf,
+    plot: bool,
+) -> Result<()> {
+    // Parse dates
+    let start_date = NaiveDate::parse_from_str(start, "%Y-%m-%d")
+        .context("Invalid start date format. Use YYYY-MM-DD")?;
+    let end_date = NaiveDate::parse_from_str(end, "%Y-%m-%d")
+        .context("Invalid end date format. Use YYYY-MM-DD")?;
+
+    // Build config
+    let mut config = AtmIvConfig::default();
+    if let Some(mats) = maturities {
+        config.maturity_targets = mats;
+    }
+    if let Some(tol) = tolerance {
+        config.maturity_tolerance = tol;
+    }
+
+    // Determine data directory
+    let data_dir = data_dir
+        .cloned()
+        .or_else(|| std::env::var("FINQ_DATA_DIR").ok().map(PathBuf::from))
+        .context("Data directory not specified. Use --data-dir or set FINQ_DATA_DIR")?;
+
+    println!("{}", style("ATM IV Time Series Generation").bold().cyan());
+    println!("Symbols: {}", symbols.join(", "));
+    println!("Date range: {} to {}", start_date, end_date);
+    println!("Maturities: {:?}", config.maturity_targets);
+    println!("Tolerance: {} days", config.maturity_tolerance);
+    println!("Output: {:?}", output);
+    println!();
+
+    // Create output directory
+    std::fs::create_dir_all(&output)?;
+
+    // Create repositories
+    let equity_repo = FinqEquityRepository::new(data_dir.clone());
+    let options_repo = FinqOptionsRepository::new(data_dir);
+
+    // Create use case
+    let use_case = GenerateIvTimeSeriesUseCase::new(equity_repo, options_repo);
+
+    // Process each symbol
+    for symbol in &symbols {
+        println!("{}", style(format!("Processing {}...", symbol)).bold());
+
+        let result = use_case.execute(symbol, start_date, end_date, &config).await?;
+
+        println!(
+            "  {} trading days processed, {} successful observations",
+            result.total_days, result.successful_days
+        );
+
+        if result.observations.is_empty() {
+            println!("{}", style("  Warning: No observations generated").yellow());
+            continue;
+        }
+
+        // Save to parquet
+        let output_path = output.join(format!("atm_iv_{}.parquet", symbol));
+        GenerateIvTimeSeriesUseCase::<FinqEquityRepository, FinqOptionsRepository>::save_to_parquet(
+            &result,
+            &output_path,
+        )?;
+
+        println!(
+            "  {}",
+            style(format!("Saved {} observations to {:?}", result.observations.len(), output_path))
+                .green()
+        );
+
+        // Generate plots if requested
+        if plot {
+            println!("  {}", style("Plot generation not yet implemented").yellow());
+            // TODO: Add plotting implementation
+        }
+    }
+
+    println!();
+    println!("{}", style("Done!").bold().green());
 
     Ok(())
 }

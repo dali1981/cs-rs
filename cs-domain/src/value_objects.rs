@@ -134,6 +134,105 @@ pub enum FailureReason {
     PricingError(String),
 }
 
+/// ATM (At-The-Money) IV observation for a single trading day
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AtmIvObservation {
+    pub symbol: String,
+    pub date: NaiveDate,
+    pub spot: Decimal,
+    /// ATM IV for ~30 DTE options
+    pub atm_iv_30d: Option<f64>,
+    /// ATM IV for ~60 DTE options
+    pub atm_iv_60d: Option<f64>,
+    /// ATM IV for ~90 DTE options
+    pub atm_iv_90d: Option<f64>,
+    /// Term spread: IV_30d - IV_60d (positive = backwardation)
+    pub term_spread_30_60: Option<f64>,
+    /// Term spread: IV_30d - IV_90d (positive = backwardation)
+    pub term_spread_30_90: Option<f64>,
+}
+
+impl AtmIvObservation {
+    pub fn new(symbol: String, date: NaiveDate, spot: Decimal) -> Self {
+        Self {
+            symbol,
+            date,
+            spot,
+            atm_iv_30d: None,
+            atm_iv_60d: None,
+            atm_iv_90d: None,
+            term_spread_30_60: None,
+            term_spread_30_90: None,
+        }
+    }
+
+    /// Calculate term spreads from IV values
+    pub fn calculate_spreads(&mut self) {
+        if let (Some(iv_30), Some(iv_60)) = (self.atm_iv_30d, self.atm_iv_60d) {
+            self.term_spread_30_60 = Some(iv_30 - iv_60);
+        }
+        if let (Some(iv_30), Some(iv_90)) = (self.atm_iv_30d, self.atm_iv_90d) {
+            self.term_spread_30_90 = Some(iv_30 - iv_90);
+        }
+    }
+}
+
+/// ATM strike selection method
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AtmMethod {
+    /// Strike closest to spot (default)
+    Closest,
+    /// Strike immediately below spot
+    BelowSpot,
+    /// Strike immediately above spot
+    AboveSpot,
+}
+
+impl Default for AtmMethod {
+    fn default() -> Self {
+        Self::Closest
+    }
+}
+
+/// Configuration for ATM IV computation and earnings detection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AtmIvConfig {
+    /// Target maturities in days (default: [30, 60, 90])
+    pub maturity_targets: Vec<u32>,
+    /// Tolerance window for maturity matching (default: 7 days)
+    pub maturity_tolerance: u32,
+    /// ATM strike selection method
+    pub atm_strike_method: AtmMethod,
+    /// Minimum valid IV (default: 0.01)
+    pub iv_min_bound: f64,
+    /// Maximum valid IV (default: 5.0)
+    pub iv_max_bound: f64,
+    /// IV spike threshold for detection (default: 0.20 = 20%)
+    pub spike_threshold: f64,
+    /// Lookback window for spike detection (default: 5 days)
+    pub spike_lookback_days: usize,
+    /// IV crush threshold for detection (default: 0.15 = 15%)
+    pub crush_threshold: f64,
+    /// Backwardation threshold (default: 0.05 = 5%)
+    pub backwardation_threshold: f64,
+}
+
+impl Default for AtmIvConfig {
+    fn default() -> Self {
+        Self {
+            maturity_targets: vec![30, 60, 90],
+            maturity_tolerance: 7,
+            atm_strike_method: AtmMethod::default(),
+            iv_min_bound: 0.01,
+            iv_max_bound: 5.0,
+            spike_threshold: 0.20,
+            spike_lookback_days: 5,
+            crush_threshold: 0.15,
+            backwardation_threshold: 0.05,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

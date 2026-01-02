@@ -15,6 +15,7 @@ pub mod selection_model;
 pub mod svi;
 pub mod svi_fitter;
 pub mod arbitrage;
+pub mod atm_iv_computer;
 
 pub use black_scholes::{bs_price, bs_implied_volatility, bs_greeks, bs_delta, BSConfig, BSError};
 pub use greeks::Greeks;
@@ -38,3 +39,4 @@ pub use arbitrage::{
     ArbitrageViolation, ArbitrageReport,
     check_butterfly_arbitrage, check_calendar_arbitrage, full_arbitrage_check,
 };
+pub use atm_iv_computer::{AtmIvComputer, AtmIvResult, AtmMethod, OptionPoint};
