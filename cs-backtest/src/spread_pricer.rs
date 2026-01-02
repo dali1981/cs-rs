@@ -5,7 +5,7 @@ use finq_core::OptionType;
 
 use cs_analytics::{
     bs_price, bs_greeks, bs_implied_volatility, BSConfig, Greeks, IVSurface, IVPoint,
-    IVModel, IVInterpolator,
+    PricingModel, PricingIVProvider,
 };
 use cs_domain::{CalendarSpread, Strike, TradingDate, TradingTimestamp, MarketTime};
 
@@ -44,7 +44,7 @@ pub struct SpreadPricing {
 pub struct SpreadPricer {
     bs_config: BSConfig,
     market_close: MarketTime,
-    iv_model: IVModel,
+    pricing_model: PricingModel,
 }
 
 impl SpreadPricer {
@@ -52,7 +52,7 @@ impl SpreadPricer {
         Self {
             bs_config: BSConfig::default(),
             market_close: MarketTime::new(16, 0), // Default 4 PM
-            iv_model: IVModel::default(),         // Sticky strike
+            pricing_model: PricingModel::default(),         // Sticky strike
         }
     }
 
@@ -61,19 +61,19 @@ impl SpreadPricer {
         self
     }
 
-    /// Set the IV interpolation model
+    /// Set the pricing IV interpolation model
     ///
     /// - `StickyStrike`: IV indexed by absolute strike K (default)
     /// - `StickyMoneyness`: IV indexed by K/S (floats with spot)
     /// - `StickyDelta`: IV indexed by delta (iterative, most accurate floating smile)
-    pub fn with_iv_model(mut self, iv_model: IVModel) -> Self {
-        self.iv_model = iv_model;
+    pub fn with_pricing_model(mut self, pricing_model: PricingModel) -> Self {
+        self.pricing_model = pricing_model;
         self
     }
 
-    /// Get the current IV model
-    pub fn iv_model(&self) -> IVModel {
-        self.iv_model
+    /// Get the current pricing model
+    pub fn pricing_model(&self) -> PricingModel {
+        self.pricing_model
     }
 
     /// Price a calendar spread using option chain data
@@ -92,8 +92,8 @@ impl SpreadPricer {
             spread.symbol(),
         );
 
-        // Create interpolator based on configured IV model
-        let interpolator = self.iv_model.to_interpolator_with_rate(self.bs_config.risk_free_rate);
+        // Create pricing provider based on configured pricing model
+        let pricing_provider = self.pricing_model.to_provider_with_rate(self.bs_config.risk_free_rate);
 
         let short_pricing = self.price_leg(
             &spread.short_leg.strike,
@@ -103,7 +103,7 @@ impl SpreadPricer {
             spot_price,
             pricing_time,
             iv_surface.as_ref(),
-            interpolator.as_ref(),
+            pricing_provider.as_ref(),
         )?;
 
         let long_pricing = self.price_leg(
@@ -114,7 +114,7 @@ impl SpreadPricer {
             spot_price,
             pricing_time,
             iv_surface.as_ref(),
-            interpolator.as_ref(),
+            pricing_provider.as_ref(),
         )?;
 
         // Calendar spread: pay (long - short)
@@ -127,8 +127,8 @@ impl SpreadPricer {
         })
     }
 
-    /// Price a single option leg
-    fn price_leg(
+    /// Price a single option leg (public for use by iron butterfly pricer)
+    pub fn price_leg(
         &self,
         strike: &Strike,
         expiration: NaiveDate,
@@ -137,7 +137,7 @@ impl SpreadPricer {
         spot_price: f64,
         pricing_time: DateTime<Utc>,
         iv_surface: Option<&IVSurface>,
-        interpolator: &dyn IVInterpolator,
+        pricing_provider: &dyn PricingIVProvider,
     ) -> Result<LegPricing, PricingError> {
         // Filter to matching strike, expiration, and option type
         let expiration_polars = TradingDate::from_naive_date(expiration).to_polars_date();
@@ -163,10 +163,10 @@ impl SpreadPricer {
             // No market data, use Black-Scholes with interpolated or estimated IV
             let ttm = self.calculate_ttm(pricing_time, expiration);
 
-            // Use configured IV model for interpolation, fall back to 30%
+            // Use configured pricing model for interpolation, fall back to 30%
             let estimated_iv = iv_surface
                 .and_then(|surface| {
-                    interpolator.get_iv(
+                    pricing_provider.get_iv(
                         surface,
                         strike.value(),
                         expiration,
@@ -357,29 +357,29 @@ mod tests {
     use chrono::NaiveDate;
 
     #[test]
-    fn test_spread_pricer_default_iv_model() {
+    fn test_spread_pricer_default_pricing_model() {
         let pricer = SpreadPricer::new();
-        assert_eq!(pricer.iv_model(), IVModel::StickyStrike);
+        assert_eq!(pricer.pricing_model(), PricingModel::StickyStrike);
     }
 
     #[test]
-    fn test_spread_pricer_with_iv_model() {
+    fn test_spread_pricer_with_pricing_model() {
         let pricer = SpreadPricer::new()
-            .with_iv_model(IVModel::StickyDelta);
-        assert_eq!(pricer.iv_model(), IVModel::StickyDelta);
+            .with_pricing_model(PricingModel::StickyDelta);
+        assert_eq!(pricer.pricing_model(), PricingModel::StickyDelta);
 
         let pricer = SpreadPricer::new()
-            .with_iv_model(IVModel::StickyMoneyness);
-        assert_eq!(pricer.iv_model(), IVModel::StickyMoneyness);
+            .with_pricing_model(PricingModel::StickyMoneyness);
+        assert_eq!(pricer.pricing_model(), PricingModel::StickyMoneyness);
     }
 
     #[test]
     fn test_spread_pricer_builder_chain() {
         let pricer = SpreadPricer::new()
             .with_market_close(MarketTime::new(15, 45))
-            .with_iv_model(IVModel::StickyDelta);
+            .with_pricing_model(PricingModel::StickyDelta);
 
-        assert_eq!(pricer.iv_model(), IVModel::StickyDelta);
+        assert_eq!(pricer.pricing_model(), PricingModel::StickyDelta);
     }
 
     #[test]

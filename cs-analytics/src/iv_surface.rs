@@ -2,7 +2,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 
-use crate::iv_model::IVInterpolator;
+use crate::iv_model::PricingIVProvider;
 
 /// Single IV observation
 #[derive(Debug, Clone)]
@@ -94,7 +94,7 @@ impl IVSurface {
         strike: Decimal,
         expiration: NaiveDate,
         is_call: bool,
-        model: &dyn IVInterpolator,
+        model: &dyn PricingIVProvider,
     ) -> Option<f64> {
         model.get_iv(self, strike, expiration, is_call)
     }

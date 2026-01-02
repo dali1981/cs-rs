@@ -82,6 +82,7 @@ mod tests {
             earnings_date: NaiveDate::from_ymd_opt(2025, 6, 20).unwrap(),
             earnings_time: EarningsTime::AfterMarketClose,
             strike: Strike::new(Decimal::new(100, 0)).unwrap(),
+            long_strike: None,
             option_type: OptionType::Call,
             short_expiry: NaiveDate::from_ymd_opt(2025, 1, 17).unwrap(),
             long_expiry: NaiveDate::from_ymd_opt(2025, 1, 31).unwrap(),

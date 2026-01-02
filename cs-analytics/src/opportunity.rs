@@ -5,12 +5,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::delta_surface::DeltaVolSurface;
 use crate::math_utils::linspace;
+use crate::selection_model::{SelectionModel, SelectionIVProvider, StrikeSpaceSelection};
 
 /// Calendar spread opportunity identified in delta-space
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CalendarOpportunity {
     /// Target delta for the spread
     pub target_delta: f64,
+    /// Strike where IVs were compared (from selection model)
+    pub strike: f64,
     /// Short leg expiration
     pub short_expiry: NaiveDate,
     /// Long leg expiration
@@ -58,11 +61,20 @@ impl OpportunityAnalyzerConfig {
 /// Scans delta-space for calendar spread opportunities based on IV ratio.
 pub struct OpportunityAnalyzer {
     config: OpportunityAnalyzerConfig,
+    selection_provider: Box<dyn SelectionIVProvider>,
 }
 
 impl OpportunityAnalyzer {
     pub fn new(config: OpportunityAnalyzerConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            selection_provider: Box::new(StrikeSpaceSelection),
+        }
+    }
+
+    pub fn with_selection_model(mut self, model: SelectionModel) -> Self {
+        self.selection_provider = model.to_provider();
+        self
     }
 
     /// Find calendar opportunities across delta targets
@@ -77,25 +89,30 @@ impl OpportunityAnalyzer {
         let mut opportunities = Vec::new();
 
         for &delta in &self.config.delta_targets {
-            let short_iv = match surface.get_iv(delta, short_expiry) {
-                Some(iv) => iv,
+            // Delegate to selection provider - this maps delta to strike once,
+            // then compares IVs at that same strike for both expirations
+            let iv_pair = match self.selection_provider.get_iv_pair(
+                surface,
+                delta,
+                short_expiry,
+                long_expiry,
+                true, // Assume calls for now
+            ) {
+                Some(pair) => pair,
                 None => continue,
             };
-            let long_iv = match surface.get_iv(delta, long_expiry) {
-                Some(iv) if iv > 0.0 => iv,
-                _ => continue,
-            };
 
-            let ratio = short_iv / long_iv;
+            let ratio = iv_pair.short_iv / iv_pair.long_iv;
 
             if ratio >= self.config.min_iv_ratio {
-                let score = self.score_opportunity(delta, ratio, short_iv);
+                let score = self.score_opportunity(delta, ratio, iv_pair.short_iv);
                 opportunities.push(CalendarOpportunity {
                     target_delta: delta,
+                    strike: iv_pair.strike,
                     short_expiry,
                     long_expiry,
-                    short_iv,
-                    long_iv,
+                    short_iv: iv_pair.short_iv,
+                    long_iv: iv_pair.long_iv,
                     iv_ratio: ratio,
                     score,
                 });

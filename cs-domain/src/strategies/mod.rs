@@ -1,5 +1,6 @@
 pub mod atm;
 pub mod delta;
+pub mod iron_butterfly;
 
 use crate::entities::*;
 use crate::value_objects::*;
@@ -10,6 +11,7 @@ use thiserror::Error;
 
 pub use atm::ATMStrategy;
 pub use delta::{DeltaStrategy, DeltaScanMode};
+pub use iron_butterfly::IronButterflyStrategy;
 
 #[derive(Error, Debug)]
 pub enum StrategyError {
@@ -49,6 +51,32 @@ impl Default for TradeSelectionCriteria {
             target_delta: None,
             min_iv_ratio: None,
             max_bid_ask_spread_pct: None,
+        }
+    }
+}
+
+/// Strike matching mode for calendar/diagonal spreads
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StrikeMatchMode {
+    /// Same strike for both legs (true calendar spread)
+    SameStrike,
+    /// Same delta for both legs (diagonal spread)
+    SameDelta,
+}
+
+impl Default for StrikeMatchMode {
+    fn default() -> Self {
+        Self::SameStrike
+    }
+}
+
+impl StrikeMatchMode {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().replace('-', "_").as_str() {
+            "same_strike" | "samestrike" | "calendar" => Some(Self::SameStrike),
+            "same_delta" | "samedelta" | "diagonal" => Some(Self::SameDelta),
+            _ => None,
         }
     }
 }

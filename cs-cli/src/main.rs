@@ -124,6 +124,9 @@ enum Commands {
         /// Maximum allowed IV at entry (filters trades with unreliable pricing, e.g., 1.5 for 150%)
         #[arg(long)]
         max_entry_iv: Option<f64>,
+        /// Wing width for iron butterfly strategy (distance from ATM to wings)
+        #[arg(long)]
+        wing_width: Option<f64>,
     },
 
     /// Analyze results from a run
@@ -197,6 +200,7 @@ async fn main() -> Result<()> {
             vol_model,
             strike_match_mode,
             max_entry_iv,
+            wing_width,
         } => {
             run_backtest(
                 conf,
@@ -226,6 +230,7 @@ async fn main() -> Result<()> {
                 vol_model,
                 strike_match_mode,
                 max_entry_iv,
+                wing_width,
             )
             .await?;
         }
@@ -273,6 +278,7 @@ fn build_cli_overrides(
     vol_model_str: Option<String>,
     strike_match_mode_str: Option<String>,
     max_entry_iv: Option<f64>,
+    wing_width: Option<f64>,
 ) -> Result<CliOverrides> {
     // Parse delta range if provided
     let delta_range = if let Some(ref range_str) = delta_range_str {
@@ -317,12 +323,13 @@ fn build_cli_overrides(
         } else {
             None
         },
-        strategy: if strategy_str.is_some() || delta_range.is_some() || delta_scan_steps.is_some() {
+        strategy: if strategy_str.is_some() || delta_range.is_some() || delta_scan_steps.is_some() || wing_width.is_some() {
             Some(CliStrategy {
                 strategy_type: strategy_str,
                 target_delta: None,
                 delta_range,
                 delta_scan_steps,
+                wing_width,
             })
         } else {
             None
@@ -371,6 +378,7 @@ async fn run_backtest(
     vol_model_str: Option<String>,
     strike_match_mode_str: Option<String>,
     max_entry_iv: Option<f64>,
+    wing_width: Option<f64>,
 ) -> Result<()> {
     // Parse dates
     let start_date = NaiveDate::parse_from_str(start_str, "%Y-%m-%d")
@@ -409,6 +417,7 @@ async fn run_backtest(
         vol_model_str,
         strike_match_mode_str,
         max_entry_iv,
+        wing_width,
     )?;
 
     // Load configuration with layering
@@ -438,6 +447,9 @@ async fn run_backtest(
         StrategyType::DeltaScan => {
             println!("  Delta range:   {:.2}-{:.2}", backtest_config.delta_range.0, backtest_config.delta_range.1);
             println!("  Scan steps:    {}", backtest_config.delta_scan_steps);
+        }
+        StrategyType::IronButterfly => {
+            println!("  Wing width:    ${:.2}", backtest_config.wing_width);
         }
         _ => {}
     }
@@ -560,13 +572,18 @@ async fn run_backtest(
     if !result.results.is_empty() {
         println!("{}", style("Sample Trades:").bold());
         for (i, trade) in result.results.iter().take(5).enumerate() {
+            let option_type_str = match trade.option_type() {
+                Some(finq_core::OptionType::Call) => "Call",
+                Some(finq_core::OptionType::Put) => "Put",
+                None => "Straddle",
+            };
             println!("  {}. {} {} @ {} | P&L: ${:.2} ({:.2}%)",
                 i + 1,
-                trade.symbol,
-                if trade.option_type == finq_core::OptionType::Call { "Call" } else { "Put" },
-                trade.strike.value(),
-                trade.pnl,
-                trade.pnl_pct,
+                trade.symbol(),
+                option_type_str,
+                trade.strike().value(),
+                trade.pnl(),
+                trade.pnl_pct(),
             );
         }
         if result.results.len() > 5 {
@@ -591,10 +608,39 @@ async fn run_backtest(
     // Save results if output specified
     if let Some(output_path) = output {
         info!("Saving results to {:?}...", output_path);
-        let results_repo = ParquetResultsRepository::new(output_path.parent().unwrap().to_path_buf());
-        let run_id = output_path.file_stem().unwrap().to_str().unwrap();
-        results_repo.save_results(&result.results, run_id).await?;
-        println!("{}", style(format!("Results saved to {:?}", output_path)).green());
+
+        // Detect output format based on extension
+        let is_json = output_path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("json"))
+            .unwrap_or(false);
+
+        if is_json {
+            // Save all results as JSON (supports both calendar spreads and iron butterflies)
+            let json_content = serde_json::to_string_pretty(&result.results)
+                .context("Failed to serialize results to JSON")?;
+            std::fs::write(&output_path, json_content)
+                .context("Failed to write JSON file")?;
+            println!("{}", style(format!("Results saved to {:?}", output_path)).green());
+        } else {
+            // Save as parquet (calendar spreads only for now)
+            let results_repo = ParquetResultsRepository::new(output_path.parent().unwrap().to_path_buf());
+            let run_id = output_path.file_stem().unwrap().to_str().unwrap();
+
+            let calendar_results: Vec<_> = result.results.iter()
+                .filter_map(|r| match r {
+                    cs_backtest::TradeResult::CalendarSpread(cs) => Some(cs.clone()),
+                    _ => None,
+                })
+                .collect();
+
+            if calendar_results.is_empty() {
+                println!("{}", style("Warning: No calendar spread results to save to parquet. Use .json extension for iron butterfly results.").yellow());
+            } else {
+                results_repo.save_results(&calendar_results, run_id).await?;
+                println!("{}", style(format!("Results saved to {:?}", output_path)).green());
+            }
+        }
     }
 
     Ok(())

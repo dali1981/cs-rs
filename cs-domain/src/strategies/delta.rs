@@ -9,7 +9,7 @@ use cs_analytics::{
     linspace,
 };
 
-use super::{OptionChainData, StrategyError, TradeSelectionCriteria, TradingStrategy};
+use super::{OptionChainData, StrategyError, TradeSelectionCriteria, TradingStrategy, StrikeMatchMode};
 use crate::entities::{CalendarSpread, EarningsEvent, OptionLeg};
 use crate::value_objects::{SpotPrice, Strike};
 
@@ -47,6 +47,8 @@ pub struct DeltaStrategy {
     pub scan_mode: DeltaScanMode,
     /// Delta range for scanning (min, max)
     pub delta_range: (f64, f64),
+    /// Strike matching mode
+    pub strike_match_mode: StrikeMatchMode,
 }
 
 impl Default for DeltaStrategy {
@@ -57,6 +59,7 @@ impl Default for DeltaStrategy {
             risk_free_rate: 0.05,
             scan_mode: DeltaScanMode::Fixed,
             delta_range: (0.25, 0.75),
+            strike_match_mode: StrikeMatchMode::default(),
         }
     }
 }
@@ -70,6 +73,7 @@ impl DeltaStrategy {
             risk_free_rate: 0.05,
             scan_mode: DeltaScanMode::Fixed,
             delta_range: (0.25, 0.75),
+            strike_match_mode: StrikeMatchMode::default(),
         }
     }
 
@@ -85,12 +89,19 @@ impl DeltaStrategy {
             risk_free_rate: 0.05,
             scan_mode: DeltaScanMode::Scan { steps },
             delta_range,
+            strike_match_mode: StrikeMatchMode::default(),
         }
     }
 
     /// Set risk-free rate
     pub fn with_risk_free_rate(mut self, rate: f64) -> Self {
         self.risk_free_rate = rate;
+        self
+    }
+
+    /// Set strike matching mode
+    pub fn with_strike_match_mode(mut self, mode: StrikeMatchMode) -> Self {
+        self.strike_match_mode = mode;
         self
     }
 }
@@ -143,24 +154,36 @@ impl TradingStrategy for DeltaStrategy {
         // For puts, use the equivalent put delta
         let is_call = option_type == OptionType::Call;
 
-        // Map delta to theoretical strike
-        let theoretical_strike = delta_surface
+        // Map delta to theoretical strike for short leg
+        let theoretical_short_strike = delta_surface
             .delta_to_strike(target_delta, short_exp, is_call)
             .ok_or(StrategyError::NoDeltaData)?;
 
-        // Find closest tradable strike
-        let closest_strike = find_closest_strike(&chain_data.strikes, theoretical_strike)?;
+        // Find closest tradable strike for short leg
+        let short_strike = find_closest_strike(&chain_data.strikes, theoretical_short_strike)?;
+
+        // Determine long leg strike based on matching mode
+        let long_strike = match self.strike_match_mode {
+            StrikeMatchMode::SameStrike => short_strike,
+            StrikeMatchMode::SameDelta => {
+                // Map same delta to strike using LONG expiration
+                let theoretical_long_strike = delta_surface
+                    .delta_to_strike(target_delta, long_exp, is_call)
+                    .ok_or(StrategyError::NoDeltaData)?;
+                find_closest_strike(&chain_data.strikes, theoretical_long_strike)?
+            }
+        };
 
         // Build spread
         let short_leg = OptionLeg::new(
             event.symbol.clone(),
-            closest_strike,
+            short_strike,
             short_exp,
             option_type,
         );
         let long_leg = OptionLeg::new(
             event.symbol.clone(),
-            closest_strike,
+            long_strike,
             long_exp,
             option_type,
         );

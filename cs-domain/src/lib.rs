@@ -16,7 +16,7 @@ pub use value_objects::*;
 pub use entities::*;
 pub use strategies::{
     TradingStrategy, StrategyError, TradeSelectionCriteria, OptionChainData,
-    ATMStrategy, DeltaStrategy, DeltaScanMode,
+    ATMStrategy, DeltaStrategy, DeltaScanMode, StrikeMatchMode,
 };
 pub use repositories::*;
 pub use services::*;

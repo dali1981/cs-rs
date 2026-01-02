@@ -1,16 +1,46 @@
 use super::*;
 use chrono::NaiveDate;
+use cs_analytics::{DeltaVolSurface, bs_delta};
 
 /// ATM strategy - select strike closest to spot
 pub struct ATMStrategy {
     pub criteria: TradeSelectionCriteria,
+    /// Strike matching mode
+    pub strike_match_mode: StrikeMatchMode,
+    /// Risk-free rate for delta calculations (used when strike_match_mode is SameDelta)
+    pub risk_free_rate: f64,
 }
 
 impl Default for ATMStrategy {
     fn default() -> Self {
         Self {
             criteria: TradeSelectionCriteria::default(),
+            strike_match_mode: StrikeMatchMode::default(),
+            risk_free_rate: 0.05,
         }
+    }
+}
+
+impl ATMStrategy {
+    /// Create a new ATM strategy
+    pub fn new(criteria: TradeSelectionCriteria) -> Self {
+        Self {
+            criteria,
+            strike_match_mode: StrikeMatchMode::default(),
+            risk_free_rate: 0.05,
+        }
+    }
+
+    /// Set strike matching mode
+    pub fn with_strike_match_mode(mut self, mode: StrikeMatchMode) -> Self {
+        self.strike_match_mode = mode;
+        self
+    }
+
+    /// Set risk-free rate
+    pub fn with_risk_free_rate(mut self, rate: f64) -> Self {
+        self.risk_free_rate = rate;
+        self
     }
 }
 
@@ -26,9 +56,9 @@ impl TradingStrategy for ATMStrategy {
             return Err(StrategyError::NoStrikes);
         }
 
-        // Find ATM strike
+        // Find ATM strike for short leg
         let spot_f64: f64 = spot.value.try_into().unwrap_or(0.0);
-        let atm_strike = chain_data.strikes
+        let short_atm_strike = chain_data.strikes
             .iter()
             .min_by(|a, b| {
                 let a_diff = (f64::from(**a) - spot_f64).abs();
@@ -47,15 +77,70 @@ impl TradingStrategy for ATMStrategy {
             self.criteria.max_long_dte,
         )?;
 
+        // Determine long leg strike based on matching mode
+        let long_strike = match self.strike_match_mode {
+            StrikeMatchMode::SameStrike => *short_atm_strike,
+            StrikeMatchMode::SameDelta => {
+                // Need IV surface to calculate delta
+                let iv_surface = chain_data
+                    .iv_surface
+                    .as_ref()
+                    .ok_or(StrategyError::NoDeltaData)?;
+
+                // Build delta-parameterized surface
+                let delta_surface = DeltaVolSurface::from_iv_surface(iv_surface, self.risk_free_rate);
+
+                // Calculate delta of ATM strike at short expiration
+                let is_call = option_type == OptionType::Call;
+                let short_strike_f64: f64 = (*short_atm_strike).into();
+
+                // Get the IV at the short ATM strike
+                let short_slice = delta_surface.slice(short_exp)
+                    .ok_or(StrategyError::NoDeltaData)?;
+                let short_iv = short_slice.get_iv_at_strike(short_strike_f64)
+                    .ok_or(StrategyError::NoDeltaData)?;
+
+                // Calculate time to expiry for short leg
+                let short_tte = delta_surface.tte(short_exp)
+                    .ok_or(StrategyError::NoDeltaData)?;
+
+                // Calculate delta at ATM strike
+                let atm_delta = bs_delta(
+                    spot_f64,
+                    short_strike_f64,
+                    short_tte,
+                    short_iv,
+                    is_call,
+                    self.risk_free_rate,
+                );
+
+                // Find strike at long expiry with same delta
+                let theoretical_long_strike = delta_surface
+                    .delta_to_strike(atm_delta, long_exp, is_call)
+                    .ok_or(StrategyError::NoDeltaData)?;
+
+                // Find closest tradable strike
+                chain_data.strikes
+                    .iter()
+                    .min_by(|a, b| {
+                        let a_diff = (f64::from(**a) - theoretical_long_strike).abs();
+                        let b_diff = (f64::from(**b) - theoretical_long_strike).abs();
+                        a_diff.partial_cmp(&b_diff).unwrap()
+                    })
+                    .copied()
+                    .ok_or(StrategyError::NoStrikes)?
+            }
+        };
+
         let short_leg = OptionLeg::new(
             event.symbol.clone(),
-            *atm_strike,
+            *short_atm_strike,
             short_exp,
             option_type,
         );
         let long_leg = OptionLeg::new(
             event.symbol.clone(),
-            *atm_strike,
+            long_strike,
             long_exp,
             option_type,
         );

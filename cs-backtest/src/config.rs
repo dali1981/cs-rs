@@ -35,6 +35,13 @@ pub struct BacktestConfig {
     /// Set to None to disable filtering. Common values: 1.5 (150%), 2.0 (200%)
     #[serde(default)]
     pub max_entry_iv: Option<f64>,
+    /// Wing width for iron butterfly strategy (in dollars)
+    #[serde(default = "default_wing_width")]
+    pub wing_width: f64,
+}
+
+fn default_wing_width() -> f64 {
+    10.0
 }
 
 fn default_target_delta() -> f64 {
@@ -58,6 +65,8 @@ pub enum StrategyType {
     Delta,
     /// Scanning delta strategy (scans delta_range for best opportunity)
     DeltaScan,
+    /// Iron butterfly strategy (short straddle + protective wings)
+    IronButterfly,
 }
 
 impl StrategyType {
@@ -65,6 +74,7 @@ impl StrategyType {
         match s.to_lowercase().replace('-', "_").as_str() {
             "delta" => StrategyType::Delta,
             "delta_scan" | "deltascan" => StrategyType::DeltaScan,
+            "iron_butterfly" | "ironbutterfly" | "butterfly" => StrategyType::IronButterfly,
             _ => StrategyType::ATM,
         }
     }
@@ -90,6 +100,7 @@ impl Default for BacktestConfig {
             vol_model: InterpolationMode::default(),
             strike_match_mode: StrikeMatchMode::default(),
             max_entry_iv: None, // No filtering by default
+            wing_width: default_wing_width(),
         }
     }
 }

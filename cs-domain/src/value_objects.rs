@@ -11,6 +11,12 @@ pub enum ValidationError {
     ExpirationMismatch { short: NaiveDate, long: NaiveDate },
     #[error("Symbol mismatch: {0} != {1}")]
     SymbolMismatch(String, String),
+    #[error("Strike mismatch: call strike != put strike")]
+    StrikeMismatch { call: Strike, put: Strike },
+    #[error("Invalid strike order: {0}")]
+    InvalidStrikeOrder(String),
+    #[error("Invalid option type: {0}")]
+    InvalidOptionType(String),
 }
 
 /// Strike price (validated positive)

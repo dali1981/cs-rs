@@ -64,6 +64,7 @@ pub struct StrategyConfig {
     pub target_delta: f64,
     pub delta_range: (f64, f64),
     pub delta_scan_steps: usize,
+    pub wing_width: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,6 +134,7 @@ impl Default for StrategyConfig {
             target_delta: 0.50,
             delta_range: (0.25, 0.75),
             delta_scan_steps: 5,
+            wing_width: 10.0,
         }
     }
 }
@@ -227,6 +229,7 @@ impl AppConfig {
             strike_match_mode: cs_domain::StrikeMatchMode::from_str(&self.strike_match_mode)
                 .unwrap_or(cs_domain::StrikeMatchMode::SameStrike),
             max_entry_iv: self.max_entry_iv,
+            wing_width: self.strategy.wing_width,
         }
     }
 }

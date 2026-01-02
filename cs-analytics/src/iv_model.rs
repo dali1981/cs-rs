@@ -1,6 +1,6 @@
-//! IV Interpolation Models
+//! Pricing IV Interpolation Models
 //!
-//! Implements different volatility surface interpolation strategies:
+//! Implements different volatility surface interpolation strategies for option pricing:
 //! - Sticky Strike: IV indexed by absolute strike K
 //! - Sticky Moneyness: IV indexed by K/S
 //! - Sticky Delta: IV indexed by Black-Scholes delta Δ
@@ -14,8 +14,11 @@ use std::collections::BTreeMap;
 use crate::black_scholes::bs_delta;
 use crate::iv_surface::{IVPoint, IVSurface};
 
-/// Trait for IV surface interpolation strategies
-pub trait IVInterpolator: Send + Sync {
+/// Provider for IV interpolation during option pricing
+///
+/// This trait defines how to interpolate implied volatility from market
+/// observations when pricing options at strikes/expirations without direct quotes.
+pub trait PricingIVProvider: Send + Sync {
     /// Get IV for a specific option
     fn get_iv(
         &self,
@@ -30,7 +33,7 @@ pub trait IVInterpolator: Send + Sync {
 }
 
 // =============================================================================
-// Sticky Strike Interpolator (Current Default)
+// Sticky Strike Pricing (Current Default)
 // =============================================================================
 
 /// Sticky Strike: IV indexed by absolute strike K
@@ -38,9 +41,9 @@ pub trait IVInterpolator: Send + Sync {
 /// When spot moves, the smile stays anchored to the same strike values.
 /// This is the simplest model and matches the current implementation.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct StickyStrikeInterpolator;
+pub struct StickyStrikePricing;
 
-impl IVInterpolator for StickyStrikeInterpolator {
+impl PricingIVProvider for StickyStrikePricing {
     fn get_iv(
         &self,
         surface: &IVSurface,
@@ -58,7 +61,7 @@ impl IVInterpolator for StickyStrikeInterpolator {
 }
 
 // =============================================================================
-// Sticky Moneyness Interpolator
+// Sticky Moneyness Pricing
 // =============================================================================
 
 /// Sticky Moneyness: IV indexed by K/S (moneyness)
@@ -66,9 +69,9 @@ impl IVInterpolator for StickyStrikeInterpolator {
 /// When spot moves, the smile "floats" with it.
 /// Same moneyness → same IV, regardless of absolute strike.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct StickyMoneynessInterpolator;
+pub struct StickyMoneynessPricing;
 
-impl IVInterpolator for StickyMoneynessInterpolator {
+impl PricingIVProvider for StickyMoneynessPricing {
     fn get_iv(
         &self,
         surface: &IVSurface,
@@ -232,7 +235,7 @@ fn interpolate_expiration_by_moneyness(
 }
 
 // =============================================================================
-// Sticky Delta Interpolator
+// Sticky Delta Pricing
 // =============================================================================
 
 /// Sticky Delta: IV indexed by Black-Scholes delta Δ
@@ -242,13 +245,13 @@ fn interpolate_expiration_by_moneyness(
 ///
 /// Reference: Derman (1999) "Regimes of Volatility"
 #[derive(Debug, Clone)]
-pub struct StickyDeltaInterpolator {
+pub struct StickyDeltaPricing {
     pub risk_free_rate: f64,
     pub max_iterations: usize,
     pub tolerance: f64,
 }
 
-impl Default for StickyDeltaInterpolator {
+impl Default for StickyDeltaPricing {
     fn default() -> Self {
         Self {
             risk_free_rate: 0.05,
@@ -258,7 +261,7 @@ impl Default for StickyDeltaInterpolator {
     }
 }
 
-impl StickyDeltaInterpolator {
+impl StickyDeltaPricing {
     pub fn new(risk_free_rate: f64) -> Self {
         Self {
             risk_free_rate,
@@ -297,7 +300,7 @@ impl StickyDeltaInterpolator {
     }
 }
 
-impl IVInterpolator for StickyDeltaInterpolator {
+impl PricingIVProvider for StickyDeltaPricing {
     fn get_iv(
         &self,
         surface: &IVSurface,
@@ -450,53 +453,56 @@ impl DeltaSmile {
 }
 
 // =============================================================================
-// IVModel Enum (for configuration)
+// PricingModel Enum (for configuration)
 // =============================================================================
 
-/// IV interpolation model selection
+/// Pricing IV interpolation model selection
+///
+/// Determines how to interpolate implied volatility when pricing options
+/// at strikes/expirations without direct market quotes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum IVModel {
+pub enum PricingModel {
     #[default]
     StickyStrike,
     StickyMoneyness,
     StickyDelta,
 }
 
-impl IVModel {
+impl PricingModel {
     pub fn from_string(s: &str) -> Self {
         match s.to_lowercase().replace('-', "_").as_str() {
-            "sticky_moneyness" | "moneyness" => IVModel::StickyMoneyness,
-            "sticky_delta" | "delta" => IVModel::StickyDelta,
-            _ => IVModel::StickyStrike,
+            "sticky_moneyness" | "moneyness" => PricingModel::StickyMoneyness,
+            "sticky_delta" | "delta" => PricingModel::StickyDelta,
+            _ => PricingModel::StickyStrike,
         }
     }
 
-    /// Create the corresponding interpolator
-    pub fn to_interpolator(&self) -> Box<dyn IVInterpolator> {
+    /// Create the corresponding pricing provider
+    pub fn to_provider(&self) -> Box<dyn PricingIVProvider> {
         match self {
-            IVModel::StickyStrike => Box::new(StickyStrikeInterpolator),
-            IVModel::StickyMoneyness => Box::new(StickyMoneynessInterpolator),
-            IVModel::StickyDelta => Box::new(StickyDeltaInterpolator::default()),
+            PricingModel::StickyStrike => Box::new(StickyStrikePricing),
+            PricingModel::StickyMoneyness => Box::new(StickyMoneynessPricing),
+            PricingModel::StickyDelta => Box::new(StickyDeltaPricing::default()),
         }
     }
 
-    /// Create interpolator with custom risk-free rate (for sticky delta)
-    pub fn to_interpolator_with_rate(&self, risk_free_rate: f64) -> Box<dyn IVInterpolator> {
+    /// Create pricing provider with custom risk-free rate (for sticky delta)
+    pub fn to_provider_with_rate(&self, risk_free_rate: f64) -> Box<dyn PricingIVProvider> {
         match self {
-            IVModel::StickyStrike => Box::new(StickyStrikeInterpolator),
-            IVModel::StickyMoneyness => Box::new(StickyMoneynessInterpolator),
-            IVModel::StickyDelta => Box::new(StickyDeltaInterpolator::new(risk_free_rate)),
+            PricingModel::StickyStrike => Box::new(StickyStrikePricing),
+            PricingModel::StickyMoneyness => Box::new(StickyMoneynessPricing),
+            PricingModel::StickyDelta => Box::new(StickyDeltaPricing::new(risk_free_rate)),
         }
     }
 }
 
-impl std::fmt::Display for IVModel {
+impl std::fmt::Display for PricingModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            IVModel::StickyStrike => write!(f, "sticky_strike"),
-            IVModel::StickyMoneyness => write!(f, "sticky_moneyness"),
-            IVModel::StickyDelta => write!(f, "sticky_delta"),
+            PricingModel::StickyStrike => write!(f, "sticky_strike"),
+            PricingModel::StickyMoneyness => write!(f, "sticky_moneyness"),
+            PricingModel::StickyDelta => write!(f, "sticky_delta"),
         }
     }
 }
@@ -585,11 +591,11 @@ mod tests {
     #[test]
     fn test_sticky_strike_basic() {
         let surface = create_test_surface(100.0);
-        let interpolator = StickyStrikeInterpolator;
+        let provider = StickyStrikePricing;
         let exp = surface.as_of_time().date_naive() + chrono::Duration::days(30);
 
         // ATM should give 0.30
-        let iv = interpolator.get_iv(&surface, dec(100), exp, true);
+        let iv = provider.get_iv(&surface, dec(100), exp, true);
         assert!(iv.is_some());
         assert!((iv.unwrap() - 0.30).abs() < 0.01);
     }
@@ -597,11 +603,11 @@ mod tests {
     #[test]
     fn test_sticky_moneyness_basic() {
         let surface = create_test_surface(100.0);
-        let interpolator = StickyMoneynessInterpolator;
+        let provider = StickyMoneynessPricing;
         let exp = surface.as_of_time().date_naive() + chrono::Duration::days(30);
 
         // Moneyness 1.0 (ATM) should give ~0.30
-        let iv = interpolator.get_iv(&surface, dec(100), exp, true);
+        let iv = provider.get_iv(&surface, dec(100), exp, true);
         assert!(iv.is_some());
         assert!((iv.unwrap() - 0.30).abs() < 0.01);
     }
@@ -613,15 +619,15 @@ mod tests {
         // Surface 2: spot = 110 (spot moved up)
         let surface2 = create_test_surface(110.0);
 
-        let interpolator = StickyMoneynessInterpolator;
+        let provider = StickyMoneynessPricing;
         let exp1 = surface1.as_of_time().date_naive() + chrono::Duration::days(30);
         let exp2 = surface2.as_of_time().date_naive() + chrono::Duration::days(30);
 
         // Moneyness 0.95 in both cases
         // Surface1: K=95, S=100, K/S=0.95
         // Surface2: K=104.5, S=110, K/S=0.95
-        let iv1 = interpolator.get_iv(&surface1, dec(95), exp1, false);
-        let iv2 = interpolator.get_iv(&surface2, Decimal::try_from(104.5).unwrap(), exp2, false);
+        let iv1 = provider.get_iv(&surface1, dec(95), exp1, false);
+        let iv2 = provider.get_iv(&surface2, Decimal::try_from(104.5).unwrap(), exp2, false);
 
         assert!(iv1.is_some());
         assert!(iv2.is_some());
@@ -632,11 +638,11 @@ mod tests {
     #[test]
     fn test_sticky_delta_basic() {
         let surface = create_test_surface(100.0);
-        let interpolator = StickyDeltaInterpolator::default();
+        let provider = StickyDeltaPricing::default();
         let exp = surface.as_of_time().date_naive() + chrono::Duration::days(30);
 
         // ATM call should give ~0.30
-        let iv = interpolator.get_iv(&surface, dec(100), exp, true);
+        let iv = provider.get_iv(&surface, dec(100), exp, true);
         assert!(iv.is_some());
         assert!((iv.unwrap() - 0.30).abs() < 0.05);
     }
@@ -644,7 +650,7 @@ mod tests {
     #[test]
     fn test_sticky_delta_convergence() {
         let surface = create_test_surface(100.0);
-        let interpolator = StickyDeltaInterpolator {
+        let provider = StickyDeltaPricing {
             risk_free_rate: 0.05,
             max_iterations: 100,
             tolerance: 1e-8,
@@ -652,35 +658,35 @@ mod tests {
         let exp = surface.as_of_time().date_naive() + chrono::Duration::days(30);
 
         // Test OTM put
-        let iv = interpolator.get_iv(&surface, dec(95), exp, false);
+        let iv = provider.get_iv(&surface, dec(95), exp, false);
         assert!(iv.is_some());
         let iv_val = iv.unwrap();
         assert!(iv_val > 0.0 && iv_val < 1.0);
     }
 
     #[test]
-    fn test_iv_model_from_string() {
-        assert_eq!(IVModel::from_string("sticky_strike"), IVModel::StickyStrike);
-        assert_eq!(IVModel::from_string("sticky-strike"), IVModel::StickyStrike);
-        assert_eq!(IVModel::from_string("sticky_moneyness"), IVModel::StickyMoneyness);
-        assert_eq!(IVModel::from_string("moneyness"), IVModel::StickyMoneyness);
-        assert_eq!(IVModel::from_string("sticky_delta"), IVModel::StickyDelta);
-        assert_eq!(IVModel::from_string("delta"), IVModel::StickyDelta);
-        assert_eq!(IVModel::from_string("unknown"), IVModel::StickyStrike);
+    fn test_pricing_model_from_string() {
+        assert_eq!(PricingModel::from_string("sticky_strike"), PricingModel::StickyStrike);
+        assert_eq!(PricingModel::from_string("sticky-strike"), PricingModel::StickyStrike);
+        assert_eq!(PricingModel::from_string("sticky_moneyness"), PricingModel::StickyMoneyness);
+        assert_eq!(PricingModel::from_string("moneyness"), PricingModel::StickyMoneyness);
+        assert_eq!(PricingModel::from_string("sticky_delta"), PricingModel::StickyDelta);
+        assert_eq!(PricingModel::from_string("delta"), PricingModel::StickyDelta);
+        assert_eq!(PricingModel::from_string("unknown"), PricingModel::StickyStrike);
     }
 
     #[test]
-    fn test_iv_model_to_interpolator() {
-        let model = IVModel::StickyStrike;
-        let interp = model.to_interpolator();
-        assert_eq!(interp.name(), "sticky_strike");
+    fn test_pricing_model_to_provider() {
+        let model = PricingModel::StickyStrike;
+        let provider = model.to_provider();
+        assert_eq!(provider.name(), "sticky_strike");
 
-        let model = IVModel::StickyMoneyness;
-        let interp = model.to_interpolator();
-        assert_eq!(interp.name(), "sticky_moneyness");
+        let model = PricingModel::StickyMoneyness;
+        let provider = model.to_provider();
+        assert_eq!(provider.name(), "sticky_moneyness");
 
-        let model = IVModel::StickyDelta;
-        let interp = model.to_interpolator();
-        assert_eq!(interp.name(), "sticky_delta");
+        let model = PricingModel::StickyDelta;
+        let provider = model.to_provider();
+        assert_eq!(provider.name(), "sticky_delta");
     }
 }

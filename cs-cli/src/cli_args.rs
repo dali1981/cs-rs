@@ -82,6 +82,8 @@ pub struct CliStrategy {
     pub delta_range: Option<(f64, f64)>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delta_scan_steps: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wing_width: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

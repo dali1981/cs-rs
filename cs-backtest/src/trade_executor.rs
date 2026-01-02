@@ -268,6 +268,10 @@ where
             iv_long_entry: entry_pricing.long_leg.iv,
             iv_short_exit: exit_pricing.short_leg.iv,
             iv_long_exit: exit_pricing.long_leg.iv,
+            iv_ratio_entry: match (entry_pricing.short_leg.iv, entry_pricing.long_leg.iv) {
+                (Some(short_iv), Some(long_iv)) if long_iv > 0.0 => Some(short_iv / long_iv),
+                _ => None,
+            },
             delta_pnl,
             gamma_pnl,
             theta_pnl,
@@ -331,6 +335,7 @@ where
             iv_long_entry: None,
             iv_short_exit: None,
             iv_long_exit: None,
+            iv_ratio_entry: None,
             delta_pnl: None,
             gamma_pnl: None,
             theta_pnl: None,
