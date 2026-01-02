@@ -319,10 +319,10 @@ impl PricingIVProvider for StickyDeltaPricing {
         // Build delta smile from surface
         let delta_smile = self.build_delta_smile(surface);
 
-        // Get ATM vol as initial guess
+        // Get ATM vol as initial guess - required for iteration
+        // Return None if no ATM vol available (insufficient surface data)
         let mut sigma = delta_smile
-            .get_atm_iv(expiration, is_call)
-            .unwrap_or(0.30);
+            .get_atm_iv(expiration, is_call)?;
 
         // Iterative solve: find σ such that σ = smile(Δ(K, σ))
         for _ in 0..self.max_iterations {

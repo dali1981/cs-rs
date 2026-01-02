@@ -160,10 +160,10 @@ impl SpreadPricer {
             .map_err(|e| PricingError::Polars(e.to_string()))?;
 
         if filtered.is_empty() {
-            // No market data, use Black-Scholes with interpolated or estimated IV
+            // No market data, use Black-Scholes with interpolated IV
             let ttm = self.calculate_ttm(pricing_time, expiration);
 
-            // Use configured pricing model for interpolation, fall back to 30%
+            // Use configured pricing model for interpolation - fail if not available
             let estimated_iv = iv_surface
                 .and_then(|surface| {
                     pricing_provider.get_iv(
@@ -173,7 +173,12 @@ impl SpreadPricer {
                         option_type == OptionType::Call,
                     )
                 })
-                .unwrap_or(0.30);
+                .ok_or_else(|| PricingError::InvalidIV(format!(
+                    "Cannot determine IV for {} strike {}, expiration {} - no market data and interpolation failed",
+                    if option_type == OptionType::Call { "call" } else { "put" },
+                    strike_f64,
+                    expiration
+                )))?;
 
             let price = bs_price(
                 spot_price,
