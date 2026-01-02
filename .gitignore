@@ -46,3 +46,5 @@ mlruns/
 *.csv
 !tests/fixtures/*.csv
 !tests/fixtures/*.parquet
+out*.json
+.cargo/

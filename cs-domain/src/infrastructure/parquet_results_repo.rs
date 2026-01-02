@@ -109,6 +109,7 @@ mod tests {
             iv_long_entry: Some(0.25),
             iv_short_exit: Some(0.28),
             iv_long_exit: Some(0.26),
+            iv_ratio_entry: Some(1.2),
             delta_pnl: Some(Decimal::new(5, 1)),
             gamma_pnl: Some(Decimal::new(2, 1)),
             theta_pnl: Some(Decimal::new(-1, 1)),

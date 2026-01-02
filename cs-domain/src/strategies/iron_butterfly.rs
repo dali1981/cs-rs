@@ -4,7 +4,6 @@ use super::{StrategyError, OptionChainData};
 use chrono::NaiveDate;
 use finq_core::OptionType;
 use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 
 /// Iron butterfly strategy configuration
 #[derive(Debug, Clone)]
@@ -99,9 +98,10 @@ impl IronButterflyStrategy {
     ) -> Result<Strike, StrategyError> {
         strikes
             .iter()
-            .min_by_key(|s| {
-                let diff = s.value() - spot.value;
-                (diff.abs() * Decimal::from(1000)).to_i64().unwrap_or(i64::MAX)
+            .min_by(|a, b| {
+                let a_diff = (a.value() - spot.value).abs();
+                let b_diff = (b.value() - spot.value).abs();
+                a_diff.partial_cmp(&b_diff).unwrap_or(std::cmp::Ordering::Equal)
             })
             .copied()
             .ok_or(StrategyError::NoStrikes)
@@ -117,8 +117,10 @@ impl IronButterflyStrategy {
         available
             .iter()
             .filter(|s| if round_up { **s >= target } else { **s <= target })
-            .min_by_key(|s| {
-                (s.value() - target.value()).abs() * Decimal::from(1000)
+            .min_by(|a, b| {
+                let a_diff = (a.value() - target.value()).abs();
+                let b_diff = (b.value() - target.value()).abs();
+                a_diff.partial_cmp(&b_diff).unwrap_or(std::cmp::Ordering::Equal)
             })
             .copied()
             .ok_or(StrategyError::NoStrikes)
