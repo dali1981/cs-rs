@@ -6,7 +6,8 @@ pub mod black_scholes;
 pub mod greeks;
 pub mod iv_model;
 pub mod iv_surface;
-pub mod historical_iv;
+pub mod realized_volatility;
+pub mod iv_statistics;
 pub mod math_utils;
 pub mod vol_slice;
 pub mod delta_surface;
@@ -24,7 +25,8 @@ pub use iv_model::{
     StickyStrikePricing, StickyMoneynessPricing, StickyDeltaPricing,
 };
 pub use iv_surface::{IVSurface, IVPoint};
-pub use historical_iv::{iv_percentile, iv_rank, realized_volatility};
+pub use realized_volatility::realized_volatility;
+pub use iv_statistics::{iv_percentile, iv_rank};
 pub use math_utils::{inv_norm_cdf, linspace};
 pub use vol_slice::{VolSlice, InterpolationMode, delta_to_strike_with_iv};
 pub use delta_surface::DeltaVolSurface;

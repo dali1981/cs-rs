@@ -16,7 +16,7 @@ use cs_analytics::{
 use cs_domain::{
     datetime::TradingTimestamp,
     repositories::{EquityDataRepository, OptionsDataRepository},
-    value_objects::{AtmIvConfig, AtmIvObservation, IvInterpolationMethod},
+    value_objects::{AtmIvConfig, AtmIvObservation, HvConfig, IvInterpolationMethod},
     MarketTime, TradingDate,
 };
 
@@ -94,6 +94,7 @@ where
         start_date: NaiveDate,
         end_date: NaiveDate,
         config: &AtmIvConfig,
+        hv_config: Option<&HvConfig>,
     ) -> Result<MinuteAlignedIvResult, MinuteAlignedIvError> {
         let mut observations = Vec::new();
         let mut successful_days = 0;
@@ -125,6 +126,11 @@ where
                     std::io::ErrorKind::InvalidData,
                     "Date overflow",
                 )))?;
+        }
+
+        // Enrich with historical volatility if requested
+        if let Some(hv_cfg) = hv_config {
+            self.enrich_with_hv(symbol, &mut observations, hv_cfg).await?;
         }
 
         Ok(MinuteAlignedIvResult {
@@ -642,6 +648,13 @@ where
         let cm_spread_30_60: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_spread_30_60).collect();
         let cm_spread_30_90: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_spread_30_90).collect();
 
+        // HV columns
+        let hv_10d: Vec<Option<f64>> = result.observations.iter().map(|o| o.hv_10d).collect();
+        let hv_20d: Vec<Option<f64>> = result.observations.iter().map(|o| o.hv_20d).collect();
+        let hv_30d: Vec<Option<f64>> = result.observations.iter().map(|o| o.hv_30d).collect();
+        let hv_60d: Vec<Option<f64>> = result.observations.iter().map(|o| o.hv_60d).collect();
+        let iv_hv_spread_30d: Vec<Option<f64>> = result.observations.iter().map(|o| o.iv_hv_spread_30d).collect();
+
         let df = DataFrame::new(vec![
             Series::new("symbol", symbols),
             Series::new("date", dates),
@@ -666,11 +679,126 @@ where
             Series::new("cm_spread_7_30", cm_spread_7_30),
             Series::new("cm_spread_30_60", cm_spread_30_60),
             Series::new("cm_spread_30_90", cm_spread_30_90),
+            // Historical Volatility columns
+            Series::new("hv_10d", hv_10d),
+            Series::new("hv_20d", hv_20d),
+            Series::new("hv_30d", hv_30d),
+            Series::new("hv_60d", hv_60d),
+            Series::new("iv_hv_spread_30d", iv_hv_spread_30d),
         ])?;
 
         // Write to parquet
         let mut file = std::fs::File::create(output_path)?;
         ParquetWriter::new(&mut file).finish(&mut df.clone())?;
+
+        Ok(())
+    }
+
+    /// Collect daily close prices for the date range covered by observations
+    async fn collect_daily_closes(
+        &self,
+        symbol: &str,
+        observations: &[AtmIvObservation],
+        lookback_days: usize,
+    ) -> Result<HashMap<NaiveDate, f64>, MinuteAlignedIvError> {
+        if observations.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        // Determine date range with lookback buffer
+        let first_date = observations.first().unwrap().date;
+        let last_date = observations.last().unwrap().date;
+
+        // Add lookback buffer to start date
+        let start_with_buffer = first_date - chrono::Duration::days(lookback_days as i64);
+
+        let mut closes = HashMap::new();
+        let mut current_date = start_with_buffer;
+
+        while current_date <= last_date {
+            // Get bars for this date
+            if let Ok(df) = self.equity_repo.get_bars(symbol, current_date).await {
+                if !df.is_empty() {
+                    // Get the last close price of the day
+                    if let Ok(close_col) = df.column("close") {
+                        if let Ok(close_series) = close_col.f64() {
+                            if let Some(last_close) = close_series.last() {
+                                closes.insert(current_date, last_close);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Move to next day
+            current_date = current_date
+                .succ_opt()
+                .ok_or_else(|| MinuteAlignedIvError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Date overflow",
+                )))?;
+        }
+
+        Ok(closes)
+    }
+
+    /// Enrich observations with historical volatility calculations
+    async fn enrich_with_hv(
+        &self,
+        symbol: &str,
+        observations: &mut [AtmIvObservation],
+        hv_config: &HvConfig,
+    ) -> Result<(), MinuteAlignedIvError> {
+        // Determine maximum lookback needed
+        let max_window = hv_config.windows.iter().max().copied().unwrap_or(60);
+
+        // Collect all daily close prices with lookback buffer
+        let daily_closes = self.collect_daily_closes(symbol, observations, max_window + 10).await?;
+
+        // Build sorted price history
+        let mut dates: Vec<NaiveDate> = daily_closes.keys().copied().collect();
+        dates.sort();
+
+        // For each observation, compute HV
+        for obs in observations.iter_mut() {
+            // Find all dates up to and including this observation's date
+            let prices: Vec<f64> = dates.iter()
+                .filter(|&&d| d <= obs.date)
+                .filter_map(|d| daily_closes.get(d).copied())
+                .collect();
+
+            // Skip if not enough data
+            if prices.len() < hv_config.min_data_points {
+                continue;
+            }
+
+            // Compute HV for each window
+            for &window in &hv_config.windows {
+                if prices.len() < window + 1 {
+                    continue;
+                }
+
+                let hv = cs_analytics::realized_volatility(
+                    &prices,
+                    window,
+                    hv_config.annualization_factor,
+                );
+
+                // Assign to appropriate field
+                match window {
+                    10 => obs.hv_10d = hv,
+                    20 => obs.hv_20d = hv,
+                    30 => obs.hv_30d = hv,
+                    60 => obs.hv_60d = hv,
+                    _ => {} // Other windows not stored
+                }
+            }
+
+            // Calculate IV-HV spread if we have both values
+            if let (Some(cm_iv_30d), Some(hv_30d)) = (obs.cm_iv_30d, obs.hv_30d) {
+                obs.iv_hv_spread_30d = Some(cm_iv_30d - hv_30d);
+            }
+        }
 
         Ok(())
     }

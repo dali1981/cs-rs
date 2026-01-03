@@ -185,6 +185,12 @@ enum Commands {
         /// Minimum DTE for expiration inclusion (default: 3)
         #[arg(long, default_value = "3")]
         min_dte: i64,
+        /// Include historical volatility computation
+        #[arg(long)]
+        with_hv: bool,
+        /// HV windows in days (default: 10,20,30,60)
+        #[arg(long, value_delimiter = ',')]
+        hv_windows: Option<Vec<usize>>,
     },
 }
 
@@ -300,6 +306,8 @@ async fn main() -> Result<()> {
             minute_aligned,
             constant_maturity,
             min_dte,
+            with_hv,
+            hv_windows,
         } => {
             run_atm_iv_command(
                 cli.data_dir.as_ref(),
@@ -313,6 +321,8 @@ async fn main() -> Result<()> {
                 minute_aligned,
                 constant_maturity,
                 min_dte,
+                with_hv,
+                hv_windows,
             )
             .await?;
         }
@@ -826,8 +836,10 @@ async fn run_atm_iv_command(
     minute_aligned: bool,
     constant_maturity: bool,
     min_dte: i64,
+    with_hv: bool,
+    hv_windows: Option<Vec<usize>>,
 ) -> Result<()> {
-    use cs_domain::value_objects::IvInterpolationMethod;
+    use cs_domain::value_objects::{IvInterpolationMethod, HvConfig};
 
     // Parse dates
     let start_date = NaiveDate::parse_from_str(start, "%Y-%m-%d")
@@ -849,6 +861,17 @@ async fn run_atm_iv_command(
         IvInterpolationMethod::Rolling
     };
     config.min_dte = min_dte;
+
+    // Build HV config if requested
+    let hv_config = if with_hv {
+        let mut hv_cfg = HvConfig::default();
+        if let Some(windows) = hv_windows {
+            hv_cfg.windows = windows;
+        }
+        Some(hv_cfg)
+    } else {
+        None
+    };
 
     // Determine data directory
     let data_dir = data_dir
@@ -885,7 +908,7 @@ async fn run_atm_iv_command(
         for symbol in &symbols {
             println!("{}", style(format!("Processing {}...", symbol)).bold());
 
-            let result = use_case.execute(symbol, start_date, end_date, &config).await?;
+            let result = use_case.execute(symbol, start_date, end_date, &config, hv_config.as_ref()).await?;
 
             println!(
                 "  {} trading days processed, {} successful observations",

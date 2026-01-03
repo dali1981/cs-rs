@@ -193,6 +193,25 @@ pub struct AtmIvObservation {
     /// Constant-maturity term spread: CM_IV_30d - CM_IV_90d
     #[serde(default)]
     pub cm_spread_30_90: Option<f64>,
+
+    // === Historical Volatility fields ===
+    /// 10-day realized volatility
+    #[serde(default)]
+    pub hv_10d: Option<f64>,
+    /// 20-day realized volatility
+    #[serde(default)]
+    pub hv_20d: Option<f64>,
+    /// 30-day realized volatility (default window)
+    #[serde(default)]
+    pub hv_30d: Option<f64>,
+    /// 60-day realized volatility
+    #[serde(default)]
+    pub hv_60d: Option<f64>,
+
+    // === IV vs HV spreads ===
+    /// IV-HV spread at 30d (volatility risk premium)
+    #[serde(default)]
+    pub iv_hv_spread_30d: Option<f64>,
 }
 
 impl AtmIvObservation {
@@ -219,6 +238,11 @@ impl AtmIvObservation {
             cm_spread_7_30: None,
             cm_spread_30_60: None,
             cm_spread_30_90: None,
+            hv_10d: None,
+            hv_20d: None,
+            hv_30d: None,
+            hv_60d: None,
+            iv_hv_spread_30d: None,
         }
     }
 
@@ -326,6 +350,27 @@ impl Default for AtmIvConfig {
             backwardation_threshold: 0.05,
             interpolation_method: IvInterpolationMethod::default(),
             min_dte: 3,
+        }
+    }
+}
+
+/// Configuration for Historical Volatility computation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HvConfig {
+    /// Rolling window sizes in days (default: [10, 20, 30, 60])
+    pub windows: Vec<usize>,
+    /// Annualization factor (default: 252.0 trading days per year)
+    pub annualization_factor: f64,
+    /// Minimum data points required before computing HV (default: 20)
+    pub min_data_points: usize,
+}
+
+impl Default for HvConfig {
+    fn default() -> Self {
+        Self {
+            windows: vec![10, 20, 30, 60],
+            annualization_factor: 252.0,
+            min_data_points: 20,
         }
     }
 }
