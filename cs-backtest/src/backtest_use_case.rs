@@ -9,7 +9,7 @@ use crate::config::{BacktestConfig, SpreadType, SelectionType};
 use crate::trade_executor::TradeExecutor;
 use crate::iron_butterfly_executor::IronButterflyExecutor;
 use crate::straddle_executor::StraddleExecutor;
-use crate::iv_surface_builder::build_iv_surface;
+use crate::iv_surface_builder::build_iv_surface_minute_aligned;
 
 /// Unified trade result (either calendar spread, iron butterfly, or straddle)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -674,16 +674,16 @@ where
                 phase: "spot_price".into(),
             })?;
 
-        // Get option chain data
+        // Get option chain data with timestamps for minute-aligned IV computation
         let chain_df = self.options_repo
-            .get_option_bars(&event.symbol, entry_date)
+            .get_option_bars_at_time(&event.symbol, entry_time)
             .await
             .map_err(|_| TradeGenerationError {
                 symbol: event.symbol.clone(),
                 earnings_date: event.earnings_date,
                 earnings_time: event.earnings_time,
                 reason: "NO_OPTIONS_DATA".into(),
-                details: Some(format!("No option data on {}", entry_date)),
+                details: Some(format!("No option data at {}", entry_time)),
                 phase: "option_data".into(),
             })?;
 
@@ -757,13 +757,12 @@ where
             });
         }
 
-        // Build IV surface for pricing interpolation
-        let iv_surface = build_iv_surface(
+        // Build IV surface with per-option spot prices (minute-aligned)
+        let iv_surface = build_iv_surface_minute_aligned(
             &chain_df,
-            spot.to_f64(),
-            entry_time,
+            self.equity_repo.as_ref(),
             &event.symbol,
-        );
+        ).await;
 
         let chain_data = OptionChainData {
             expirations: valid_expirations,
@@ -804,6 +803,35 @@ where
                 details: None,
                 phase: "execution".into(),
             });
+        }
+
+        // Filter by entry price if configured
+        let entry_price: f64 = result.entry_debit.to_string().parse().unwrap_or(0.0);
+
+        if let Some(min_price) = self.config.min_entry_price {
+            if entry_price < min_price {
+                return Err(TradeGenerationError {
+                    symbol: result.symbol,
+                    earnings_date: result.earnings_date,
+                    earnings_time: result.earnings_time,
+                    reason: "ENTRY_PRICE_TOO_LOW".into(),
+                    details: Some(format!("Entry price ${:.2} < min ${:.2}", entry_price, min_price)),
+                    phase: "entry_price_filter".into(),
+                });
+            }
+        }
+
+        if let Some(max_price) = self.config.max_entry_price {
+            if entry_price > max_price {
+                return Err(TradeGenerationError {
+                    symbol: result.symbol,
+                    earnings_date: result.earnings_date,
+                    earnings_time: result.earnings_time,
+                    reason: "ENTRY_PRICE_TOO_HIGH".into(),
+                    details: Some(format!("Entry price ${:.2} > max ${:.2}", entry_price, max_price)),
+                    phase: "entry_price_filter".into(),
+                });
+            }
         }
 
         Ok(result)
@@ -866,16 +894,16 @@ where
                 phase: "spot_price".into(),
             })?;
 
-        // Get option chain data
+        // Get option chain data with timestamps for minute-aligned IV computation
         let chain_df = self.options_repo
-            .get_option_bars(&event.symbol, entry_date)
+            .get_option_bars_at_time(&event.symbol, entry_time)
             .await
             .map_err(|_| TradeGenerationError {
                 symbol: event.symbol.clone(),
                 earnings_date: event.earnings_date,
                 earnings_time: event.earnings_time,
                 reason: "NO_OPTIONS_DATA".into(),
-                details: Some(format!("No option data on {}", entry_date)),
+                details: Some(format!("No option data at {}", entry_time)),
                 phase: "option_data".into(),
             })?;
 
@@ -891,13 +919,12 @@ where
             });
         }
 
-        // Build IV surface for all strategies (needed for pricing interpolation)
-        let iv_surface = build_iv_surface(
+        // Build IV surface with per-option spot prices (minute-aligned)
+        let iv_surface = build_iv_surface_minute_aligned(
             &chain_df,
-            spot.to_f64(),
-            entry_time,
+            self.equity_repo.as_ref(),
             &event.symbol,
-        );
+        ).await;
 
         // Get available expirations and strikes
         let expirations = self.options_repo

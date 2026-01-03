@@ -92,6 +92,20 @@ impl SpreadPricer {
             spread.symbol(),
         );
 
+        self.price_spread_with_surface(spread, chain_df, spot_price, pricing_time, iv_surface.as_ref())
+    }
+
+    /// Price a calendar spread using a pre-built IV surface
+    ///
+    /// Use this when you have a minute-aligned IV surface built with per-option spot prices.
+    pub fn price_spread_with_surface(
+        &self,
+        spread: &CalendarSpread,
+        chain_df: &DataFrame,
+        spot_price: f64,
+        pricing_time: DateTime<Utc>,
+        iv_surface: Option<&IVSurface>,
+    ) -> Result<SpreadPricing, PricingError> {
         // Create pricing provider based on configured pricing model
         let pricing_provider = self.pricing_model.to_provider_with_rate(self.bs_config.risk_free_rate);
 
@@ -102,7 +116,7 @@ impl SpreadPricer {
             chain_df,
             spot_price,
             pricing_time,
-            iv_surface.as_ref(),
+            iv_surface,
             pricing_provider.as_ref(),
         )?;
 
@@ -113,7 +127,7 @@ impl SpreadPricer {
             chain_df,
             spot_price,
             pricing_time,
-            iv_surface.as_ref(),
+            iv_surface,
             pricing_provider.as_ref(),
         )?;
 

@@ -8,6 +8,7 @@ use cs_domain::{
     IronButterfly, IronButterflyResult, EarningsEvent, FailureReason,
     EquityDataRepository, OptionsDataRepository, MarketTime,
 };
+use crate::iv_surface_builder::build_iv_surface_minute_aligned;
 use crate::iron_butterfly_pricer::{IronButterflyPricer, IronButterflyPricing};
 use crate::spread_pricer::{SpreadPricer, LegPricing};
 use crate::trade_executor::ExecutionError;
@@ -86,21 +87,29 @@ where
             .get_spot_price(butterfly.symbol(), exit_time)
             .await?;
 
-        // Get option chain data
+        // Get option chain data with timestamps for minute-aligned IV computation
         let entry_chain = self.options_repo
-            .get_option_bars(butterfly.symbol(), entry_time.date_naive())
+            .get_option_bars_at_time(butterfly.symbol(), entry_time)
             .await?;
 
         let exit_chain = self.options_repo
-            .get_option_bars(butterfly.symbol(), exit_time.date_naive())
+            .get_option_bars_at_time(butterfly.symbol(), exit_time)
             .await?;
 
-        // Price at entry
-        let entry_pricing = self.pricer.price(
+        // Build IV surface with per-option spot prices (minute-aligned)
+        let entry_surface = build_iv_surface_minute_aligned(
+            &entry_chain,
+            self.equity_repo.as_ref(),
+            butterfly.symbol(),
+        ).await;
+
+        // Price at entry using pre-built minute-aligned surface
+        let entry_pricing = self.pricer.price_with_surface(
             butterfly,
             &entry_chain,
             entry_spot.to_f64(),
             entry_time,
+            entry_surface.as_ref(),
         )?;
 
         // Validate minimum credit
@@ -126,12 +135,20 @@ where
             }
         }
 
-        // Price at exit
-        let exit_pricing = self.pricer.price(
+        // Build IV surface for exit with per-option spot prices
+        let exit_surface = build_iv_surface_minute_aligned(
+            &exit_chain,
+            self.equity_repo.as_ref(),
+            butterfly.symbol(),
+        ).await;
+
+        // Price at exit using pre-built minute-aligned surface
+        let exit_pricing = self.pricer.price_with_surface(
             butterfly,
             &exit_chain,
             exit_spot.to_f64(),
             exit_time,
+            exit_surface.as_ref(),
         )?;
 
         // P&L = entry_credit - exit_cost (profit when options expire worthless)

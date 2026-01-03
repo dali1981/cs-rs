@@ -9,6 +9,7 @@ use rust_decimal::Decimal;
 
 use cs_analytics::{bs_implied_volatility, BSConfig, IVPoint, IVSurface};
 use cs_domain::{MarketTime, TradingDate, TradingTimestamp};
+use cs_domain::repositories::EquityDataRepository;
 
 /// Build an IV surface from option chain DataFrame
 ///
@@ -107,6 +108,136 @@ pub fn build_iv_surface(
         symbol.to_string(),
         pricing_time,
         spot_decimal,
+    ))
+}
+
+/// Build an IV surface with per-option spot price lookup (minute-aligned)
+///
+/// For each option trade, looks up the spot price at that option's specific timestamp,
+/// ensuring correct IV computation. This is the preferred method for accurate IV surfaces.
+///
+/// The DataFrame must include a `timestamp` column (nanoseconds since epoch) in addition
+/// to: strike, expiration, close, option_type
+pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository>(
+    chain_df: &DataFrame,
+    equity_repo: &R,
+    symbol: &str,
+) -> Option<IVSurface> {
+    let bs_config = BSConfig::default();
+    let market_close = MarketTime::new(16, 0);
+
+    // Extract columns including timestamp
+    let strikes = chain_df.column("strike").ok()?.f64().ok()?;
+    let expirations = chain_df.column("expiration").ok()?.date().ok()?;
+    let closes = chain_df.column("close").ok()?.f64().ok()?;
+    let option_types = chain_df.column("option_type").ok()?.str().ok()?;
+    let timestamps = chain_df.column("timestamp").ok()?.i64().ok()?;
+
+    let mut points = Vec::new();
+    let mut latest_timestamp: Option<DateTime<Utc>> = None;
+    let mut latest_spot: Option<Decimal> = None;
+
+    for i in 0..chain_df.height() {
+        // Extract row data, skip if any value is missing
+        let (strike_f64, exp_days, close, opt_type, ts_nanos) = match (
+            strikes.get(i),
+            expirations.get(i),
+            closes.get(i),
+            option_types.get(i),
+            timestamps.get(i),
+        ) {
+            (Some(s), Some(e), Some(c), Some(t), Some(ts)) => (s, e, c, t, ts),
+            _ => continue,
+        };
+
+        // Skip invalid data
+        if close <= 0.0 || strike_f64 <= 0.0 {
+            continue;
+        }
+
+        // Convert timestamp from nanoseconds to DateTime
+        let opt_timestamp = TradingTimestamp::from_nanos(ts_nanos).to_datetime_utc();
+
+        // Look up spot price at this option's trade timestamp
+        let spot_price = match equity_repo.get_spot_price(symbol, opt_timestamp).await {
+            Ok(sp) => sp,
+            Err(_) => continue, // Skip if no spot price available
+        };
+        let spot_f64 = spot_price.to_f64();
+        let spot_decimal = match Decimal::try_from(spot_f64) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        // Track latest timestamp and its spot for surface-level metadata
+        if latest_timestamp.is_none() || opt_timestamp > latest_timestamp.unwrap() {
+            latest_timestamp = Some(opt_timestamp);
+            latest_spot = Some(spot_decimal);
+        }
+
+        // Convert expiration from Polars date (days since epoch) to NaiveDate
+        let expiration = TradingDate::from_polars_date(exp_days).to_naive_date();
+        let is_call = opt_type == "call";
+
+        // Calculate time to maturity from this option's timestamp
+        let ttm = calculate_ttm(opt_timestamp, expiration, &market_close);
+        if ttm <= 0.0 {
+            continue; // Skip expired options
+        }
+
+        // Calculate IV from market price using per-option spot
+        let iv = match bs_implied_volatility(
+            close,
+            spot_f64,
+            strike_f64,
+            ttm,
+            is_call,
+            &bs_config,
+        ) {
+            Some(v) => v,
+            None => continue,
+        };
+
+        // Skip unreasonable IVs
+        if iv < 0.01 || iv > 5.0 {
+            continue;
+        }
+
+        let strike_decimal = match Decimal::try_from(strike_f64) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        points.push(IVPoint {
+            strike: strike_decimal,
+            expiration,
+            iv,
+            timestamp: opt_timestamp,
+            underlying_price: spot_decimal, // Per-option spot price
+            is_call,
+            contract_ticker: format!(
+                "{}{}{}{}",
+                symbol,
+                expiration.format("%y%m%d"),
+                if is_call { "C" } else { "P" },
+                strike_f64 as i64
+            ),
+        });
+    }
+
+    if points.is_empty() {
+        return None;
+    }
+
+    // Use latest spot for surface-level pricing (for downstream vol model use)
+    let surface_spot = latest_spot?;
+    let surface_time = latest_timestamp?;
+
+    Some(IVSurface::new(
+        points,
+        symbol.to_string(),
+        surface_time,
+        surface_spot,
     ))
 }
 

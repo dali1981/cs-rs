@@ -8,6 +8,7 @@ use cs_domain::{
     CalendarSpread, CalendarSpreadResult, EarningsEvent, FailureReason,
     EquityDataRepository, OptionsDataRepository, RepositoryError, MarketTime,
 };
+use crate::iv_surface_builder::build_iv_surface_minute_aligned;
 use crate::spread_pricer::{SpreadPricer, PricingError};
 
 /// Error type for trade execution
@@ -107,22 +108,30 @@ where
             .get_spot_price(spread.symbol(), exit_time)
             .await?;
 
-        // Get option chain data for entry
+        // Get option chain data with timestamps for minute-aligned IV computation
         let entry_chain = self.options_repo
-            .get_option_bars(spread.symbol(), entry_time.date_naive())
+            .get_option_bars_at_time(spread.symbol(), entry_time)
             .await?;
 
         // Get option chain data for exit
         let exit_chain = self.options_repo
-            .get_option_bars(spread.symbol(), exit_time.date_naive())
+            .get_option_bars_at_time(spread.symbol(), exit_time)
             .await?;
 
-        // Price at entry
-        let entry_pricing = self.pricer.price_spread(
+        // Build IV surface with per-option spot prices (minute-aligned)
+        let entry_surface = build_iv_surface_minute_aligned(
+            &entry_chain,
+            self.equity_repo.as_ref(),
+            spread.symbol(),
+        ).await;
+
+        // Price at entry using pre-built minute-aligned surface
+        let entry_pricing = self.pricer.price_spread_with_surface(
             spread,
             &entry_chain,
             entry_spot.to_f64(),
             entry_time,
+            entry_surface.as_ref(),
         )?;
 
         // Validate: Filter trades with extreme IV at entry (unreliable pricing/greeks)
@@ -169,12 +178,20 @@ where
             )));
         }
 
-        // Price at exit
-        let exit_pricing = self.pricer.price_spread(
+        // Build IV surface for exit with per-option spot prices
+        let exit_surface = build_iv_surface_minute_aligned(
+            &exit_chain,
+            self.equity_repo.as_ref(),
+            spread.symbol(),
+        ).await;
+
+        // Price at exit using pre-built minute-aligned surface
+        let exit_pricing = self.pricer.price_spread_with_surface(
             spread,
             &exit_chain,
             exit_spot.to_f64(),
             exit_time,
+            exit_surface.as_ref(),
         )?;
 
         // Calculate P&L

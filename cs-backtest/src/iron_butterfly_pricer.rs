@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use polars::prelude::*;
 use rust_decimal::Decimal;
 
+use cs_analytics::IVSurface;
 use cs_domain::IronButterfly;
 use crate::spread_pricer::{SpreadPricer, LegPricing, PricingError};
 
@@ -42,6 +43,20 @@ impl IronButterflyPricer {
             butterfly.symbol(),
         );
 
+        self.price_with_surface(butterfly, chain_df, spot_price, pricing_time, iv_surface.as_ref())
+    }
+
+    /// Price iron butterfly using a pre-built IV surface
+    ///
+    /// Use this when you have a minute-aligned IV surface built with per-option spot prices.
+    pub fn price_with_surface(
+        &self,
+        butterfly: &IronButterfly,
+        chain_df: &DataFrame,
+        spot_price: f64,
+        pricing_time: DateTime<Utc>,
+        iv_surface: Option<&IVSurface>,
+    ) -> Result<IronButterflyPricing, PricingError> {
         // Create pricing provider
         let pricing_provider = self.inner.pricing_model().to_provider_with_rate(0.0);
 
@@ -53,7 +68,7 @@ impl IronButterflyPricer {
             chain_df,
             spot_price,
             pricing_time,
-            iv_surface.as_ref(),
+            iv_surface,
             pricing_provider.as_ref(),
         )?;
 
@@ -64,7 +79,7 @@ impl IronButterflyPricer {
             chain_df,
             spot_price,
             pricing_time,
-            iv_surface.as_ref(),
+            iv_surface,
             pricing_provider.as_ref(),
         )?;
 
@@ -75,7 +90,7 @@ impl IronButterflyPricer {
             chain_df,
             spot_price,
             pricing_time,
-            iv_surface.as_ref(),
+            iv_surface,
             pricing_provider.as_ref(),
         )?;
 
@@ -86,7 +101,7 @@ impl IronButterflyPricer {
             chain_df,
             spot_price,
             pricing_time,
-            iv_surface.as_ref(),
+            iv_surface,
             pricing_provider.as_ref(),
         )?;
 

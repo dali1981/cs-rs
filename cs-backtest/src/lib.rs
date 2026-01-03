@@ -23,7 +23,7 @@ pub use iron_butterfly_pricer::{IronButterflyPricer, IronButterflyPricing};
 pub use iron_butterfly_executor::IronButterflyExecutor;
 pub use straddle_pricer::{StraddlePricer, StraddlePricing};
 pub use straddle_executor::StraddleExecutor;
-pub use iv_surface_builder::build_iv_surface;
+pub use iv_surface_builder::{build_iv_surface, build_iv_surface_minute_aligned};
 pub use atm_iv_use_case::{GenerateIvTimeSeriesUseCase, IvTimeSeriesResult, IvTimeSeriesError};
 pub use minute_aligned_iv_use_case::{MinuteAlignedIvUseCase, MinuteAlignedIvResult, MinuteAlignedIvError};
 pub use earnings_analysis_use_case::{EarningsAnalysisUseCase, EarningsAnalysisResult, EarningsAnalysisError};

@@ -1,7 +1,7 @@
 use polars::prelude::*;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use cs_analytics::PricingModel;
+use cs_analytics::{IVSurface, PricingModel};
 use cs_domain::{Straddle, PricingSource};
 use crate::spread_pricer::{SpreadPricer, LegPricing, PricingError};
 
@@ -45,6 +45,20 @@ impl StraddlePricer {
             straddle.symbol(),
         );
 
+        self.price_with_surface(straddle, chain_df, spot, timestamp, iv_surface.as_ref())
+    }
+
+    /// Price straddle using a pre-built IV surface
+    ///
+    /// Use this when you have a minute-aligned IV surface built with per-option spot prices.
+    pub fn price_with_surface(
+        &self,
+        straddle: &Straddle,
+        chain_df: &DataFrame,
+        spot: f64,
+        timestamp: DateTime<Utc>,
+        iv_surface: Option<&IVSurface>,
+    ) -> Result<StraddlePricing, PricingError> {
         // Create pricing provider
         let pricing_provider = self.spread_pricer.pricing_model().to_provider_with_rate(0.0);
 
@@ -56,7 +70,7 @@ impl StraddlePricer {
             chain_df,
             spot,
             timestamp,
-            iv_surface.as_ref(),
+            iv_surface,
             pricing_provider.as_ref(),
         )?;
 
@@ -68,7 +82,7 @@ impl StraddlePricer {
             chain_df,
             spot,
             timestamp,
-            iv_surface.as_ref(),
+            iv_surface,
             pricing_provider.as_ref(),
         )?;
 

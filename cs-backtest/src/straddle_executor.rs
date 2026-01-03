@@ -8,6 +8,7 @@ use cs_domain::{
     Straddle, StraddleResult, EarningsEvent, FailureReason, PricingSource,
     EquityDataRepository, OptionsDataRepository,
 };
+use crate::iv_surface_builder::build_iv_surface_minute_aligned;
 use crate::straddle_pricer::{StraddlePricer, StraddlePricing};
 use crate::spread_pricer::SpreadPricer;
 use crate::trade_executor::ExecutionError;
@@ -86,16 +87,24 @@ where
             .get_spot_price(straddle.symbol(), exit_time)
             .await?;
 
-        // Get option chain data (try minute bars first, then daily)
+        // Get option chain data with timestamps for minute-aligned IV computation
         let entry_chain = self.get_option_chain(straddle.symbol(), entry_time).await?;
         let exit_chain = self.get_option_chain(straddle.symbol(), exit_time).await?;
 
-        // Price at entry (debit we pay)
-        let entry_pricing = self.pricer.price(
+        // Build IV surface with per-option spot prices (minute-aligned)
+        let entry_surface = build_iv_surface_minute_aligned(
+            &entry_chain,
+            self.equity_repo.as_ref(),
+            straddle.symbol(),
+        ).await;
+
+        // Price at entry (debit we pay) using pre-built minute-aligned surface
+        let entry_pricing = self.pricer.price_with_surface(
             straddle,
             &entry_chain,
             entry_spot.to_f64(),
             entry_time,
+            entry_surface.as_ref(),
         )?;
 
         // Validate minimum straddle price
@@ -119,13 +128,21 @@ where
             }
         }
 
-        // Price at exit (credit we receive)
+        // Build IV surface for exit with per-option spot prices
+        let exit_surface = build_iv_surface_minute_aligned(
+            &exit_chain,
+            self.equity_repo.as_ref(),
+            straddle.symbol(),
+        ).await;
+
+        // Price at exit (credit we receive) using pre-built minute-aligned surface
         // This may use model pricing if market data unavailable
-        let exit_pricing = self.pricer.price(
+        let exit_pricing = self.pricer.price_with_surface(
             straddle,
             &exit_chain,
             exit_spot.to_f64(),
             exit_time,
+            exit_surface.as_ref(),
         )?;
 
         // P&L = Exit value - Entry cost (profit when straddle appreciated)
@@ -208,15 +225,15 @@ where
         })
     }
 
-    /// Get option chain - tries minute bars first, then daily
+    /// Get option chain with timestamps for minute-aligned IV computation
     async fn get_option_chain(
         &self,
         symbol: &str,
         timestamp: DateTime<Utc>,
     ) -> Result<polars::prelude::DataFrame, ExecutionError> {
-        // Try daily bars (minute bars might not be available for all data sources)
+        // Use minute bars with timestamps for per-option spot lookup
         self.options_repo
-            .get_option_bars(symbol, timestamp.date_naive())
+            .get_option_bars_at_time(symbol, timestamp)
             .await
             .map_err(ExecutionError::Repository)
     }

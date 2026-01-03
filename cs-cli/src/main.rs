@@ -140,6 +140,12 @@ enum Commands {
         /// Straddle: Minimum days from entry to expiration (default: 7)
         #[arg(long, default_value = "7")]
         min_straddle_dte: i32,
+        /// Straddle: Minimum entry price - total debit paid (e.g., 2.50)
+        #[arg(long)]
+        min_entry_price: Option<f64>,
+        /// Straddle: Maximum entry price - caps max loss (e.g., 10.00)
+        #[arg(long)]
+        max_entry_price: Option<f64>,
         /// Minimum daily option notional: sum(all option volumes) × 100 × stock_price (e.g., 100000 for $100k)
         #[arg(long)]
         min_notional: Option<f64>,
@@ -188,9 +194,9 @@ enum Commands {
         /// Generate plots
         #[arg(long)]
         plot: bool,
-        /// Use minute-aligned IV computation (time-aligns option and spot prices)
+        /// Use EOD pricing instead of minute-aligned (default: minute-aligned)
         #[arg(long)]
-        minute_aligned: bool,
+        eod_pricing: bool,
         /// Use constant-maturity IV interpolation (variance-space interpolation to exact DTEs)
         #[arg(long, alias = "cm")]
         constant_maturity: bool,
@@ -283,6 +289,8 @@ async fn main() -> Result<()> {
             straddle_entry_days,
             straddle_exit_days,
             min_straddle_dte,
+            min_entry_price,
+            max_entry_price,
             min_notional,
         } => {
             run_backtest(
@@ -318,6 +326,8 @@ async fn main() -> Result<()> {
                 straddle_entry_days,
                 straddle_exit_days,
                 min_straddle_dte,
+                min_entry_price,
+                max_entry_price,
                 min_notional,
             )
             .await?;
@@ -345,7 +355,7 @@ async fn main() -> Result<()> {
             tolerance,
             output,
             plot,
-            minute_aligned,
+            eod_pricing,
             constant_maturity,
             min_dte,
             with_hv,
@@ -360,7 +370,7 @@ async fn main() -> Result<()> {
                 tolerance,
                 output,
                 plot,
-                minute_aligned,
+                eod_pricing,
                 constant_maturity,
                 min_dte,
                 with_hv,
@@ -421,6 +431,8 @@ fn build_cli_overrides(
     straddle_entry_days: Option<usize>,
     straddle_exit_days: Option<usize>,
     min_straddle_dte: Option<i32>,
+    min_entry_price: Option<f64>,
+    max_entry_price: Option<f64>,
     min_notional: Option<f64>,
 ) -> Result<CliOverrides> {
     // Parse delta range if provided
@@ -466,7 +478,7 @@ fn build_cli_overrides(
         } else {
             None
         },
-        strategy: if spread.is_some() || selection.is_some() || delta_range.is_some() || delta_scan_steps.is_some() || wing_width.is_some() || straddle_entry_days.is_some() || straddle_exit_days.is_some() || min_straddle_dte.is_some() {
+        strategy: if spread.is_some() || selection.is_some() || delta_range.is_some() || delta_scan_steps.is_some() || wing_width.is_some() || straddle_entry_days.is_some() || straddle_exit_days.is_some() || min_straddle_dte.is_some() || min_entry_price.is_some() || max_entry_price.is_some() {
             Some(CliStrategy {
                 spread_type: spread.map(|s| s.to_string()),
                 selection_type: selection.map(|s| s.to_string()),
@@ -477,6 +489,8 @@ fn build_cli_overrides(
                 straddle_entry_days,
                 straddle_exit_days,
                 min_straddle_dte,
+                min_entry_price,
+                max_entry_price,
             })
         } else {
             None
@@ -532,6 +546,8 @@ async fn run_backtest(
     straddle_entry_days: usize,
     straddle_exit_days: usize,
     min_straddle_dte: i32,
+    min_entry_price: Option<f64>,
+    max_entry_price: Option<f64>,
     min_notional: Option<f64>,
 ) -> Result<()> {
     // Parse dates
@@ -671,6 +687,8 @@ async fn run_backtest(
         Some(straddle_entry_days),
         Some(straddle_exit_days),
         Some(min_straddle_dte),
+        min_entry_price,
+        max_entry_price,
         min_notional,
     )?;
 
@@ -956,7 +974,7 @@ async fn run_atm_iv_command(
     tolerance: Option<u32>,
     output: PathBuf,
     plot: bool,
-    minute_aligned: bool,
+    eod_pricing: bool,
     constant_maturity: bool,
     min_dte: i64,
     with_hv: bool,
@@ -1003,7 +1021,7 @@ async fn run_atm_iv_command(
         .context("Data directory not specified. Use --data-dir or set FINQ_DATA_DIR")?;
 
     println!("{}", style("ATM IV Time Series Generation").bold().cyan());
-    println!("Mode: {}", if minute_aligned { "Minute-Aligned" } else { "EOD" });
+    println!("Mode: {}", if eod_pricing { "EOD" } else { "Minute-Aligned (default)" });
     println!("Interpolation: {}", match config.interpolation_method {
         IvInterpolationMethod::Rolling => "Rolling TTE",
         IvInterpolationMethod::ConstantMaturity => "Constant-Maturity (variance interpolation)",
@@ -1023,9 +1041,9 @@ async fn run_atm_iv_command(
     let equity_repo = FinqEquityRepository::new(data_dir.clone());
     let options_repo = FinqOptionsRepository::new(data_dir);
 
-    // Process each symbol based on mode
-    if minute_aligned {
-        // Use minute-aligned IV computation
+    // Process each symbol based on mode (minute-aligned is default)
+    if !eod_pricing {
+        // Use minute-aligned IV computation (default)
         let use_case = MinuteAlignedIvUseCase::new(equity_repo, options_repo);
 
         for symbol in &symbols {
@@ -1063,7 +1081,7 @@ async fn run_atm_iv_command(
             }
         }
     } else {
-        // Use EOD IV computation (existing)
+        // Use EOD IV computation (--eod-pricing flag specified)
         let use_case = GenerateIvTimeSeriesUseCase::new(equity_repo, options_repo);
 
         for symbol in &symbols {
