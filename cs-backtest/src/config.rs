@@ -50,6 +50,9 @@ pub struct BacktestConfig {
     /// None = no filter, Some(100000.0) = $100k minimum daily option activity
     #[serde(default)]
     pub min_notional: Option<f64>,
+    /// Straddle: Minimum days from entry to expiration (default: 7)
+    #[serde(default = "default_min_straddle_dte")]
+    pub min_straddle_dte: i32,
 }
 
 fn default_wing_width() -> f64 {
@@ -74,6 +77,10 @@ fn default_delta_range() -> (f64, f64) {
 
 fn default_delta_scan_steps() -> usize {
     5
+}
+
+fn default_min_straddle_dte() -> i32 {
+    7 // At least 7 days from entry to expiration
 }
 
 /// Trade structure - WHAT to trade
@@ -143,6 +150,7 @@ impl Default for BacktestConfig {
             straddle_entry_days: default_straddle_entry_days(),
             straddle_exit_days: default_straddle_exit_days(),
             min_notional: None, // No filtering by default
+            min_straddle_dte: default_min_straddle_dte(),
         }
     }
 }

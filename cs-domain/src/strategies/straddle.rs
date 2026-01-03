@@ -6,38 +6,41 @@ use finq_core::OptionType;
 
 /// Straddle selection strategy
 ///
-/// Selects ATM straddle with first expiration AFTER earnings.
-/// This ensures the options still have time value when we exit
-/// (1 day before earnings).
+/// Selects ATM straddle with minimum DTE from entry.
+/// This ensures we have enough time for the trade to work.
 pub struct StraddleStrategy {
-    pub min_dte_after_earnings: i32,  // Minimum days after earnings for expiry
+    pub min_dte_from_entry: i32,  // Minimum days from entry to expiration
+    pub entry_date: NaiveDate,     // When we enter the trade
 }
 
 impl Default for StraddleStrategy {
     fn default() -> Self {
         Self {
-            min_dte_after_earnings: 1,  // At least 1 day after earnings
+            min_dte_from_entry: 7,  // At least 7 days from entry
+            entry_date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(), // Placeholder
         }
     }
 }
 
 impl StraddleStrategy {
-    /// Create with custom minimum DTE after earnings
-    pub fn with_min_dte(min_dte: i32) -> Self {
-        Self { min_dte_after_earnings: min_dte }
+    /// Create with custom minimum DTE from entry
+    pub fn with_min_dte(min_dte: i32, entry_date: NaiveDate) -> Self {
+        Self {
+            min_dte_from_entry: min_dte,
+            entry_date,
+        }
     }
 
-    /// Find first expiration after earnings date
+    /// Find first expiration with sufficient DTE from entry
     fn select_expiration(
         &self,
         expirations: &[NaiveDate],
-        earnings_date: NaiveDate,
     ) -> Option<NaiveDate> {
         expirations
             .iter()
             .filter(|&&exp| {
-                let days_after = (exp - earnings_date).num_days() as i32;
-                days_after >= self.min_dte_after_earnings
+                let dte = (exp - self.entry_date).num_days() as i32;
+                dte >= self.min_dte_from_entry
             })
             .min()
             .copied()
@@ -74,8 +77,8 @@ impl SelectionStrategy for StraddleStrategy {
         spot: &SpotPrice,
         chain_data: &OptionChainData,
     ) -> Result<Straddle, StrategyError> {
-        // Select first expiration AFTER earnings
-        let expiration = self.select_expiration(&chain_data.expirations, event.earnings_date)
+        // Select first expiration with sufficient DTE from entry
+        let expiration = self.select_expiration(&chain_data.expirations)
             .ok_or(StrategyError::NoExpirations)?;
 
         // Select ATM strike (closest to spot)

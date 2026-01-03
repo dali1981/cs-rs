@@ -68,6 +68,7 @@ pub struct StrategyConfig {
     pub wing_width: f64,
     pub straddle_entry_days: usize,
     pub straddle_exit_days: usize,
+    pub min_straddle_dte: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,6 +143,7 @@ impl Default for StrategyConfig {
             wing_width: 10.0,
             straddle_entry_days: 5,
             straddle_exit_days: 1,
+            min_straddle_dte: 7,
         }
     }
 }
@@ -241,6 +243,7 @@ impl AppConfig {
             straddle_entry_days: self.strategy.straddle_entry_days,
             straddle_exit_days: self.strategy.straddle_exit_days,
             min_notional: self.min_notional,
+            min_straddle_dte: self.strategy.min_straddle_dte,
         }
     }
 }

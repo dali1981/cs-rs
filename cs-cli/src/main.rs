@@ -137,6 +137,9 @@ enum Commands {
         /// Straddle: Exit N trading days before earnings (default: 1)
         #[arg(long, default_value = "1")]
         straddle_exit_days: usize,
+        /// Straddle: Minimum days from entry to expiration (default: 7)
+        #[arg(long, default_value = "7")]
+        min_straddle_dte: i32,
         /// Minimum daily option notional: sum(all option volumes) × 100 × stock_price (e.g., 100000 for $100k)
         #[arg(long)]
         min_notional: Option<f64>,
@@ -279,6 +282,7 @@ async fn main() -> Result<()> {
             wing_width,
             straddle_entry_days,
             straddle_exit_days,
+            min_straddle_dte,
             min_notional,
         } => {
             run_backtest(
@@ -313,6 +317,7 @@ async fn main() -> Result<()> {
                 wing_width,
                 straddle_entry_days,
                 straddle_exit_days,
+                min_straddle_dte,
                 min_notional,
             )
             .await?;
@@ -415,6 +420,7 @@ fn build_cli_overrides(
     wing_width: Option<f64>,
     straddle_entry_days: Option<usize>,
     straddle_exit_days: Option<usize>,
+    min_straddle_dte: Option<i32>,
     min_notional: Option<f64>,
 ) -> Result<CliOverrides> {
     // Parse delta range if provided
@@ -460,7 +466,7 @@ fn build_cli_overrides(
         } else {
             None
         },
-        strategy: if spread.is_some() || selection.is_some() || delta_range.is_some() || delta_scan_steps.is_some() || wing_width.is_some() {
+        strategy: if spread.is_some() || selection.is_some() || delta_range.is_some() || delta_scan_steps.is_some() || wing_width.is_some() || straddle_entry_days.is_some() || straddle_exit_days.is_some() || min_straddle_dte.is_some() {
             Some(CliStrategy {
                 spread_type: spread.map(|s| s.to_string()),
                 selection_type: selection.map(|s| s.to_string()),
@@ -468,6 +474,9 @@ fn build_cli_overrides(
                 delta_range,
                 delta_scan_steps,
                 wing_width,
+                straddle_entry_days,
+                straddle_exit_days,
+                min_straddle_dte,
             })
         } else {
             None
@@ -485,14 +494,7 @@ fn build_cli_overrides(
         min_market_cap,
         parallel: if no_parallel { Some(false) } else { None },
         max_entry_iv,
-        straddle: if straddle_entry_days.is_some() || straddle_exit_days.is_some() {
-            Some(CliStraddle {
-                straddle_entry_days,
-                straddle_exit_days,
-            })
-        } else {
-            None
-        },
+        straddle: None,  // Straddle fields now in strategy
         min_notional,
     })
 }
@@ -529,6 +531,7 @@ async fn run_backtest(
     wing_width: Option<f64>,
     straddle_entry_days: usize,
     straddle_exit_days: usize,
+    min_straddle_dte: i32,
     min_notional: Option<f64>,
 ) -> Result<()> {
     // Parse dates
@@ -667,6 +670,7 @@ async fn run_backtest(
         wing_width,
         Some(straddle_entry_days),
         Some(straddle_exit_days),
+        Some(min_straddle_dte),
         min_notional,
     )?;
 

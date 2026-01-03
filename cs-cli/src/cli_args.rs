@@ -90,6 +90,12 @@ pub struct CliStrategy {
     pub delta_scan_steps: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wing_width: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub straddle_entry_days: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub straddle_exit_days: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_straddle_dte: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -108,4 +114,6 @@ pub struct CliStraddle {
     pub straddle_entry_days: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub straddle_exit_days: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_straddle_dte: Option<i32>,
 }

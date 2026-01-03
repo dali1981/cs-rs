@@ -541,9 +541,7 @@ where
         let mut sessions_processed = 0;
         let mut total_opportunities = 0;
 
-        // Create straddle strategy and timing
-        let strategy = StraddleStrategy::default();
-
+        // Create straddle timing
         let timing = StraddleTradeTiming::new(self.config.timing)
             .with_entry_days(self.config.straddle_entry_days)
             .with_exit_days(self.config.straddle_exit_days);
@@ -595,14 +593,14 @@ where
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_straddle_event(event, &strategy, &timing))
+                    .map(|event| self.process_straddle_event(event, &timing))
                     .collect();
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
                     results.push(
-                        self.process_straddle_event(event, &strategy, &timing).await
+                        self.process_straddle_event(event, &timing).await
                     );
                 }
                 results
@@ -651,12 +649,17 @@ where
     async fn process_straddle_event(
         &self,
         event: &EarningsEvent,
-        strategy: &StraddleStrategy,
         timing: &StraddleTradeTiming,
     ) -> Result<StraddleResult, TradeGenerationError> {
         let entry_time = timing.entry_datetime(event);
         let exit_time = timing.exit_datetime(event);
         let entry_date = entry_time.date_naive();
+
+        // Create strategy with entry date and min DTE from config
+        let strategy = StraddleStrategy::with_min_dte(
+            self.config.min_straddle_dte,
+            entry_date
+        );
 
         // Get spot price at entry
         let spot = self.equity_repo
