@@ -186,19 +186,10 @@ where
             }
             let ttm = dte as f64 / 365.25;
 
-            // Check if this expiration is within tolerance of a target maturity
-            let mut matched_target_dte: Option<i64> = None;
-            for &target_dte in &config.maturity_targets {
-                let diff = (dte - target_dte as i64).abs();
-                if diff <= config.maturity_tolerance as i64 {
-                    matched_target_dte = Some(dte);
-                    break;
-                }
-            }
-
-            if matched_target_dte.is_none() {
-                continue; // Not within tolerance of any target maturity
-            }
+            // Note: Do NOT filter by target maturity here
+            // For constant-maturity interpolation, we need ALL available expirations
+            // to build a complete term structure. Filtering happens later in
+            // build_term_structure (by min_dte) and during interpolation (by target matching)
 
             // Compute IV using Black-Scholes
             if opt.price <= 0.0 {
