@@ -10,6 +10,7 @@ pub mod iron_butterfly_pricer;
 pub mod iron_butterfly_executor;
 pub mod backtest_use_case;
 pub mod atm_iv_use_case;
+pub mod minute_aligned_iv_use_case;
 
 pub use config::{BacktestConfig, SpreadType, SelectionType};
 pub use backtest_use_case::{BacktestUseCase, BacktestResult, SessionProgress, TradeGenerationError, TradeResult};
@@ -19,6 +20,7 @@ pub use iron_butterfly_pricer::{IronButterflyPricer, IronButterflyPricing};
 pub use iron_butterfly_executor::IronButterflyExecutor;
 pub use iv_surface_builder::build_iv_surface;
 pub use atm_iv_use_case::{GenerateIvTimeSeriesUseCase, IvTimeSeriesResult, IvTimeSeriesError};
+pub use minute_aligned_iv_use_case::{MinuteAlignedIvUseCase, MinuteAlignedIvResult, MinuteAlignedIvError};
 
 // Re-export pricing model types for convenience
 pub use cs_analytics::{PricingModel, PricingIVProvider, InterpolationMode};

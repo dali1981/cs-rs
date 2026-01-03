@@ -39,4 +39,7 @@ pub use arbitrage::{
     ArbitrageViolation, ArbitrageReport,
     check_butterfly_arbitrage, check_calendar_arbitrage, full_arbitrage_check,
 };
-pub use atm_iv_computer::{AtmIvComputer, AtmIvResult, AtmMethod, OptionPoint};
+pub use atm_iv_computer::{
+    AtmIvComputer, AtmIvResult, AtmMethod, OptionPoint,
+    ExpirationIv, ConstantMaturityResult, ConstantMaturityInterpolator,
+};

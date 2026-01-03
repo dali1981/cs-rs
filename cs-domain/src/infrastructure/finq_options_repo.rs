@@ -1,11 +1,12 @@
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
+use finq_core::Timeframe;
 use finq_flatfiles::{OptionBarReader, OptionBarRepository, FlatfileConfig};
 use polars::prelude::*;
 use rust_decimal::Decimal;
 use std::path::PathBuf;
 
-use crate::datetime::TradingDate;
+use crate::datetime::{TradingDate, TradingTimestamp};
 use crate::repositories::{OptionsDataRepository, RepositoryError};
 use crate::value_objects::Strike;
 
@@ -36,6 +37,78 @@ impl OptionsDataRepository for FinqOptionsRepository {
                 "Failed to load option bars for {} on {}: {}",
                 underlying, date, e
             )))
+    }
+
+    async fn get_option_minute_bars(
+        &self,
+        underlying: &str,
+        date: NaiveDate,
+    ) -> Result<DataFrame, RepositoryError> {
+        self.repository
+            .get_bars(underlying, Timeframe::MINUTE, date, date)
+            .await
+            .map_err(|e| RepositoryError::NotFound(format!(
+                "Failed to load minute option bars for {} on {}: {}",
+                underlying, date, e
+            )))
+    }
+
+    async fn get_option_bars_at_time(
+        &self,
+        underlying: &str,
+        target_time: DateTime<Utc>,
+    ) -> Result<DataFrame, RepositoryError> {
+        let date = target_time.date_naive();
+
+        // Load minute bars for the target date
+        let df = self.repository
+            .get_bars(underlying, Timeframe::MINUTE, date, date)
+            .await
+            .map_err(|e| RepositoryError::NotFound(format!(
+                "Failed to load minute option bars for {} on {}: {}",
+                underlying, date, e
+            )))?;
+
+        if df.is_empty() {
+            return Err(RepositoryError::NotFound(format!(
+                "No minute bars found for {} on {}",
+                underlying, date
+            )));
+        }
+
+        // Convert target time to nanoseconds
+        let target_nanos = TradingTimestamp::from_datetime_utc(target_time).to_nanos();
+
+        // Filter to trades at or before target time, then take latest per contract
+        let filtered = df
+            .lazy()
+            .filter(col("timestamp").lt_eq(lit(target_nanos)))
+            .sort(
+                ["strike", "expiration", "option_type", "timestamp"],
+                SortMultipleOptions::default()
+                    .with_order_descending_multi(vec![false, false, false, true])
+            )
+            // Group by contract (strike, expiration, option_type) and take first (latest due to sort)
+            .group_by([col("strike"), col("expiration"), col("option_type")])
+            .agg([
+                col("close").first().alias("close"),
+                col("timestamp").first().alias("timestamp"),
+                col("open").first().alias("open"),
+                col("high").first().alias("high"),
+                col("low").first().alias("low"),
+                col("volume").first().alias("volume"),
+            ])
+            .collect()
+            .map_err(|e| RepositoryError::Polars(e.to_string()))?;
+
+        if filtered.is_empty() {
+            return Err(RepositoryError::NotFound(format!(
+                "No option bars at or before {} for {} on {}",
+                target_time, underlying, date
+            )));
+        }
+
+        Ok(filtered)
     }
 
     async fn get_available_expirations(

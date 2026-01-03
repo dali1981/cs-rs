@@ -140,16 +140,59 @@ pub struct AtmIvObservation {
     pub symbol: String,
     pub date: NaiveDate,
     pub spot: Decimal,
-    /// ATM IV for ~30 DTE options
+
+    // === Rolling TTE fields (existing) ===
+    /// ATM IV for nearest expiration (>min_dte to avoid expiry effects)
+    pub atm_iv_nearest: Option<f64>,
+    /// DTE of nearest expiration used
+    pub nearest_dte: Option<i64>,
+    /// ATM IV for ~30 DTE options (rolling)
     pub atm_iv_30d: Option<f64>,
-    /// ATM IV for ~60 DTE options
+    /// ATM IV for ~60 DTE options (rolling)
     pub atm_iv_60d: Option<f64>,
-    /// ATM IV for ~90 DTE options
+    /// ATM IV for ~90 DTE options (rolling)
     pub atm_iv_90d: Option<f64>,
+
+    // === Constant-Maturity fields (new) ===
+    /// Constant-maturity ATM IV at exactly 7 DTE
+    #[serde(default)]
+    pub cm_iv_7d: Option<f64>,
+    /// Constant-maturity ATM IV at exactly 14 DTE
+    #[serde(default)]
+    pub cm_iv_14d: Option<f64>,
+    /// Constant-maturity ATM IV at exactly 21 DTE
+    #[serde(default)]
+    pub cm_iv_21d: Option<f64>,
+    /// Constant-maturity ATM IV at exactly 30 DTE
+    #[serde(default)]
+    pub cm_iv_30d: Option<f64>,
+    /// Constant-maturity ATM IV at exactly 60 DTE
+    #[serde(default)]
+    pub cm_iv_60d: Option<f64>,
+    /// Constant-maturity ATM IV at exactly 90 DTE
+    #[serde(default)]
+    pub cm_iv_90d: Option<f64>,
+    /// Was constant-maturity interpolated (true) or extrapolated (false)?
+    #[serde(default)]
+    pub cm_interpolated: Option<bool>,
+    /// Number of expirations used for interpolation
+    #[serde(default)]
+    pub cm_num_expirations: Option<usize>,
+
+    // === Term spreads ===
     /// Term spread: IV_30d - IV_60d (positive = backwardation)
     pub term_spread_30_60: Option<f64>,
     /// Term spread: IV_30d - IV_90d (positive = backwardation)
     pub term_spread_30_90: Option<f64>,
+    /// Constant-maturity term spread: CM_IV_7d - CM_IV_30d
+    #[serde(default)]
+    pub cm_spread_7_30: Option<f64>,
+    /// Constant-maturity term spread: CM_IV_30d - CM_IV_60d
+    #[serde(default)]
+    pub cm_spread_30_60: Option<f64>,
+    /// Constant-maturity term spread: CM_IV_30d - CM_IV_90d
+    #[serde(default)]
+    pub cm_spread_30_90: Option<f64>,
 }
 
 impl AtmIvObservation {
@@ -158,21 +201,46 @@ impl AtmIvObservation {
             symbol,
             date,
             spot,
+            atm_iv_nearest: None,
+            nearest_dte: None,
             atm_iv_30d: None,
             atm_iv_60d: None,
             atm_iv_90d: None,
+            cm_iv_7d: None,
+            cm_iv_14d: None,
+            cm_iv_21d: None,
+            cm_iv_30d: None,
+            cm_iv_60d: None,
+            cm_iv_90d: None,
+            cm_interpolated: None,
+            cm_num_expirations: None,
             term_spread_30_60: None,
             term_spread_30_90: None,
+            cm_spread_7_30: None,
+            cm_spread_30_60: None,
+            cm_spread_30_90: None,
         }
     }
 
     /// Calculate term spreads from IV values
     pub fn calculate_spreads(&mut self) {
+        // Rolling spreads
         if let (Some(iv_30), Some(iv_60)) = (self.atm_iv_30d, self.atm_iv_60d) {
             self.term_spread_30_60 = Some(iv_30 - iv_60);
         }
         if let (Some(iv_30), Some(iv_90)) = (self.atm_iv_30d, self.atm_iv_90d) {
             self.term_spread_30_90 = Some(iv_30 - iv_90);
+        }
+
+        // Constant-maturity spreads
+        if let (Some(iv_7), Some(iv_30)) = (self.cm_iv_7d, self.cm_iv_30d) {
+            self.cm_spread_7_30 = Some(iv_7 - iv_30);
+        }
+        if let (Some(iv_30), Some(iv_60)) = (self.cm_iv_30d, self.cm_iv_60d) {
+            self.cm_spread_30_60 = Some(iv_30 - iv_60);
+        }
+        if let (Some(iv_30), Some(iv_90)) = (self.cm_iv_30d, self.cm_iv_90d) {
+            self.cm_spread_30_90 = Some(iv_30 - iv_90);
         }
     }
 }
@@ -194,12 +262,28 @@ impl Default for AtmMethod {
     }
 }
 
+/// Interpolation method for term structure IVs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IvInterpolationMethod {
+    /// Rolling TTE: Use closest expiration within tolerance (existing behavior)
+    Rolling,
+    /// Constant Maturity: Interpolate in variance space to exact target DTEs
+    ConstantMaturity,
+}
+
+impl Default for IvInterpolationMethod {
+    fn default() -> Self {
+        Self::Rolling
+    }
+}
+
 /// Configuration for ATM IV computation and earnings detection
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AtmIvConfig {
-    /// Target maturities in days (default: [30, 60, 90])
+    /// Target maturities in days (default: [7, 14, 21, 30, 60, 90])
     pub maturity_targets: Vec<u32>,
     /// Tolerance window for maturity matching (default: 7 days)
+    /// Only used in Rolling mode
     pub maturity_tolerance: u32,
     /// ATM strike selection method
     pub atm_strike_method: AtmMethod,
@@ -215,12 +299,23 @@ pub struct AtmIvConfig {
     pub crush_threshold: f64,
     /// Backwardation threshold (default: 0.05 = 5%)
     pub backwardation_threshold: f64,
+    /// Interpolation method (default: Rolling for backward compatibility)
+    #[serde(default)]
+    pub interpolation_method: IvInterpolationMethod,
+    /// Minimum DTE for expiration inclusion (default: 3)
+    /// Used in ConstantMaturity mode to avoid expiry effects
+    #[serde(default = "default_min_dte")]
+    pub min_dte: i64,
+}
+
+fn default_min_dte() -> i64 {
+    3
 }
 
 impl Default for AtmIvConfig {
     fn default() -> Self {
         Self {
-            maturity_targets: vec![30, 60, 90],
+            maturity_targets: vec![7, 14, 21, 30, 60, 90],
             maturity_tolerance: 7,
             atm_strike_method: AtmMethod::default(),
             iv_min_bound: 0.01,
@@ -229,6 +324,8 @@ impl Default for AtmIvConfig {
             spike_lookback_days: 5,
             crush_threshold: 0.15,
             backwardation_threshold: 0.05,
+            interpolation_method: IvInterpolationMethod::default(),
+            min_dte: 3,
         }
     }
 }

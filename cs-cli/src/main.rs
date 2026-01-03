@@ -11,7 +11,7 @@ use tabled::{Table, Tabled};
 use tracing::{info, Level};
 use tracing_subscriber;
 
-use cs_backtest::{BacktestUseCase, GenerateIvTimeSeriesUseCase};
+use cs_backtest::{BacktestUseCase, GenerateIvTimeSeriesUseCase, MinuteAlignedIvUseCase};
 use cs_domain::{
     infrastructure::{
         EarningsReaderAdapter, FinqEquityRepository, FinqOptionsRepository,
@@ -164,7 +164,7 @@ enum Commands {
         /// End date (YYYY-MM-DD)
         #[arg(long)]
         end: String,
-        /// Target maturities in days (default: 30,60,90)
+        /// Target maturities in days (default: 7,14,21,30,60,90)
         #[arg(long, value_delimiter = ',')]
         maturities: Option<Vec<u32>>,
         /// Maturity tolerance in days (default: 7)
@@ -176,6 +176,15 @@ enum Commands {
         /// Generate plots
         #[arg(long)]
         plot: bool,
+        /// Use minute-aligned IV computation (time-aligns option and spot prices)
+        #[arg(long)]
+        minute_aligned: bool,
+        /// Use constant-maturity IV interpolation (variance-space interpolation to exact DTEs)
+        #[arg(long, alias = "cm")]
+        constant_maturity: bool,
+        /// Minimum DTE for expiration inclusion (default: 3)
+        #[arg(long, default_value = "3")]
+        min_dte: i64,
     },
 }
 
@@ -288,6 +297,9 @@ async fn main() -> Result<()> {
             tolerance,
             output,
             plot,
+            minute_aligned,
+            constant_maturity,
+            min_dte,
         } => {
             run_atm_iv_command(
                 cli.data_dir.as_ref(),
@@ -298,6 +310,9 @@ async fn main() -> Result<()> {
                 tolerance,
                 output,
                 plot,
+                minute_aligned,
+                constant_maturity,
+                min_dte,
             )
             .await?;
         }
@@ -808,7 +823,12 @@ async fn run_atm_iv_command(
     tolerance: Option<u32>,
     output: PathBuf,
     plot: bool,
+    minute_aligned: bool,
+    constant_maturity: bool,
+    min_dte: i64,
 ) -> Result<()> {
+    use cs_domain::value_objects::IvInterpolationMethod;
+
     // Parse dates
     let start_date = NaiveDate::parse_from_str(start, "%Y-%m-%d")
         .context("Invalid start date format. Use YYYY-MM-DD")?;
@@ -823,6 +843,12 @@ async fn run_atm_iv_command(
     if let Some(tol) = tolerance {
         config.maturity_tolerance = tol;
     }
+    config.interpolation_method = if constant_maturity {
+        IvInterpolationMethod::ConstantMaturity
+    } else {
+        IvInterpolationMethod::Rolling
+    };
+    config.min_dte = min_dte;
 
     // Determine data directory
     let data_dir = data_dir
@@ -831,10 +857,16 @@ async fn run_atm_iv_command(
         .context("Data directory not specified. Use --data-dir or set FINQ_DATA_DIR")?;
 
     println!("{}", style("ATM IV Time Series Generation").bold().cyan());
+    println!("Mode: {}", if minute_aligned { "Minute-Aligned" } else { "EOD" });
+    println!("Interpolation: {}", match config.interpolation_method {
+        IvInterpolationMethod::Rolling => "Rolling TTE",
+        IvInterpolationMethod::ConstantMaturity => "Constant-Maturity (variance interpolation)",
+    });
     println!("Symbols: {}", symbols.join(", "));
     println!("Date range: {} to {}", start_date, end_date);
     println!("Maturities: {:?}", config.maturity_targets);
     println!("Tolerance: {} days", config.maturity_tolerance);
+    println!("Min DTE: {}", config.min_dte);
     println!("Output: {:?}", output);
     println!();
 
@@ -845,42 +877,82 @@ async fn run_atm_iv_command(
     let equity_repo = FinqEquityRepository::new(data_dir.clone());
     let options_repo = FinqOptionsRepository::new(data_dir);
 
-    // Create use case
-    let use_case = GenerateIvTimeSeriesUseCase::new(equity_repo, options_repo);
+    // Process each symbol based on mode
+    if minute_aligned {
+        // Use minute-aligned IV computation
+        let use_case = MinuteAlignedIvUseCase::new(equity_repo, options_repo);
 
-    // Process each symbol
-    for symbol in &symbols {
-        println!("{}", style(format!("Processing {}...", symbol)).bold());
+        for symbol in &symbols {
+            println!("{}", style(format!("Processing {}...", symbol)).bold());
 
-        let result = use_case.execute(symbol, start_date, end_date, &config).await?;
+            let result = use_case.execute(symbol, start_date, end_date, &config).await?;
 
-        println!(
-            "  {} trading days processed, {} successful observations",
-            result.total_days, result.successful_days
-        );
+            println!(
+                "  {} trading days processed, {} successful observations",
+                result.total_days, result.successful_days
+            );
 
-        if result.observations.is_empty() {
-            println!("{}", style("  Warning: No observations generated").yellow());
-            continue;
+            if result.observations.is_empty() {
+                println!("{}", style("  Warning: No observations generated").yellow());
+                continue;
+            }
+
+            // Save to parquet
+            let output_path = output.join(format!("atm_iv_{}.parquet", symbol));
+            MinuteAlignedIvUseCase::<FinqEquityRepository, FinqOptionsRepository>::save_to_parquet(
+                &result,
+                &output_path,
+            )?;
+
+            println!(
+                "  {}",
+                style(format!("Saved {} observations to {:?}", result.observations.len(), output_path))
+                    .green()
+            );
+
+            // Generate plots if requested
+            if plot {
+                println!("  {}", style("Plot generation not yet implemented").yellow());
+                // TODO: Add plotting implementation
+            }
         }
+    } else {
+        // Use EOD IV computation (existing)
+        let use_case = GenerateIvTimeSeriesUseCase::new(equity_repo, options_repo);
 
-        // Save to parquet
-        let output_path = output.join(format!("atm_iv_{}.parquet", symbol));
-        GenerateIvTimeSeriesUseCase::<FinqEquityRepository, FinqOptionsRepository>::save_to_parquet(
-            &result,
-            &output_path,
-        )?;
+        for symbol in &symbols {
+            println!("{}", style(format!("Processing {}...", symbol)).bold());
 
-        println!(
-            "  {}",
-            style(format!("Saved {} observations to {:?}", result.observations.len(), output_path))
-                .green()
-        );
+            let result = use_case.execute(symbol, start_date, end_date, &config).await?;
 
-        // Generate plots if requested
-        if plot {
-            println!("  {}", style("Plot generation not yet implemented").yellow());
-            // TODO: Add plotting implementation
+            println!(
+                "  {} trading days processed, {} successful observations",
+                result.total_days, result.successful_days
+            );
+
+            if result.observations.is_empty() {
+                println!("{}", style("  Warning: No observations generated").yellow());
+                continue;
+            }
+
+            // Save to parquet
+            let output_path = output.join(format!("atm_iv_{}.parquet", symbol));
+            GenerateIvTimeSeriesUseCase::<FinqEquityRepository, FinqOptionsRepository>::save_to_parquet(
+                &result,
+                &output_path,
+            )?;
+
+            println!(
+                "  {}",
+                style(format!("Saved {} observations to {:?}", result.observations.len(), output_path))
+                    .green()
+            );
+
+            // Generate plots if requested
+            if plot {
+                println!("  {}", style("Plot generation not yet implemented").yellow());
+                // TODO: Add plotting implementation
+            }
         }
     }
 

@@ -31,10 +31,26 @@ pub trait EarningsRepository: Send + Sync {
 /// Options data repository
 #[async_trait]
 pub trait OptionsDataRepository: Send + Sync {
+    /// Get option bars for a specific date (daily aggregated snapshot)
     async fn get_option_bars(
         &self,
         underlying: &str,
         date: NaiveDate,
+    ) -> Result<polars::frame::DataFrame, RepositoryError>;
+
+    /// Get minute-level option bars for a specific date
+    async fn get_option_minute_bars(
+        &self,
+        underlying: &str,
+        date: NaiveDate,
+    ) -> Result<polars::frame::DataFrame, RepositoryError>;
+
+    /// Get option chain snapshot at a specific point in time (minute-aligned)
+    /// Returns the most recent trade for each contract at or before target_time
+    async fn get_option_bars_at_time(
+        &self,
+        underlying: &str,
+        target_time: DateTime<Utc>,
     ) -> Result<polars::frame::DataFrame, RepositoryError>;
 
     async fn get_available_expirations(

@@ -44,9 +44,139 @@ pub struct OptionPoint {
     pub is_call: bool,
 }
 
+/// ATM IV at a specific expiration (used for constant-maturity interpolation)
+#[derive(Debug, Clone)]
+pub struct ExpirationIv {
+    pub expiration: NaiveDate,
+    pub dte: i64,
+    pub atm_iv: f64,
+    pub atm_strike: f64,
+}
+
+/// Constant-maturity IV interpolation result
+#[derive(Debug, Clone)]
+pub struct ConstantMaturityResult {
+    pub target_dte: u32,
+    /// Interpolated IV at exactly target_dte
+    pub iv: f64,
+    /// Whether this was interpolated (true) or extrapolated (false)
+    pub is_interpolated: bool,
+    /// Bracketing expirations used [lower_dte, upper_dte] or None if extrapolated
+    pub bracket: Option<(i64, i64)>,
+}
+
+/// Constant-maturity IV interpolator
+///
+/// Interpolates in variance space (sigma^2 * T) to produce IVs at exact target DTEs.
+/// This makes IV time series directly comparable across days.
+pub struct ConstantMaturityInterpolator;
+
+impl ConstantMaturityInterpolator {
+    /// Interpolate ATM IV to exact target DTE using variance-space interpolation
+    ///
+    /// # Arguments
+    /// * `term_structure` - ATM IVs at various expirations, must be sorted by DTE ascending
+    /// * `target_dte` - Target DTE to interpolate to (e.g., 7, 14, 30, 60, 90)
+    ///
+    /// # Returns
+    /// ConstantMaturityResult with interpolated IV, or None if insufficient data
+    pub fn interpolate(
+        term_structure: &[ExpirationIv],
+        target_dte: u32,
+    ) -> Option<ConstantMaturityResult> {
+        if term_structure.is_empty() {
+            return None;
+        }
+
+        let target_dte_i64 = target_dte as i64;
+
+        // Find bracketing expirations
+        let mut lower: Option<&ExpirationIv> = None;
+        let mut upper: Option<&ExpirationIv> = None;
+
+        for exp_iv in term_structure {
+            if exp_iv.dte <= target_dte_i64 {
+                lower = Some(exp_iv);
+            } else if upper.is_none() {
+                upper = Some(exp_iv);
+                break;
+            }
+        }
+
+        match (lower, upper) {
+            (Some(l), Some(u)) => {
+                // Interpolate in variance space
+                let t1 = l.dte as f64 / 365.0;
+                let t2 = u.dte as f64 / 365.0;
+                let t_target = target_dte as f64 / 365.0;
+
+                // Total variance: sigma^2 * T
+                let var1 = l.atm_iv * l.atm_iv * t1;
+                let var2 = u.atm_iv * u.atm_iv * t2;
+
+                // Linear interpolation in variance
+                let denom = t2 - t1;
+                if denom.abs() < 1e-10 {
+                    return Some(ConstantMaturityResult {
+                        target_dte,
+                        iv: l.atm_iv,
+                        is_interpolated: true,
+                        bracket: Some((l.dte, u.dte)),
+                    });
+                }
+
+                let var_target = var1 + (var2 - var1) * (t_target - t1) / denom;
+
+                // Back out IV: sigma = sqrt(variance / T)
+                if t_target > 0.0 && var_target >= 0.0 {
+                    let iv = (var_target / t_target).sqrt();
+                    Some(ConstantMaturityResult {
+                        target_dte,
+                        iv,
+                        is_interpolated: true,
+                        bracket: Some((l.dte, u.dte)),
+                    })
+                } else {
+                    None
+                }
+            }
+            (Some(l), None) => {
+                // Target is beyond longest expiration - extrapolate flat
+                Some(ConstantMaturityResult {
+                    target_dte,
+                    iv: l.atm_iv,
+                    is_interpolated: false,
+                    bracket: None,
+                })
+            }
+            (None, Some(u)) => {
+                // Target is before shortest expiration - extrapolate flat
+                Some(ConstantMaturityResult {
+                    target_dte,
+                    iv: u.atm_iv,
+                    is_interpolated: false,
+                    bracket: None,
+                })
+            }
+            (None, None) => None,
+        }
+    }
+
+    /// Interpolate multiple target DTEs
+    pub fn interpolate_many(
+        term_structure: &[ExpirationIv],
+        targets: &[u32],
+    ) -> Vec<ConstantMaturityResult> {
+        targets
+            .iter()
+            .filter_map(|&target| Self::interpolate(term_structure, target))
+            .collect()
+    }
+}
+
 /// ATM IV computer - pure computational service
 pub struct AtmIvComputer {
-    bs_config: BSConfig,
+    pub bs_config: BSConfig,
 }
 
 impl AtmIvComputer {
@@ -100,6 +230,104 @@ impl AtmIvComputer {
             }
         }
 
+        results
+    }
+
+    /// Compute ATM IV for ALL available expirations
+    ///
+    /// Returns ATM IV for every expiration in the option chain, regardless of target DTEs.
+    /// Used for constant-maturity interpolation.
+    ///
+    /// # Arguments
+    /// * `options` - Vector of option data points
+    /// * `spot_price` - Underlying spot price
+    /// * `pricing_time` - Current time for TTM calculation
+    /// * `min_dte` - Minimum DTE to include (e.g., 3 to avoid expiry effects)
+    /// * `atm_method` - Method for selecting ATM strike
+    ///
+    /// # Returns
+    /// Vector of ExpirationIv sorted by DTE ascending
+    pub fn compute_all_atm_ivs(
+        &self,
+        options: &[OptionPoint],
+        spot_price: f64,
+        pricing_time: DateTime<Utc>,
+        min_dte: i64,
+        atm_method: AtmMethod,
+    ) -> Vec<ExpirationIv> {
+        let pricing_date = pricing_time.date_naive();
+
+        // Group options by expiration
+        let mut by_expiration: HashMap<NaiveDate, Vec<&OptionPoint>> = HashMap::new();
+        for opt in options {
+            by_expiration.entry(opt.expiration).or_default().push(opt);
+        }
+
+        // Compute ATM IV for each expiration
+        let mut results: Vec<ExpirationIv> = Vec::new();
+
+        for (expiration, exp_options) in by_expiration {
+            let dte = (expiration - pricing_date).num_days();
+            if dte < min_dte {
+                continue; // Skip expirations too close to expiry
+            }
+
+            // Select ATM strike
+            let atm_strike = match self.select_atm_strike(&exp_options, spot_price, atm_method) {
+                Some(s) => s,
+                None => continue,
+            };
+
+            // Calculate TTM
+            let ttm = dte as f64 / 365.25;
+
+            // Find call and put at ATM strike and compute IV
+            let mut call_iv: Option<f64> = None;
+            let mut put_iv: Option<f64> = None;
+
+            for opt in exp_options.iter() {
+                if (opt.strike - atm_strike).abs() < 1e-6 && opt.price > 0.0 {
+                    let iv = bs_implied_volatility(
+                        opt.price,
+                        spot_price,
+                        opt.strike,
+                        ttm,
+                        opt.is_call,
+                        &self.bs_config,
+                    );
+
+                    if let Some(iv_val) = iv {
+                        if iv_val >= self.bs_config.min_iv && iv_val <= self.bs_config.max_iv {
+                            if opt.is_call {
+                                call_iv = Some(iv_val);
+                            } else {
+                                put_iv = Some(iv_val);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Compute average IV
+            let avg_iv = match (call_iv, put_iv) {
+                (Some(c), Some(p)) => Some((c + p) / 2.0),
+                (Some(c), None) => Some(c),
+                (None, Some(p)) => Some(p),
+                (None, None) => None,
+            };
+
+            if let Some(iv) = avg_iv {
+                results.push(ExpirationIv {
+                    expiration,
+                    dte,
+                    atm_iv: iv,
+                    atm_strike,
+                });
+            }
+        }
+
+        // Sort by DTE ascending
+        results.sort_by_key(|r| r.dte);
         results
     }
 

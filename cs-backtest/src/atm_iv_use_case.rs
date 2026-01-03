@@ -6,10 +6,13 @@ use chrono::NaiveDate;
 use polars::prelude::*;
 use std::path::PathBuf;
 
-use cs_analytics::{AtmIvComputer, AtmMethod, BSConfig, OptionPoint};
+use cs_analytics::{
+    AtmIvComputer, AtmMethod, BSConfig, OptionPoint,
+    ConstantMaturityInterpolator,
+};
 use cs_domain::{
     repositories::{EquityDataRepository, OptionsDataRepository},
-    value_objects::{AtmIvConfig, AtmIvObservation},
+    value_objects::{AtmIvConfig, AtmIvObservation, IvInterpolationMethod},
     MarketTime, TradingDate,
 };
 
@@ -175,11 +178,72 @@ where
         // Build observation
         let mut obs = AtmIvObservation::new(symbol.to_string(), date, spot_price.value);
 
-        // Map results to observation fields based on target DTE
-        for result in results {
-            let target_dte = result.maturity_dte;
+        // Branch based on interpolation method
+        match config.interpolation_method {
+            IvInterpolationMethod::Rolling => {
+                // Existing rolling TTE logic
+                self.compute_rolling_ivs(
+                    &mut obs,
+                    &options,
+                    spot_price.to_f64(),
+                    pricing_time,
+                    config,
+                    atm_method,
+                )?;
+            }
+            IvInterpolationMethod::ConstantMaturity => {
+                // New constant-maturity logic
+                self.compute_constant_maturity_ivs(
+                    &mut obs,
+                    &options,
+                    spot_price.to_f64(),
+                    pricing_time,
+                    config,
+                    atm_method,
+                )?;
 
-            // Match to closest target
+                // Also compute rolling for comparison
+                self.compute_rolling_ivs(
+                    &mut obs,
+                    &options,
+                    spot_price.to_f64(),
+                    pricing_time,
+                    config,
+                    atm_method,
+                )?;
+            }
+        }
+
+        // Compute nearest expiration IV (always rolling)
+        self.compute_nearest_iv(&mut obs, &options, spot_price.to_f64(), pricing_time, atm_method, config)?;
+
+        // Calculate all spreads
+        obs.calculate_spreads();
+
+        Ok(Some(obs))
+    }
+
+    /// Compute rolling TTE IVs (existing logic extracted)
+    fn compute_rolling_ivs(
+        &self,
+        obs: &mut AtmIvObservation,
+        options: &[OptionPoint],
+        spot_price: f64,
+        pricing_time: chrono::DateTime<chrono::Utc>,
+        config: &AtmIvConfig,
+        atm_method: AtmMethod,
+    ) -> Result<(), IvTimeSeriesError> {
+        let results = self.atm_computer.compute_atm_ivs(
+            options,
+            spot_price,
+            pricing_time,
+            &config.maturity_targets,
+            config.maturity_tolerance,
+            atm_method,
+        );
+
+        for result in &results {
+            let target_dte = result.maturity_dte;
             if (target_dte - 30).abs() <= config.maturity_tolerance as i64 {
                 obs.atm_iv_30d = result.avg_iv;
             } else if (target_dte - 60).abs() <= config.maturity_tolerance as i64 {
@@ -189,10 +253,91 @@ where
             }
         }
 
-        // Calculate term spreads
-        obs.calculate_spreads();
+        Ok(())
+    }
 
-        Ok(Some(obs))
+    /// Compute constant-maturity IVs via variance interpolation
+    fn compute_constant_maturity_ivs(
+        &self,
+        obs: &mut AtmIvObservation,
+        options: &[OptionPoint],
+        spot_price: f64,
+        pricing_time: chrono::DateTime<chrono::Utc>,
+        config: &AtmIvConfig,
+        atm_method: AtmMethod,
+    ) -> Result<(), IvTimeSeriesError> {
+        // Get ATM IV for ALL expirations
+        let term_structure = self.atm_computer.compute_all_atm_ivs(
+            options,
+            spot_price,
+            pricing_time,
+            config.min_dte,
+            atm_method,
+        );
+
+        if term_structure.is_empty() {
+            return Ok(());
+        }
+
+        obs.cm_num_expirations = Some(term_structure.len());
+
+        // Interpolate to target maturities
+        let cm_results = ConstantMaturityInterpolator::interpolate_many(
+            &term_structure,
+            &config.maturity_targets,
+        );
+
+        let mut any_interpolated = false;
+        for result in cm_results {
+            if result.is_interpolated {
+                any_interpolated = true;
+            }
+
+            match result.target_dte {
+                7 => obs.cm_iv_7d = Some(result.iv),
+                14 => obs.cm_iv_14d = Some(result.iv),
+                21 => obs.cm_iv_21d = Some(result.iv),
+                30 => obs.cm_iv_30d = Some(result.iv),
+                60 => obs.cm_iv_60d = Some(result.iv),
+                90 => obs.cm_iv_90d = Some(result.iv),
+                _ => {}
+            }
+        }
+
+        obs.cm_interpolated = Some(any_interpolated);
+
+        Ok(())
+    }
+
+    /// Compute nearest expiration IV
+    fn compute_nearest_iv(
+        &self,
+        obs: &mut AtmIvObservation,
+        options: &[OptionPoint],
+        spot_price: f64,
+        pricing_time: chrono::DateTime<chrono::Utc>,
+        atm_method: AtmMethod,
+        config: &AtmIvConfig,
+    ) -> Result<(), IvTimeSeriesError> {
+        let nearest_results = self.atm_computer.compute_atm_ivs(
+            options,
+            spot_price,
+            pricing_time,
+            &[4, 7, 14, 21],
+            3,
+            atm_method,
+        );
+
+        if let Some(nearest_result) = nearest_results
+            .iter()
+            .filter(|r| r.maturity_dte > config.min_dte)
+            .min_by_key(|r| r.maturity_dte)
+        {
+            obs.atm_iv_nearest = nearest_result.avg_iv;
+            obs.nearest_dte = Some(nearest_result.maturity_dte);
+        }
+
+        Ok(())
     }
 
     /// Convert Polars DataFrame to vector of OptionPoints
@@ -264,6 +409,10 @@ where
             })
             .collect();
         let spots: Vec<f64> = result.observations.iter().map(|o| o.spot.to_string().parse::<f64>().unwrap_or(0.0)).collect();
+
+        // Rolling TTE fields (existing)
+        let iv_nearest: Vec<Option<f64>> = result.observations.iter().map(|o| o.atm_iv_nearest).collect();
+        let nearest_dte: Vec<Option<i64>> = result.observations.iter().map(|o| o.nearest_dte).collect();
         let iv_30d: Vec<Option<f64>> = result.observations.iter().map(|o| o.atm_iv_30d).collect();
         let iv_60d: Vec<Option<f64>> = result.observations.iter().map(|o| o.atm_iv_60d).collect();
         let iv_90d: Vec<Option<f64>> = result.observations.iter().map(|o| o.atm_iv_90d).collect();
@@ -272,15 +421,43 @@ where
         let spread_30_90: Vec<Option<f64>> =
             result.observations.iter().map(|o| o.term_spread_30_90).collect();
 
+        // Constant-Maturity fields (new)
+        let cm_iv_7d: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_iv_7d).collect();
+        let cm_iv_14d: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_iv_14d).collect();
+        let cm_iv_21d: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_iv_21d).collect();
+        let cm_iv_30d: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_iv_30d).collect();
+        let cm_iv_60d: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_iv_60d).collect();
+        let cm_iv_90d: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_iv_90d).collect();
+        let cm_interpolated: Vec<Option<bool>> = result.observations.iter().map(|o| o.cm_interpolated).collect();
+        let cm_num_expirations: Vec<Option<u32>> = result.observations.iter().map(|o| o.cm_num_expirations.map(|n| n as u32)).collect();
+        let cm_spread_7_30: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_spread_7_30).collect();
+        let cm_spread_30_60: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_spread_30_60).collect();
+        let cm_spread_30_90: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_spread_30_90).collect();
+
         let df = DataFrame::new(vec![
             Series::new("symbol", symbols),
             Series::new("date", dates),
             Series::new("spot", spots),
+            // Rolling TTE columns
+            Series::new("atm_iv_nearest", iv_nearest),
+            Series::new("nearest_dte", nearest_dte),
             Series::new("atm_iv_30d", iv_30d),
             Series::new("atm_iv_60d", iv_60d),
             Series::new("atm_iv_90d", iv_90d),
             Series::new("term_spread_30_60", spread_30_60),
             Series::new("term_spread_30_90", spread_30_90),
+            // Constant-Maturity columns
+            Series::new("cm_iv_7d", cm_iv_7d),
+            Series::new("cm_iv_14d", cm_iv_14d),
+            Series::new("cm_iv_21d", cm_iv_21d),
+            Series::new("cm_iv_30d", cm_iv_30d),
+            Series::new("cm_iv_60d", cm_iv_60d),
+            Series::new("cm_iv_90d", cm_iv_90d),
+            Series::new("cm_interpolated", cm_interpolated),
+            Series::new("cm_num_expirations", cm_num_expirations),
+            Series::new("cm_spread_7_30", cm_spread_7_30),
+            Series::new("cm_spread_30_60", cm_spread_30_60),
+            Series::new("cm_spread_30_90", cm_spread_30_90),
         ])?;
 
         // Write to parquet
