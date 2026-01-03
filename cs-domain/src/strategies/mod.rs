@@ -1,6 +1,7 @@
 pub mod atm;
 pub mod delta;
 pub mod iron_butterfly;
+pub mod straddle;
 
 use crate::entities::*;
 use crate::value_objects::*;
@@ -12,6 +13,7 @@ use thiserror::Error;
 pub use atm::ATMStrategy;
 pub use delta::{DeltaStrategy, DeltaScanMode};
 pub use iron_butterfly::IronButterflyStrategy;
+pub use straddle::StraddleStrategy;
 
 #[derive(Error, Debug)]
 pub enum StrategyError {
@@ -103,6 +105,8 @@ pub enum OptionStrategy {
     CalendarSpread,
     /// Iron butterfly (short straddle with protective wings)
     IronButterfly,
+    /// Long straddle (long ATM call + long ATM put)
+    Straddle,
 }
 
 impl Default for OptionStrategy {
@@ -131,12 +135,27 @@ pub trait SelectionStrategy: Send + Sync {
     /// Default implementation returns an error.
     fn select_iron_butterfly(
         &self,
-        event: &EarningsEvent,
-        spot: &SpotPrice,
-        chain_data: &OptionChainData,
+        _event: &EarningsEvent,
+        _spot: &SpotPrice,
+        _chain_data: &OptionChainData,
     ) -> Result<IronButterfly, StrategyError> {
         Err(StrategyError::UnsupportedStrategy(
             "Iron butterfly not supported by this selection strategy".to_string()
+        ))
+    }
+
+    /// Select a straddle opportunity
+    ///
+    /// Selects ATM strike and first expiration AFTER earnings date.
+    /// Default implementation returns UnsupportedStrategy error.
+    fn select_straddle(
+        &self,
+        _event: &EarningsEvent,
+        _spot: &SpotPrice,
+        _chain_data: &OptionChainData,
+    ) -> Result<crate::entities::Straddle, StrategyError> {
+        Err(StrategyError::UnsupportedStrategy(
+            "Straddle not supported by this selection strategy".to_string()
         ))
     }
 }

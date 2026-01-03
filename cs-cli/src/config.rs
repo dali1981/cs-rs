@@ -27,6 +27,7 @@ pub struct AppConfig {
     pub min_market_cap: Option<u64>,
     pub parallel: bool,
     pub max_entry_iv: Option<f64>,
+    pub min_notional: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +66,8 @@ pub struct StrategyConfig {
     pub delta_range: (f64, f64),
     pub delta_scan_steps: usize,
     pub wing_width: f64,
+    pub straddle_entry_days: usize,
+    pub straddle_exit_days: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +91,7 @@ impl Default for AppConfig {
             min_market_cap: None,
             parallel: true,
             max_entry_iv: None,
+            min_notional: None,
         }
     }
 }
@@ -136,6 +140,8 @@ impl Default for StrategyConfig {
             delta_range: (0.25, 0.75),
             delta_scan_steps: 5,
             wing_width: 10.0,
+            straddle_entry_days: 5,
+            straddle_exit_days: 1,
         }
     }
 }
@@ -232,6 +238,9 @@ impl AppConfig {
                 .unwrap_or(cs_domain::StrikeMatchMode::SameStrike),
             max_entry_iv: self.max_entry_iv,
             wing_width: self.strategy.wing_width,
+            straddle_entry_days: self.strategy.straddle_entry_days,
+            straddle_exit_days: self.strategy.straddle_exit_days,
+            min_notional: self.min_notional,
         }
     }
 }

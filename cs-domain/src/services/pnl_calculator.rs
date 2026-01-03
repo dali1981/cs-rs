@@ -12,6 +12,15 @@ pub struct PnLAttribution {
     pub unexplained: Decimal,
 }
 
+/// Leg-level P&L components (returns f64 for easy summing)
+#[derive(Debug, Clone, Default)]
+pub struct LegPnL {
+    pub delta: f64,
+    pub gamma: f64,
+    pub theta: f64,
+    pub vega: f64,
+}
+
 /// Calculate P&L attribution from Greeks (single leg or already-netted spread greeks)
 pub fn calculate_pnl_attribution(
     entry_greeks: &Greeks,
@@ -85,6 +94,65 @@ pub fn calculate_spread_pnl_attribution(
         theta: theta_pnl,
         vega: vega_pnl,
         unexplained,
+    }
+}
+
+/// Calculate P&L attribution for a single option leg
+///
+/// This is the fundamental building block for all multi-leg strategies.
+/// Each leg's P&L is calculated independently and then summed.
+///
+/// # Arguments
+/// * `entry_greeks` - Greeks at entry time
+/// * `entry_iv` - Implied volatility at entry (as decimal, e.g., 0.30 = 30%)
+/// * `exit_iv` - Implied volatility at exit (as decimal, e.g., 0.35 = 35%)
+/// * `spot_change` - Change in underlying price (exit_spot - entry_spot)
+/// * `days_held` - Number of days position was held
+/// * `position_sign` - +1.0 for long positions, -1.0 for short positions
+///
+/// # Returns
+/// LegPnL with delta, gamma, theta, vega components in f64 (for easy summing)
+///
+/// # Formula
+/// - Delta P&L = position_sign × delta × spot_change
+/// - Gamma P&L = position_sign × 0.5 × gamma × spot_change²
+/// - Theta P&L = position_sign × theta × days_held
+/// - Vega P&L = position_sign × vega × (exit_iv - entry_iv) × 100
+///
+/// The factor of 100 in vega is because:
+/// - Vega is quoted as P&L per 1% IV change
+/// - IV is stored as decimal (0.30 not 30)
+/// - So IV change of 0.05 = 5% needs × 100
+pub fn calculate_option_leg_pnl(
+    entry_greeks: Option<&Greeks>,
+    entry_iv: Option<f64>,
+    exit_iv: Option<f64>,
+    spot_change: f64,
+    days_held: f64,
+    position_sign: f64,
+) -> LegPnL {
+    match entry_greeks {
+        Some(greeks) => {
+            let delta_pnl = position_sign * greeks.delta * spot_change;
+            let gamma_pnl = position_sign * 0.5 * greeks.gamma * spot_change.powi(2);
+            let theta_pnl = position_sign * greeks.theta * days_held;
+
+            let vega_pnl = match (entry_iv, exit_iv) {
+                (Some(iv_entry), Some(iv_exit)) => {
+                    let iv_change = iv_exit - iv_entry;
+                    position_sign * greeks.vega * iv_change * 100.0
+                }
+                _ => 0.0,
+            };
+
+            LegPnL {
+                delta: delta_pnl,
+                gamma: gamma_pnl,
+                theta: theta_pnl,
+                vega: vega_pnl,
+            }
+        }
+        None => LegPnL::default(),
     }
 }
 

@@ -60,17 +60,45 @@ impl IVSurface {
         expiration: NaiveDate,
         is_call: bool,
     ) -> Option<f64> {
+        // Try to find IV for the requested option type
         let matching: Vec<_> = self.points.iter()
             .filter(|p| p.is_call == is_call)
             .collect();
 
-        if matching.is_empty() {
+        if !matching.is_empty() {
+            // Group by expiration
+            let mut by_expiry: BTreeMap<NaiveDate, Vec<&IVPoint>> = BTreeMap::new();
+            for p in &matching {
+                by_expiry.entry(p.expiration).or_default().push(p);
+            }
+
+            // Try exact expiration first
+            if let Some(points) = by_expiry.get(&expiration) {
+                if let Some(iv) = self.interpolate_strike(points, strike) {
+                    return Some(iv);
+                }
+            }
+
+            // Interpolate across expirations
+            if let Some(iv) = self.interpolate_expiration(&by_expiry, strike, expiration) {
+                return Some(iv);
+            }
+        }
+
+        // Fallback: Use put-call parity approximation
+        // For European options at the same strike, put IV ≈ call IV
+        // Try using the opposite type's IV if the requested type isn't available
+        let opposite_matching: Vec<_> = self.points.iter()
+            .filter(|p| p.is_call != is_call)
+            .collect();
+
+        if opposite_matching.is_empty() {
             return None;
         }
 
         // Group by expiration
         let mut by_expiry: BTreeMap<NaiveDate, Vec<&IVPoint>> = BTreeMap::new();
-        for p in &matching {
+        for p in &opposite_matching {
             by_expiry.entry(p.expiration).or_default().push(p);
         }
 

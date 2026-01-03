@@ -39,10 +39,29 @@ pub struct BacktestConfig {
     /// Wing width for iron butterfly strategy (in dollars)
     #[serde(default = "default_wing_width")]
     pub wing_width: f64,
+    /// Straddle: Entry N trading days before earnings (default: 5)
+    #[serde(default = "default_straddle_entry_days")]
+    pub straddle_entry_days: usize,
+    /// Straddle: Exit N trading days before earnings (default: 1)
+    #[serde(default = "default_straddle_exit_days")]
+    pub straddle_exit_days: usize,
+    /// Minimum daily option notional: sum(all option volumes for day) × 100 × stock_price
+    /// Measures total dollar liquidity in options traded that day
+    /// None = no filter, Some(100000.0) = $100k minimum daily option activity
+    #[serde(default)]
+    pub min_notional: Option<f64>,
 }
 
 fn default_wing_width() -> f64 {
     10.0
+}
+
+fn default_straddle_entry_days() -> usize {
+    5
+}
+
+fn default_straddle_exit_days() -> usize {
+    1
 }
 
 fn default_target_delta() -> f64 {
@@ -64,12 +83,14 @@ pub enum SpreadType {
     #[default]
     Calendar,
     IronButterfly,
+    Straddle,
 }
 
 impl SpreadType {
     pub fn from_string(s: &str) -> Self {
         match s.to_lowercase().replace('-', "_").as_str() {
             "iron_butterfly" | "ironbutterfly" | "butterfly" => SpreadType::IronButterfly,
+            "straddle" | "long_straddle" => SpreadType::Straddle,
             _ => SpreadType::Calendar,
         }
     }
@@ -119,6 +140,9 @@ impl Default for BacktestConfig {
             strike_match_mode: StrikeMatchMode::default(),
             max_entry_iv: None, // No filtering by default
             wing_width: default_wing_width(),
+            straddle_entry_days: default_straddle_entry_days(),
+            straddle_exit_days: default_straddle_exit_days(),
+            min_notional: None, // No filtering by default
         }
     }
 }

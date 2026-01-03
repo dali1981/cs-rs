@@ -3,18 +3,20 @@ use chrono::NaiveDate;
 use tracing::{info, debug};
 
 use cs_domain::*;
-use cs_domain::services::EarningsTradeTiming;
-use cs_domain::strategies::{DeltaStrategy, IronButterflyStrategy};
+use cs_domain::services::{EarningsTradeTiming, StraddleTradeTiming};
+use cs_domain::strategies::{DeltaStrategy, IronButterflyStrategy, StraddleStrategy};
 use crate::config::{BacktestConfig, SpreadType, SelectionType};
 use crate::trade_executor::TradeExecutor;
 use crate::iron_butterfly_executor::IronButterflyExecutor;
+use crate::straddle_executor::StraddleExecutor;
 use crate::iv_surface_builder::build_iv_surface;
 
-/// Unified trade result (either calendar spread or iron butterfly)
+/// Unified trade result (either calendar spread, iron butterfly, or straddle)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TradeResult {
     CalendarSpread(CalendarSpreadResult),
     IronButterfly(IronButterflyResult),
+    Straddle(StraddleResult),
 }
 
 impl TradeResult {
@@ -22,6 +24,7 @@ impl TradeResult {
         match self {
             TradeResult::CalendarSpread(r) => r.is_winner(),
             TradeResult::IronButterfly(r) => r.is_winner(),
+            TradeResult::Straddle(r) => r.is_winner(),
         }
     }
 
@@ -29,6 +32,7 @@ impl TradeResult {
         match self {
             TradeResult::CalendarSpread(r) => r.success,
             TradeResult::IronButterfly(r) => r.success,
+            TradeResult::Straddle(r) => r.success,
         }
     }
 
@@ -36,6 +40,7 @@ impl TradeResult {
         match self {
             TradeResult::CalendarSpread(r) => r.pnl,
             TradeResult::IronButterfly(r) => r.pnl,
+            TradeResult::Straddle(r) => r.pnl,
         }
     }
 
@@ -43,6 +48,7 @@ impl TradeResult {
         match self {
             TradeResult::CalendarSpread(r) => r.pnl_pct,
             TradeResult::IronButterfly(r) => r.pnl_pct,
+            TradeResult::Straddle(r) => r.pnl_pct,
         }
     }
 
@@ -50,13 +56,15 @@ impl TradeResult {
         match self {
             TradeResult::CalendarSpread(r) => &r.symbol,
             TradeResult::IronButterfly(r) => &r.symbol,
+            TradeResult::Straddle(r) => &r.symbol,
         }
     }
 
     pub fn option_type(&self) -> Option<finq_core::OptionType> {
         match self {
             TradeResult::CalendarSpread(r) => Some(r.option_type),
-            TradeResult::IronButterfly(_) => None, // Straddle has both call and put
+            TradeResult::IronButterfly(_) => None, // Has both call and put
+            TradeResult::Straddle(_) => None, // Has both call and put
         }
     }
 
@@ -64,6 +72,7 @@ impl TradeResult {
         match self {
             TradeResult::CalendarSpread(r) => r.strike,
             TradeResult::IronButterfly(r) => r.center_strike,
+            TradeResult::Straddle(r) => r.strike,
         }
     }
 }
@@ -293,6 +302,9 @@ where
             SpreadType::Calendar => {
                 self.execute_calendar_spread(start_date, end_date, option_type, on_progress).await
             }
+            SpreadType::Straddle => {
+                self.execute_straddle(start_date, end_date, on_progress).await
+            }
         }
     }
 
@@ -376,6 +388,10 @@ where
                     Ok(TradeResult::IronButterfly(_)) => {
                         // This should never happen when processing calendar spreads
                         unreachable!("Got iron butterfly result when processing calendar spread");
+                    }
+                    Ok(TradeResult::Straddle(_)) => {
+                        // This should never happen when processing calendar spreads
+                        unreachable!("Got straddle result when processing calendar spread");
                     }
                     Err(e) => dropped_events.push(e),
                 }
@@ -478,6 +494,10 @@ where
                         // This should never happen when processing iron butterflies
                         unreachable!("Got calendar spread result when processing iron butterfly");
                     }
+                    Ok(TradeResult::Straddle(_)) => {
+                        // This should never happen when processing iron butterflies
+                        unreachable!("Got straddle result when processing iron butterfly");
+                    }
                     Err(e) => dropped_events.push(e),
                 }
             }
@@ -508,6 +528,282 @@ where
             total_opportunities,
             dropped_events,
         })
+    }
+
+    async fn execute_straddle(
+        &self,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
+    ) -> Result<BacktestResult, BacktestError> {
+        let mut all_results: Vec<TradeResult> = Vec::new();
+        let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
+        let mut sessions_processed = 0;
+        let mut total_opportunities = 0;
+
+        // Create straddle strategy and timing
+        let strategy = StraddleStrategy::default();
+
+        let timing = StraddleTradeTiming::new(self.config.timing)
+            .with_entry_days(self.config.straddle_entry_days)
+            .with_exit_days(self.config.straddle_exit_days);
+
+        info!(
+            entry_days = self.config.straddle_entry_days,
+            exit_days = self.config.straddle_exit_days,
+            "Starting straddle backtest"
+        );
+
+        for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
+            sessions_processed += 1;
+
+            // Load earnings for wider window (need events where entry falls on session_date)
+            // Entry is N days before earnings, so look for earnings N days ahead
+            let lookahead = self.config.straddle_entry_days as i64 + 5;  // Buffer for weekends
+            let events_end = session_date + chrono::Duration::days(lookahead);
+            let events = self.earnings_repo
+                .load_earnings(session_date, events_end, self.config.symbols.as_deref())
+                .await
+                .map_err(|e| BacktestError::Repository(e.to_string()))?;
+
+            // Filter: Entry date == session_date
+            let to_enter: Vec<_> = events
+                .iter()
+                .filter(|e| timing.entry_date(e) == session_date)
+                .filter(|e| self.passes_market_cap_filter(e))
+                .cloned()
+                .collect();
+
+            if to_enter.is_empty() {
+                if let Some(ref callback) = on_progress {
+                    callback(SessionProgress {
+                        session_date,
+                        entries_count: 0,
+                        events_found: 0,
+                    });
+                }
+                continue;
+            }
+
+            debug!(
+                session_date = %session_date,
+                events_count = to_enter.len(),
+                "Processing straddle session"
+            );
+
+            // Process events
+            let session_results: Vec<_> = if self.config.parallel {
+                let futures: Vec<_> = to_enter
+                    .iter()
+                    .map(|event| self.process_straddle_event(event, &strategy, &timing))
+                    .collect();
+                futures::future::join_all(futures).await
+            } else {
+                let mut results = Vec::new();
+                for event in &to_enter {
+                    results.push(
+                        self.process_straddle_event(event, &strategy, &timing).await
+                    );
+                }
+                results
+            };
+
+            let mut session_entries = 0;
+            for result in session_results {
+                total_opportunities += 1;
+                match result {
+                    Ok(straddle_result) => {
+                        all_results.push(TradeResult::Straddle(straddle_result));
+                        session_entries += 1;
+                    }
+                    Err(e) => dropped_events.push(e),
+                }
+            }
+
+            if let Some(ref callback) = on_progress {
+                callback(SessionProgress {
+                    session_date,
+                    entries_count: session_entries,
+                    events_found: to_enter.len(),
+                });
+            }
+        }
+
+        let total_entries = all_results.len();
+
+        info!(
+            sessions_processed,
+            total_opportunities,
+            results_count = total_entries,
+            dropped_count = dropped_events.len(),
+            "Straddle backtest completed"
+        );
+
+        Ok(BacktestResult {
+            results: all_results,
+            sessions_processed,
+            total_entries,
+            total_opportunities,
+            dropped_events,
+        })
+    }
+
+    async fn process_straddle_event(
+        &self,
+        event: &EarningsEvent,
+        strategy: &StraddleStrategy,
+        timing: &StraddleTradeTiming,
+    ) -> Result<StraddleResult, TradeGenerationError> {
+        let entry_time = timing.entry_datetime(event);
+        let exit_time = timing.exit_datetime(event);
+        let entry_date = entry_time.date_naive();
+
+        // Get spot price at entry
+        let spot = self.equity_repo
+            .get_spot_price(&event.symbol, entry_time)
+            .await
+            .map_err(|_| TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "NO_SPOT_PRICE".into(),
+                details: Some(format!("No spot price at {}", entry_time)),
+                phase: "spot_price".into(),
+            })?;
+
+        // Get option chain data
+        let chain_df = self.options_repo
+            .get_option_bars(&event.symbol, entry_date)
+            .await
+            .map_err(|_| TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "NO_OPTIONS_DATA".into(),
+                details: Some(format!("No option data on {}", entry_date)),
+                phase: "option_data".into(),
+            })?;
+
+        // Check minimum daily notional filter
+        if !self.passes_notional_filter(&chain_df, spot.value, event)? {
+            return Err(TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "INSUFFICIENT_NOTIONAL".into(),
+                details: Some("Daily option notional below minimum threshold".to_string()),
+                phase: "notional_filter".into(),
+            });
+        }
+
+        // Get available expirations and strikes at entry
+        let expirations = self.options_repo
+            .get_available_expirations(&event.symbol, entry_date)
+            .await
+            .unwrap_or_default();
+
+        if expirations.is_empty() {
+            return Err(TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "NO_EXPIRATIONS".into(),
+                details: None,
+                phase: "chain_data".into(),
+            });
+        }
+
+        // Filter expirations to those after earnings
+        let valid_expirations: Vec<_> = expirations
+            .iter()
+            .filter(|&&exp| exp > event.earnings_date)
+            .copied()
+            .collect();
+
+        if valid_expirations.is_empty() {
+            return Err(TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "NO_POST_EARNINGS_EXPIRATION".into(),
+                details: Some("Need expiration after earnings date".into()),
+                phase: "chain_data".into(),
+            });
+        }
+
+        // Get strikes available across ALL valid expirations
+        let mut all_strikes = std::collections::HashSet::new();
+        for &expiration in &valid_expirations {
+            let exp_strikes = self.options_repo
+                .get_available_strikes(&event.symbol, expiration, entry_date)
+                .await
+                .unwrap_or_default();
+            all_strikes.extend(exp_strikes);
+        }
+        let mut strikes: Vec<_> = all_strikes.into_iter().collect();
+        strikes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        if strikes.is_empty() {
+            return Err(TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "NO_STRIKES".into(),
+                details: None,
+                phase: "chain_data".into(),
+            });
+        }
+
+        // Build IV surface for pricing interpolation
+        let iv_surface = build_iv_surface(
+            &chain_df,
+            spot.to_f64(),
+            entry_time,
+            &event.symbol,
+        );
+
+        let chain_data = OptionChainData {
+            expirations: valid_expirations,
+            strikes,
+            deltas: None,
+            volumes: None,
+            iv_ratios: None,
+            iv_surface,
+        };
+
+        // Select straddle
+        let straddle = strategy.select_straddle(event, &spot, &chain_data)
+            .map_err(|e| TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "STRATEGY_SELECTION_FAILED".into(),
+                details: Some(e.to_string()),
+                phase: "strategy".into(),
+            })?;
+
+        // Execute trade
+        let executor = StraddleExecutor::new(
+            self.options_repo.clone(),
+            self.equity_repo.clone(),
+        )
+        .with_pricing_model(self.config.pricing_model)
+        .with_max_entry_iv(self.config.max_entry_iv);
+
+        let result = executor.execute_trade(&straddle, event, entry_time, exit_time).await;
+
+        if !result.success {
+            return Err(TradeGenerationError {
+                symbol: result.symbol,
+                earnings_date: result.earnings_date,
+                earnings_time: result.earnings_time,
+                reason: result.failure_reason.map(|r| format!("{:?}", r)).unwrap_or("UNKNOWN".into()),
+                details: None,
+                phase: "execution".into(),
+            });
+        }
+
+        Ok(result)
     }
 
     fn create_strategy(&self) -> Box<dyn SelectionStrategy> {
@@ -580,16 +876,25 @@ where
                 phase: "option_data".into(),
             })?;
 
-        // Build IV surface for strategy selection (calendar spreads need this)
-        let iv_surface = match option_strategy {
-            OptionStrategy::CalendarSpread => build_iv_surface(
-                &chain_df,
-                spot.to_f64(),
-                entry_time,
-                &event.symbol,
-            ),
-            OptionStrategy::IronButterfly => None,
-        };
+        // Check minimum daily notional filter
+        if !self.passes_notional_filter(&chain_df, spot.value, event)? {
+            return Err(TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "INSUFFICIENT_NOTIONAL".into(),
+                details: Some("Daily option notional below minimum threshold".to_string()),
+                phase: "notional_filter".into(),
+            });
+        }
+
+        // Build IV surface for all strategies (needed for pricing interpolation)
+        let iv_surface = build_iv_surface(
+            &chain_df,
+            spot.to_f64(),
+            entry_time,
+            &event.symbol,
+        );
 
         // Get available expirations and strikes
         let expirations = self.options_repo
@@ -704,6 +1009,41 @@ where
 
                 Ok(TradeResult::IronButterfly(result))
             }
+            OptionStrategy::Straddle => {
+                // Select straddle
+                let straddle = strategy.select_straddle(event, &spot, &chain_data)
+                    .map_err(|e| TradeGenerationError {
+                        symbol: event.symbol.clone(),
+                        earnings_date: event.earnings_date,
+                        earnings_time: event.earnings_time,
+                        reason: "STRATEGY_ERROR".into(),
+                        details: Some(e.to_string()),
+                        phase: "strategy".into(),
+                    })?;
+
+                // Execute trade
+                let executor = StraddleExecutor::new(
+                    self.options_repo.clone(),
+                    self.equity_repo.clone(),
+                )
+                .with_pricing_model(self.config.pricing_model)
+                .with_max_entry_iv(self.config.max_entry_iv);
+
+                let result = executor.execute_trade(&straddle, event, entry_time, exit_time).await;
+
+                if !result.success {
+                    return Err(TradeGenerationError {
+                        symbol: result.symbol,
+                        earnings_date: result.earnings_date,
+                        earnings_time: result.earnings_time,
+                        reason: result.failure_reason.map(|r| format!("{:?}", r)).unwrap_or_else(|| "UNKNOWN".into()),
+                        details: None,
+                        phase: "execution".into(),
+                    });
+                }
+
+                Ok(TradeResult::Straddle(result))
+            }
         }
     }
 
@@ -744,6 +1084,66 @@ where
             (Some(_), None) => false,
             (None, _) => true,
         }
+    }
+
+    /// Check if option chain meets minimum daily notional threshold
+    /// Calculates: sum(all option volumes) × 100 × stock_price
+    fn passes_notional_filter(
+        &self,
+        chain_df: &polars::frame::DataFrame,
+        spot_price: rust_decimal::Decimal,
+        event: &EarningsEvent,
+    ) -> Result<bool, TradeGenerationError> {
+        use polars::prelude::*;
+
+        // If no filter configured, pass
+        let Some(min_notional) = self.config.min_notional else {
+            return Ok(true);
+        };
+
+        // Sum all volumes in the option chain
+        let volume_col = chain_df
+            .column("volume")
+            .map_err(|e| TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "NOTIONAL_FILTER_ERROR".into(),
+                details: Some(format!("Failed to read volume column: {}", e)),
+                phase: "notional_filter".into(),
+            })?;
+
+        let total_volume: i64 = volume_col
+            .i64()
+            .map_err(|e| TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "NOTIONAL_FILTER_ERROR".into(),
+                details: Some(format!("Failed to cast volume to i64: {}", e)),
+                phase: "notional_filter".into(),
+            })?
+            .sum()
+            .unwrap_or(0);
+
+        // Calculate total notional: volume × 100 shares × stock price
+        // Convert Decimal to f64 using string conversion (safe for display values)
+        let spot_f64: f64 = spot_price.to_string().parse().unwrap_or(0.0);
+        let daily_notional = (total_volume as f64) * 100.0 * spot_f64;
+
+        if daily_notional < min_notional {
+            debug!(
+                symbol = %event.symbol,
+                spot = %spot_price,
+                total_volume = total_volume,
+                daily_notional = daily_notional,
+                min_required = min_notional,
+                "Rejected: daily option notional below minimum"
+            );
+            return Ok(false);
+        }
+
+        Ok(true)
     }
 }
 

@@ -212,6 +212,23 @@ pub struct AtmIvObservation {
     /// IV-HV spread at 30d (volatility risk premium)
     #[serde(default)]
     pub iv_hv_spread_30d: Option<f64>,
+
+    // === Expected Move fields (from straddle) ===
+    /// ATM straddle price for nearest expiration
+    #[serde(default)]
+    pub straddle_price_nearest: Option<f64>,
+    /// Expected move (%) = Straddle / Spot × 100
+    #[serde(default)]
+    pub expected_move_pct: Option<f64>,
+    /// Expected move using 85% rule = Straddle × 0.85 / Spot × 100
+    #[serde(default)]
+    pub expected_move_85_pct: Option<f64>,
+    /// ATM straddle price for ~30 DTE expiration
+    #[serde(default)]
+    pub straddle_price_30d: Option<f64>,
+    /// Expected move for 30 DTE options (%)
+    #[serde(default)]
+    pub expected_move_30d_pct: Option<f64>,
 }
 
 impl AtmIvObservation {
@@ -243,6 +260,11 @@ impl AtmIvObservation {
             hv_30d: None,
             hv_60d: None,
             iv_hv_spread_30d: None,
+            straddle_price_nearest: None,
+            expected_move_pct: None,
+            expected_move_85_pct: None,
+            straddle_price_30d: None,
+            expected_move_30d_pct: None,
         }
     }
 
@@ -371,6 +393,242 @@ impl Default for HvConfig {
             windows: vec![10, 20, 30, 60],
             annualization_factor: 252.0,
             min_data_points: 20,
+        }
+    }
+}
+
+/// Direction of price move
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MoveDirection {
+    /// Price moved up
+    Up,
+    /// Price moved down
+    Down,
+    /// Price moved less than threshold (typically 0.5%)
+    Flat,
+}
+
+impl MoveDirection {
+    /// Determine move direction from percentage change
+    ///
+    /// # Arguments
+    /// * `pct_change` - Percentage change (positive = up, negative = down)
+    /// * `flat_threshold` - Threshold below which move is considered flat (default 0.5%)
+    pub fn from_pct_change(pct_change: f64, flat_threshold: f64) -> Self {
+        if pct_change.abs() < flat_threshold {
+            MoveDirection::Flat
+        } else if pct_change > 0.0 {
+            MoveDirection::Up
+        } else {
+            MoveDirection::Down
+        }
+    }
+}
+
+impl Default for MoveDirection {
+    fn default() -> Self {
+        Self::Flat
+    }
+}
+
+/// Earnings outcome with expected vs actual move comparison
+///
+/// Tracks pre-earnings expectations vs post-earnings reality
+/// to determine whether gamma (realized move) dominated vega (IV crush).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EarningsOutcome {
+    /// Stock symbol
+    pub symbol: String,
+    /// Earnings announcement date
+    pub earnings_date: NaiveDate,
+    /// Timing of announcement (BMO/AMC)
+    pub earnings_time: EarningsTime,
+
+    // === Pre-earnings state (close before) ===
+    /// Spot price before earnings
+    pub pre_spot: Decimal,
+    /// ATM straddle price before earnings
+    pub pre_straddle: Decimal,
+    /// Expected move as percentage of spot
+    pub expected_move_pct: f64,
+    /// 30-day IV before earnings
+    pub pre_iv_30d: f64,
+
+    // === Post-earnings state (open/close after) ===
+    /// Spot price after earnings
+    pub post_spot: Decimal,
+    /// 30-day IV after earnings (for IV crush calculation)
+    pub post_iv_30d: Option<f64>,
+
+    // === Actual move ===
+    /// Absolute dollar move
+    pub actual_move: Decimal,
+    /// Move as percentage of pre_spot
+    pub actual_move_pct: f64,
+    /// Direction of the move
+    pub actual_direction: MoveDirection,
+
+    // === Comparison metrics ===
+    /// Move ratio = actual_move_pct / expected_move_pct (>1 = gamma wins)
+    pub move_ratio: f64,
+    /// IV crush = (pre_iv - post_iv) / pre_iv
+    pub iv_crush_pct: Option<f64>,
+    /// Did gamma dominate vega? (actual > expected)
+    pub gamma_dominated: bool,
+}
+
+impl EarningsOutcome {
+    /// Create a new earnings outcome from pre and post data
+    pub fn new(
+        symbol: String,
+        earnings_date: NaiveDate,
+        earnings_time: EarningsTime,
+        pre_spot: Decimal,
+        pre_straddle: Decimal,
+        pre_iv_30d: f64,
+        post_spot: Decimal,
+        post_iv_30d: Option<f64>,
+    ) -> Self {
+        let pre_spot_f64: f64 = pre_spot.try_into().unwrap_or(0.0);
+        let post_spot_f64: f64 = post_spot.try_into().unwrap_or(0.0);
+        let pre_straddle_f64: f64 = pre_straddle.try_into().unwrap_or(0.0);
+
+        // Expected move = straddle / spot * 100
+        let expected_move_pct = if pre_spot_f64 > 0.0 {
+            (pre_straddle_f64 / pre_spot_f64) * 100.0
+        } else {
+            0.0
+        };
+
+        // Actual move
+        let actual_move = if post_spot >= pre_spot {
+            post_spot - pre_spot
+        } else {
+            pre_spot - post_spot
+        };
+        let actual_move_f64: f64 = actual_move.try_into().unwrap_or(0.0);
+
+        let actual_move_pct = if pre_spot_f64 > 0.0 {
+            (actual_move_f64 / pre_spot_f64) * 100.0
+        } else {
+            0.0
+        };
+
+        // Direction
+        let pct_change = if pre_spot_f64 > 0.0 {
+            ((post_spot_f64 - pre_spot_f64) / pre_spot_f64) * 100.0
+        } else {
+            0.0
+        };
+        let actual_direction = MoveDirection::from_pct_change(pct_change, 0.5);
+
+        // Move ratio
+        let move_ratio = if expected_move_pct > 0.0 {
+            actual_move_pct / expected_move_pct
+        } else {
+            0.0
+        };
+
+        // IV crush
+        let iv_crush_pct = post_iv_30d.map(|post_iv| {
+            if pre_iv_30d > 0.0 {
+                (pre_iv_30d - post_iv) / pre_iv_30d
+            } else {
+                0.0
+            }
+        });
+
+        // Gamma dominated if actual > expected
+        let gamma_dominated = actual_move_pct > expected_move_pct;
+
+        Self {
+            symbol,
+            earnings_date,
+            earnings_time,
+            pre_spot,
+            pre_straddle,
+            expected_move_pct,
+            pre_iv_30d,
+            post_spot,
+            post_iv_30d,
+            actual_move,
+            actual_move_pct,
+            actual_direction,
+            move_ratio,
+            iv_crush_pct,
+            gamma_dominated,
+        }
+    }
+}
+
+/// Summary statistics for earnings analysis
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EarningsSummaryStats {
+    /// Total earnings events analyzed
+    pub total_events: usize,
+    /// Number where actual > expected (gamma won)
+    pub gamma_dominated_count: usize,
+    /// Number where actual < expected (vega won)
+    pub vega_dominated_count: usize,
+    /// Average of actual/expected ratios
+    pub avg_move_ratio: f64,
+    /// Average IV crush percentage
+    pub avg_iv_crush_pct: f64,
+    /// Average expected move percentage
+    pub avg_expected_move_pct: f64,
+    /// Average actual move percentage
+    pub avg_actual_move_pct: f64,
+    /// Number of upward moves
+    pub up_moves: usize,
+    /// Number of downward moves
+    pub down_moves: usize,
+}
+
+impl EarningsSummaryStats {
+    /// Compute summary statistics from a list of earnings outcomes
+    pub fn from_outcomes(outcomes: &[EarningsOutcome]) -> Self {
+        if outcomes.is_empty() {
+            return Self {
+                total_events: 0,
+                gamma_dominated_count: 0,
+                vega_dominated_count: 0,
+                avg_move_ratio: 0.0,
+                avg_iv_crush_pct: 0.0,
+                avg_expected_move_pct: 0.0,
+                avg_actual_move_pct: 0.0,
+                up_moves: 0,
+                down_moves: 0,
+            };
+        }
+
+        let total = outcomes.len();
+        let gamma_count = outcomes.iter().filter(|o| o.gamma_dominated).count();
+        let vega_count = total - gamma_count;
+
+        let avg_move_ratio = outcomes.iter().map(|o| o.move_ratio).sum::<f64>() / total as f64;
+        let avg_expected = outcomes.iter().map(|o| o.expected_move_pct).sum::<f64>() / total as f64;
+        let avg_actual = outcomes.iter().map(|o| o.actual_move_pct).sum::<f64>() / total as f64;
+
+        let iv_crushes: Vec<f64> = outcomes.iter().filter_map(|o| o.iv_crush_pct).collect();
+        let avg_crush = if iv_crushes.is_empty() {
+            0.0
+        } else {
+            iv_crushes.iter().sum::<f64>() / iv_crushes.len() as f64
+        };
+
+        let up_moves = outcomes.iter().filter(|o| o.actual_direction == MoveDirection::Up).count();
+        let down_moves = outcomes.iter().filter(|o| o.actual_direction == MoveDirection::Down).count();
+
+        Self {
+            total_events: total,
+            gamma_dominated_count: gamma_count,
+            vega_dominated_count: vega_count,
+            avg_move_ratio,
+            avg_iv_crush_pct: avg_crush,
+            avg_expected_move_pct: avg_expected,
+            avg_actual_move_pct: avg_actual,
+            up_moves,
+            down_moves,
         }
     }
 }

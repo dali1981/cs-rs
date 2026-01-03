@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use cs_analytics::{
     AtmIvComputer, AtmMethod, BSConfig,
     ConstantMaturityInterpolator, ExpirationIv,
+    StraddlePriceComputer,
 };
 use cs_domain::{
     datetime::TradingTimestamp,
@@ -294,6 +295,9 @@ where
                 self.compute_rolling_ivs(&mut obs, &iv_results, spot_f64, config, atm_method);
             }
         }
+
+        // Compute straddle prices and expected moves
+        self.compute_straddle_and_expected_move(&mut obs, &options_with_timestamps, date, atm_method);
 
         // Calculate term spreads
         obs.calculate_spreads();
@@ -596,6 +600,73 @@ where
         obs.cm_interpolated = Some(any_interpolated);
     }
 
+    /// Compute straddle price and expected move from timestamped options
+    fn compute_straddle_and_expected_move(
+        &self,
+        obs: &mut AtmIvObservation,
+        options: &[TimestampedOption],
+        date: NaiveDate,
+        atm_method: AtmMethod,
+    ) {
+        if options.is_empty() {
+            return;
+        }
+
+        let spot_f64 = obs.spot.to_string().parse::<f64>().unwrap_or(0.0);
+        if spot_f64 <= 0.0 {
+            return;
+        }
+
+        // Convert to format expected by StraddlePriceComputer
+        let option_data: Vec<(f64, NaiveDate, f64, bool)> = options
+            .iter()
+            .map(|o| (o.strike, o.expiration, o.price, o.is_call))
+            .collect();
+
+        // Convert ATM method
+        let straddle_atm_method = match atm_method {
+            AtmMethod::Closest => cs_analytics::AtmMethod::Closest,
+            AtmMethod::BelowSpot => cs_analytics::AtmMethod::BelowSpot,
+            AtmMethod::AboveSpot => cs_analytics::AtmMethod::AboveSpot,
+        };
+
+        // Compute straddle for nearest expiration
+        if let Some(straddle_nearest) = StraddlePriceComputer::compute_straddle(
+            &option_data,
+            spot_f64,
+            date,
+            None, // No target DTE, use nearest
+            1,    // Min DTE
+            straddle_atm_method,
+        ) {
+            obs.straddle_price_nearest = Some(straddle_nearest.straddle_price);
+            obs.expected_move_pct = Some(StraddlePriceComputer::expected_move(
+                straddle_nearest.straddle_price,
+                spot_f64,
+            ));
+            obs.expected_move_85_pct = Some(StraddlePriceComputer::expected_move_85(
+                straddle_nearest.straddle_price,
+                spot_f64,
+            ));
+        }
+
+        // Compute straddle for 30-day options (with 7-day tolerance)
+        if let Some(straddle_30d) = StraddlePriceComputer::compute_straddle_for_dte(
+            &option_data,
+            spot_f64,
+            date,
+            30,  // Target 30 DTE
+            7,   // Tolerance
+            straddle_atm_method,
+        ) {
+            obs.straddle_price_30d = Some(straddle_30d.straddle_price);
+            obs.expected_move_30d_pct = Some(StraddlePriceComputer::expected_move(
+                straddle_30d.straddle_price,
+                spot_f64,
+            ));
+        }
+    }
+
     /// Save observations to Parquet file
     pub fn save_to_parquet(
         result: &MinuteAlignedIvResult,
@@ -655,6 +726,13 @@ where
         let hv_60d: Vec<Option<f64>> = result.observations.iter().map(|o| o.hv_60d).collect();
         let iv_hv_spread_30d: Vec<Option<f64>> = result.observations.iter().map(|o| o.iv_hv_spread_30d).collect();
 
+        // Expected Move columns (from straddle)
+        let straddle_nearest: Vec<Option<f64>> = result.observations.iter().map(|o| o.straddle_price_nearest).collect();
+        let expected_move_pct: Vec<Option<f64>> = result.observations.iter().map(|o| o.expected_move_pct).collect();
+        let expected_move_85_pct: Vec<Option<f64>> = result.observations.iter().map(|o| o.expected_move_85_pct).collect();
+        let straddle_30d: Vec<Option<f64>> = result.observations.iter().map(|o| o.straddle_price_30d).collect();
+        let expected_move_30d_pct: Vec<Option<f64>> = result.observations.iter().map(|o| o.expected_move_30d_pct).collect();
+
         let df = DataFrame::new(vec![
             Series::new("symbol", symbols),
             Series::new("date", dates),
@@ -685,6 +763,12 @@ where
             Series::new("hv_30d", hv_30d),
             Series::new("hv_60d", hv_60d),
             Series::new("iv_hv_spread_30d", iv_hv_spread_30d),
+            // Expected Move columns
+            Series::new("straddle_price_nearest", straddle_nearest),
+            Series::new("expected_move_pct", expected_move_pct),
+            Series::new("expected_move_85_pct", expected_move_85_pct),
+            Series::new("straddle_price_30d", straddle_30d),
+            Series::new("expected_move_30d_pct", expected_move_30d_pct),
         ])?;
 
         // Write to parquet

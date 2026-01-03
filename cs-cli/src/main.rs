@@ -11,13 +11,13 @@ use tabled::{Table, Tabled};
 use tracing::{info, Level};
 use tracing_subscriber;
 
-use cs_backtest::{BacktestUseCase, GenerateIvTimeSeriesUseCase, MinuteAlignedIvUseCase};
+use cs_backtest::{BacktestUseCase, EarningsAnalysisUseCase, GenerateIvTimeSeriesUseCase, MinuteAlignedIvUseCase};
 use cs_domain::{
     infrastructure::{
         EarningsReaderAdapter, FinqEquityRepository, FinqOptionsRepository,
-        ParquetResultsRepository,
+        ParquetEarningsRepository, ParquetResultsRepository,
     },
-    value_objects::AtmIvConfig,
+    value_objects::{AtmIvConfig, TimingConfig},
     ResultsRepository,
 };
 
@@ -131,6 +131,15 @@ enum Commands {
         /// Wing width for iron butterfly strategy (distance from ATM to wings)
         #[arg(long)]
         wing_width: Option<f64>,
+        /// Straddle: Entry N trading days before earnings (default: 5)
+        #[arg(long, default_value = "5")]
+        straddle_entry_days: usize,
+        /// Straddle: Exit N trading days before earnings (default: 1)
+        #[arg(long, default_value = "1")]
+        straddle_exit_days: usize,
+        /// Minimum daily option notional: sum(all option volumes) × 100 × stock_price (e.g., 100000 for $100k)
+        #[arg(long)]
+        min_notional: Option<f64>,
     },
 
     /// Analyze results from a run
@@ -192,6 +201,28 @@ enum Commands {
         #[arg(long, value_delimiter = ',')]
         hv_windows: Option<Vec<usize>>,
     },
+
+    /// Analyze expected vs actual moves on earnings events
+    EarningsAnalysis {
+        /// Symbol(s) to analyze (comma-separated)
+        #[arg(long, value_delimiter = ',', required = true)]
+        symbols: Vec<String>,
+        /// Start date (YYYY-MM-DD)
+        #[arg(long)]
+        start: String,
+        /// End date (YYYY-MM-DD)
+        #[arg(long)]
+        end: String,
+        /// Earnings data directory
+        #[arg(long, env = "EARNINGS_DATA_DIR")]
+        earnings_dir: Option<PathBuf>,
+        /// Output format (parquet, csv, json)
+        #[arg(long, default_value = "parquet")]
+        format: String,
+        /// Output file path (optional, defaults to ./earnings_analysis_<symbol>.parquet)
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(Tabled)]
@@ -246,6 +277,9 @@ async fn main() -> Result<()> {
             strike_match_mode,
             max_entry_iv,
             wing_width,
+            straddle_entry_days,
+            straddle_exit_days,
+            min_notional,
         } => {
             run_backtest(
                 conf,
@@ -277,6 +311,9 @@ async fn main() -> Result<()> {
                 strike_match_mode,
                 max_entry_iv,
                 wing_width,
+                straddle_entry_days,
+                straddle_exit_days,
+                min_notional,
             )
             .await?;
         }
@@ -326,6 +363,25 @@ async fn main() -> Result<()> {
             )
             .await?;
         }
+        Commands::EarningsAnalysis {
+            symbols,
+            start,
+            end,
+            earnings_dir,
+            format,
+            output,
+        } => {
+            run_earnings_analysis_command(
+                cli.data_dir.as_ref(),
+                earnings_dir.as_ref(),
+                symbols,
+                &start,
+                &end,
+                &format,
+                output,
+            )
+            .await?;
+        }
     }
 
     Ok(())
@@ -357,6 +413,9 @@ fn build_cli_overrides(
     strike_match_mode_str: Option<String>,
     max_entry_iv: Option<f64>,
     wing_width: Option<f64>,
+    straddle_entry_days: Option<usize>,
+    straddle_exit_days: Option<usize>,
+    min_notional: Option<f64>,
 ) -> Result<CliOverrides> {
     // Parse delta range if provided
     let delta_range = if let Some(ref range_str) = delta_range_str {
@@ -426,6 +485,15 @@ fn build_cli_overrides(
         min_market_cap,
         parallel: if no_parallel { Some(false) } else { None },
         max_entry_iv,
+        straddle: if straddle_entry_days.is_some() || straddle_exit_days.is_some() {
+            Some(CliStraddle {
+                straddle_entry_days,
+                straddle_exit_days,
+            })
+        } else {
+            None
+        },
+        min_notional,
     })
 }
 
@@ -459,6 +527,9 @@ async fn run_backtest(
     strike_match_mode_str: Option<String>,
     max_entry_iv: Option<f64>,
     wing_width: Option<f64>,
+    straddle_entry_days: usize,
+    straddle_exit_days: usize,
+    min_notional: Option<f64>,
 ) -> Result<()> {
     // Parse dates
     let start_date = NaiveDate::parse_from_str(start_str, "%Y-%m-%d")
@@ -472,7 +543,8 @@ async fn run_backtest(
         let spread = match spread_str.to_lowercase().replace('-', "_").as_str() {
             "calendar" => "calendar",
             "iron_butterfly" | "ironbutterfly" | "butterfly" => "iron_butterfly",
-            _ => anyhow::bail!("Invalid spread type: {}. Must be 'calendar' or 'iron-butterfly'", spread_str),
+            "straddle" | "long_straddle" => "straddle",
+            _ => anyhow::bail!("Invalid spread type: {}. Must be 'calendar', 'iron-butterfly', or 'straddle'", spread_str),
         };
 
         // Validate arguments based on spread type
@@ -496,6 +568,14 @@ async fn run_backtest(
                 // Default to Call for iron butterfly (will be ignored in execution)
                 finq_core::OptionType::Call
             }
+            "straddle" => {
+                // Straddle FORBIDS option-type
+                if option_type_str.is_some() {
+                    anyhow::bail!("--option-type is invalid for straddle (uses both calls and puts)");
+                }
+                // Default to Call for straddle (will be ignored in execution)
+                finq_core::OptionType::Call
+            }
             _ => unreachable!(),
         };
 
@@ -507,6 +587,14 @@ async fn run_backtest(
         // Additional validation for calendar
         if spread == "calendar" && wing_width.is_some() {
             anyhow::bail!("--wing-width is only valid for iron-butterfly spreads");
+        }
+
+        // Additional validation for straddle
+        if spread == "straddle" && strike_match_mode_str.is_some() {
+            anyhow::bail!("--strike-match-mode is not applicable to straddle strategy");
+        }
+        if spread == "straddle" && wing_width.is_some() {
+            anyhow::bail!("--wing-width is not applicable to straddle strategy");
         }
 
         // Parse selection type if provided
@@ -577,6 +665,9 @@ async fn run_backtest(
         strike_match_mode_str,
         max_entry_iv,
         wing_width,
+        Some(straddle_entry_days),
+        Some(straddle_exit_days),
+        min_notional,
     )?;
 
     // Load configuration with layering
@@ -604,6 +695,12 @@ async fn run_backtest(
         cs_backtest::SpreadType::IronButterfly => {
             println!("  Spread:        Iron Butterfly");
             println!("  Wing width:    ${:.2}", backtest_config.wing_width);
+        }
+        cs_backtest::SpreadType::Straddle => {
+            println!("  Spread:        Straddle (Long Volatility)");
+            println!("  Entry:         {} trading days before earnings", backtest_config.straddle_entry_days);
+            println!("  Exit:          {} trading day(s) before earnings", backtest_config.straddle_exit_days);
+            println!("  Expiration:    First expiry after earnings");
         }
     }
 
@@ -772,12 +869,34 @@ async fn run_backtest(
     // Show dropped events summary
     if !result.dropped_events.is_empty() {
         println!("{}", style("Dropped Events:").bold().yellow());
-        let mut reason_counts = std::collections::HashMap::new();
+
+        // Group by reason for summary
+        let mut reason_groups: std::collections::HashMap<String, Vec<_>> = std::collections::HashMap::new();
         for event in &result.dropped_events {
-            *reason_counts.entry(&event.reason).or_insert(0) += 1;
+            reason_groups.entry(event.reason.clone()).or_insert_with(Vec::new).push(event);
         }
-        for (reason, count) in reason_counts.iter() {
-            println!("  {}: {} events", reason, count);
+
+        // Show each reason group with examples
+        for (reason, events) in reason_groups.iter() {
+            println!("  {}: {} events", reason, events.len());
+
+            // Show first 3 examples with symbol and date
+            for (i, event) in events.iter().take(3).enumerate() {
+                let details_str = event.details.as_ref()
+                    .map(|d| format!(" - {}", d))
+                    .unwrap_or_default();
+                println!("    {} {} ({}){}",
+                    if i == 0 { "↳" } else { " " },
+                    event.symbol,
+                    event.earnings_date,
+                    details_str
+                );
+            }
+
+            // Show "and N more" if there are more than 3
+            if events.len() > 3 {
+                println!("      ... and {} more", events.len() - 3);
+            }
         }
         println!();
     }
@@ -982,5 +1101,235 @@ async fn run_atm_iv_command(
     println!();
     println!("{}", style("Done!").bold().green());
 
+    Ok(())
+}
+
+/// Run earnings analysis command
+async fn run_earnings_analysis_command(
+    data_dir: Option<&PathBuf>,
+    earnings_dir: Option<&PathBuf>,
+    symbols: Vec<String>,
+    start_str: &str,
+    end_str: &str,
+    format: &str,
+    output: Option<PathBuf>,
+) -> Result<()> {
+    let data_dir = data_dir
+        .map(|p| p.clone())
+        .or_else(|| std::env::var("FINQ_DATA_DIR").ok().map(PathBuf::from))
+        .context("Data directory not specified. Use --data-dir or set FINQ_DATA_DIR")?;
+
+    let earnings_dir = earnings_dir
+        .map(|p| p.clone())
+        .or_else(|| std::env::var("EARNINGS_DATA_DIR").ok().map(PathBuf::from))
+        .context("Earnings directory not specified. Use --earnings-dir or set EARNINGS_DATA_DIR")?;
+
+    let start_date = NaiveDate::parse_from_str(start_str, "%Y-%m-%d")
+        .context(format!("Invalid start date: {}", start_str))?;
+    let end_date = NaiveDate::parse_from_str(end_str, "%Y-%m-%d")
+        .context(format!("Invalid end date: {}", end_str))?;
+
+    println!("{}", style("Earnings Analysis").bold().cyan());
+    println!("{}", style("=".repeat(60)).cyan());
+    println!();
+    println!("  Symbols:     {}", symbols.join(", "));
+    println!("  Date Range:  {} to {}", start_date, end_date);
+    println!("  Data Dir:    {:?}", data_dir);
+    println!("  Earnings:    {:?}", earnings_dir);
+    println!();
+
+    // Create repositories
+    let equity_repo = Arc::new(FinqEquityRepository::new(data_dir.clone()));
+    let options_repo = Arc::new(FinqOptionsRepository::new(data_dir));
+    let earnings_repo = Arc::new(EarningsReaderAdapter::new(earnings_dir));
+
+    // Create use case
+    let use_case = EarningsAnalysisUseCase::with_default_timing(
+        equity_repo,
+        options_repo,
+        earnings_repo,
+    );
+
+    // Default config
+    let config = AtmIvConfig::default();
+
+    // Accumulate all outcomes across symbols
+    let mut all_outcomes = Vec::new();
+
+    // Process each symbol
+    for symbol in symbols {
+        println!("{}", style(format!("Analyzing {}...", symbol)).bold());
+        println!();
+
+        match use_case.analyze_earnings(&symbol, start_date, end_date, &config).await {
+            Ok(result) => {
+                println!();
+                println!("{}", style("Summary Statistics:").bold());
+                println!("  Total Events: {}", result.summary.total_events);
+                println!("  Gamma Wins:   {} ({:.1}%)",
+                         result.summary.gamma_dominated_count,
+                         100.0 * result.summary.gamma_dominated_count as f64 / result.summary.total_events as f64);
+                println!("  Vega Wins:    {} ({:.1}%)",
+                         result.summary.vega_dominated_count,
+                         100.0 * result.summary.vega_dominated_count as f64 / result.summary.total_events as f64);
+                println!("  Avg Expected: {:.2}%", result.summary.avg_expected_move_pct);
+                println!("  Avg Actual:   {:.2}%", result.summary.avg_actual_move_pct);
+                println!("  Avg Ratio:    {:.2}x", result.summary.avg_move_ratio);
+
+                if result.summary.avg_iv_crush_pct > 0.0 {
+                    println!("  Avg IV Crush: {:.1}%", result.summary.avg_iv_crush_pct * 100.0);
+                }
+
+                // Collect outcomes from this symbol
+                all_outcomes.extend(result.outcomes);
+            }
+            Err(e) => {
+                println!("  {}", style(format!("Error: {}", e)).red());
+            }
+        }
+
+        println!();
+    }
+
+    // Save combined results
+    if !all_outcomes.is_empty() {
+        let output_path = output.unwrap_or_else(|| {
+            PathBuf::from(format!("./earnings_analysis.{}", format))
+        });
+
+        // Create combined result
+        use cs_backtest::EarningsAnalysisResult;
+        use cs_domain::value_objects::EarningsSummaryStats;
+
+        let summary = EarningsSummaryStats::from_outcomes(&all_outcomes);
+        let combined_result = EarningsAnalysisResult {
+            symbol: "MULTI".to_string(),
+            outcomes: all_outcomes,
+            summary,
+        };
+
+        match format {
+            "parquet" => save_earnings_parquet(&combined_result, &output_path)?,
+            "csv" => save_earnings_csv(&combined_result, &output_path)?,
+            "json" => save_earnings_json(&combined_result, &output_path)?,
+            _ => return Err(anyhow::anyhow!("Unsupported format: {}", format)),
+        }
+
+        println!();
+        println!("{}", style(format!("Combined results saved to {:?}", output_path)).green().bold());
+        println!();
+        println!("{}", style("Overall Summary:").bold());
+        println!("  Total Events: {}", combined_result.summary.total_events);
+        println!("  Gamma Wins:   {} ({:.1}%)",
+                 combined_result.summary.gamma_dominated_count,
+                 100.0 * combined_result.summary.gamma_dominated_count as f64 / combined_result.summary.total_events as f64);
+        println!("  Vega Wins:    {} ({:.1}%)",
+                 combined_result.summary.vega_dominated_count,
+                 100.0 * combined_result.summary.vega_dominated_count as f64 / combined_result.summary.total_events as f64);
+        println!("  Avg Expected: {:.2}%", combined_result.summary.avg_expected_move_pct);
+        println!("  Avg Actual:   {:.2}%", combined_result.summary.avg_actual_move_pct);
+        println!("  Avg Ratio:    {:.2}x", combined_result.summary.avg_move_ratio);
+    }
+
+    println!("{}", style("Done!").bold().green());
+
+    Ok(())
+}
+
+/// Save earnings analysis to Parquet
+fn save_earnings_parquet(
+    result: &cs_backtest::EarningsAnalysisResult,
+    path: &PathBuf,
+) -> Result<()> {
+    use polars::prelude::*;
+    use cs_domain::datetime::TradingDate;
+
+    let outcomes = &result.outcomes;
+
+    // Build DataFrame
+    let symbols: Vec<String> = outcomes.iter().map(|o| o.symbol.clone()).collect();
+    let dates: Vec<i32> = outcomes
+        .iter()
+        .map(|o| TradingDate::from_naive_date(o.earnings_date).to_polars_date())
+        .collect();
+    let earnings_time: Vec<String> = outcomes
+        .iter()
+        .map(|o| match o.earnings_time {
+            cs_domain::value_objects::EarningsTime::BeforeMarketOpen => "BMO".to_string(),
+            cs_domain::value_objects::EarningsTime::AfterMarketClose => "AMC".to_string(),
+            cs_domain::value_objects::EarningsTime::Unknown => "Unknown".to_string(),
+        })
+        .collect();
+    let pre_spot: Vec<f64> = outcomes.iter().map(|o| o.pre_spot.to_string().parse::<f64>().unwrap_or(0.0)).collect();
+    let pre_straddle: Vec<f64> = outcomes.iter().map(|o| o.pre_straddle.to_string().parse::<f64>().unwrap_or(0.0)).collect();
+    let expected_move_pct: Vec<f64> = outcomes.iter().map(|o| o.expected_move_pct).collect();
+    let post_spot: Vec<f64> = outcomes.iter().map(|o| o.post_spot.to_string().parse::<f64>().unwrap_or(0.0)).collect();
+    let actual_move_pct: Vec<f64> = outcomes.iter().map(|o| o.actual_move_pct).collect();
+    let move_ratio: Vec<f64> = outcomes.iter().map(|o| o.move_ratio).collect();
+    let gamma_dominated: Vec<bool> = outcomes.iter().map(|o| o.gamma_dominated).collect();
+
+    let df = DataFrame::new(vec![
+        Series::new("symbol", symbols),
+        Series::new("earnings_date", dates),
+        Series::new("earnings_time", earnings_time),
+        Series::new("pre_spot", pre_spot),
+        Series::new("pre_straddle", pre_straddle),
+        Series::new("expected_move_pct", expected_move_pct),
+        Series::new("post_spot", post_spot),
+        Series::new("actual_move_pct", actual_move_pct),
+        Series::new("move_ratio", move_ratio),
+        Series::new("gamma_dominated", gamma_dominated),
+    ])?;
+
+    let mut file = std::fs::File::create(path)?;
+    ParquetWriter::new(&mut file).finish(&mut df.clone())?;
+
+    Ok(())
+}
+
+/// Save earnings analysis to CSV
+fn save_earnings_csv(
+    result: &cs_backtest::EarningsAnalysisResult,
+    path: &PathBuf,
+) -> Result<()> {
+    use std::io::Write;
+
+    let mut file = std::fs::File::create(path)?;
+
+    // Header
+    writeln!(file, "symbol,earnings_date,earnings_time,pre_spot,pre_straddle,expected_move_pct,post_spot,actual_move_pct,move_ratio,gamma_dominated")?;
+
+    // Data rows
+    for outcome in &result.outcomes {
+        writeln!(
+            file,
+            "{},{},{},{},{},{},{},{},{},{}",
+            outcome.symbol,
+            outcome.earnings_date,
+            match outcome.earnings_time {
+                cs_domain::value_objects::EarningsTime::BeforeMarketOpen => "BMO",
+                cs_domain::value_objects::EarningsTime::AfterMarketClose => "AMC",
+                cs_domain::value_objects::EarningsTime::Unknown => "Unknown",
+            },
+            outcome.pre_spot,
+            outcome.pre_straddle,
+            outcome.expected_move_pct,
+            outcome.post_spot,
+            outcome.actual_move_pct,
+            outcome.move_ratio,
+            outcome.gamma_dominated,
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Save earnings analysis to JSON
+fn save_earnings_json(
+    result: &cs_backtest::EarningsAnalysisResult,
+    path: &PathBuf,
+) -> Result<()> {
+    let json = serde_json::to_string_pretty(result)?;
+    std::fs::write(path, json)?;
     Ok(())
 }

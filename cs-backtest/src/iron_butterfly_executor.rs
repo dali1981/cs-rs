@@ -319,7 +319,10 @@ fn compute_net_greeks(pricing: &IronButterflyPricing) -> (Option<f64>, Option<f6
     }
 }
 
-/// Calculate P&L attribution for a single leg
+/// Calculate P&L attribution for a single leg (DEPRECATED - use domain function)
+///
+/// This is kept for backwards compatibility but should use cs_domain::calculate_option_leg_pnl
+#[deprecated(note = "Use cs_domain::calculate_option_leg_pnl instead")]
 fn calculate_leg_attribution(
     entry_leg: &LegPricing,
     exit_leg: &LegPricing,
@@ -327,28 +330,15 @@ fn calculate_leg_attribution(
     days_held: f64,
     leg_sign: f64, // +1 for long, -1 for short
 ) -> (f64, f64, f64, f64) {
-    let greeks = entry_leg.greeks;
-    let iv_entry = entry_leg.iv;
-    let iv_exit = exit_leg.iv;
-
-    match greeks {
-        Some(g) => {
-            let delta_pnl = leg_sign * g.delta * spot_change;
-            let gamma_pnl = leg_sign * 0.5 * g.gamma * spot_change.powi(2);
-            let theta_pnl = leg_sign * g.theta * days_held;
-
-            let vega_pnl = match (iv_entry, iv_exit) {
-                (Some(iv_in), Some(iv_out)) => {
-                    let iv_change = iv_out - iv_in;
-                    leg_sign * g.vega * iv_change * 100.0
-                }
-                _ => 0.0,
-            };
-
-            (delta_pnl, gamma_pnl, theta_pnl, vega_pnl)
-        }
-        None => (0.0, 0.0, 0.0, 0.0),
-    }
+    let pnl = cs_domain::calculate_option_leg_pnl(
+        entry_leg.greeks.as_ref(),
+        entry_leg.iv,
+        exit_leg.iv,
+        spot_change,
+        days_held,
+        leg_sign,
+    );
+    (pnl.delta, pnl.gamma, pnl.theta, pnl.vega)
 }
 
 fn calculate_pnl_attribution(

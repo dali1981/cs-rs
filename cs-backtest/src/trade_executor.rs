@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use std::sync::Arc;
 
 use cs_analytics::PricingModel;
@@ -184,53 +185,48 @@ where
             Decimal::ZERO
         };
 
-        // P&L attribution
-        let (delta_pnl, gamma_pnl, theta_pnl, vega_pnl, unexplained_pnl) =
-            if let (Some(entry_greeks_short), Some(entry_greeks_long)) =
-                (entry_pricing.short_leg.greeks, entry_pricing.long_leg.greeks)
-            {
-                let spot_change = exit_spot.to_f64() - entry_spot.to_f64();
+        // P&L attribution using leg-by-leg approach
+        let (delta_pnl, gamma_pnl, theta_pnl, vega_pnl, unexplained_pnl) = {
+            let spot_change = exit_spot.to_f64() - entry_spot.to_f64();
+            let days_held = (exit_time - entry_time).num_hours() as f64 / 24.0;
 
-                // Calculate IV changes for BOTH legs
-                let short_iv_change = match (
-                    exit_pricing.short_leg.iv,
-                    entry_pricing.short_leg.iv,
-                ) {
-                    (Some(exit_iv), Some(entry_iv)) => exit_iv - entry_iv,
-                    _ => 0.0,
-                };
+            // Calculate P&L for short leg (negative sign because we're short)
+            let short_pnl = cs_domain::calculate_option_leg_pnl(
+                entry_pricing.short_leg.greeks.as_ref(),
+                entry_pricing.short_leg.iv,
+                exit_pricing.short_leg.iv,
+                spot_change,
+                days_held,
+                -1.0, // Short position
+            );
 
-                let long_iv_change = match (
-                    exit_pricing.long_leg.iv,
-                    entry_pricing.long_leg.iv,
-                ) {
-                    (Some(exit_iv), Some(entry_iv)) => exit_iv - entry_iv,
-                    _ => 0.0,
-                };
+            // Calculate P&L for long leg (positive sign because we're long)
+            let long_pnl = cs_domain::calculate_option_leg_pnl(
+                entry_pricing.long_leg.greeks.as_ref(),
+                entry_pricing.long_leg.iv,
+                exit_pricing.long_leg.iv,
+                spot_change,
+                days_held,
+                1.0, // Long position
+            );
 
-                let days_held = (exit_time - entry_time).num_hours() as f64 / 24.0;
+            // Sum the legs
+            let delta = short_pnl.delta + long_pnl.delta;
+            let gamma = short_pnl.gamma + long_pnl.gamma;
+            let theta = short_pnl.theta + long_pnl.theta;
+            let vega = short_pnl.vega + long_pnl.vega;
 
-                // Use the corrected spread attribution function
-                let attribution = cs_domain::calculate_spread_pnl_attribution(
-                    &entry_greeks_short,
-                    &entry_greeks_long,
-                    spot_change,
-                    short_iv_change,
-                    long_iv_change,
-                    days_held,
-                    pnl,
-                );
+            let explained = delta + gamma + theta + vega;
+            let unexplained = pnl.to_f64().unwrap_or(0.0) - explained;
 
-                (
-                    Some(attribution.delta),
-                    Some(attribution.gamma),
-                    Some(attribution.theta),
-                    Some(attribution.vega),
-                    Some(attribution.unexplained),
-                )
-            } else {
-                (None, None, None, None, None)
-            };
+            (
+                Some(Decimal::try_from(delta).unwrap_or_default()),
+                Some(Decimal::try_from(gamma).unwrap_or_default()),
+                Some(Decimal::try_from(theta).unwrap_or_default()),
+                Some(Decimal::try_from(vega).unwrap_or_default()),
+                Some(Decimal::try_from(unexplained).unwrap_or_default()),
+            )
+        };
 
         Ok(CalendarSpreadResult {
             symbol: spread.symbol().to_string(),

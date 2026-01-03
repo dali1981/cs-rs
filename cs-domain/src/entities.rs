@@ -127,6 +127,13 @@ pub struct IronButterfly {
     pub long_put: OptionLeg,
 }
 
+/// Long straddle = long ATM call + long ATM put
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Straddle {
+    pub call_leg: OptionLeg,
+    pub put_leg: OptionLeg,
+}
+
 impl IronButterfly {
     pub fn new(
         short_call: OptionLeg,
@@ -233,6 +240,64 @@ impl IronButterfly {
     /// Wing width (upper wing)
     pub fn wing_width(&self) -> Decimal {
         self.upper_strike().value() - self.center_strike().value()
+    }
+}
+
+impl Straddle {
+    pub fn new(call_leg: OptionLeg, put_leg: OptionLeg) -> Result<Self, ValidationError> {
+        // Validate same symbol
+        if call_leg.symbol != put_leg.symbol {
+            return Err(ValidationError::SymbolMismatch(
+                call_leg.symbol.clone(),
+                put_leg.symbol.clone(),
+            ));
+        }
+
+        // Validate same expiration
+        if call_leg.expiration != put_leg.expiration {
+            return Err(ValidationError::ExpirationMismatch {
+                short: call_leg.expiration,
+                long: put_leg.expiration,
+            });
+        }
+
+        // Validate same strike
+        if call_leg.strike != put_leg.strike {
+            return Err(ValidationError::StrikeMismatch {
+                call: call_leg.strike,
+                put: put_leg.strike,
+            });
+        }
+
+        // Validate option types
+        if call_leg.option_type != OptionType::Call {
+            return Err(ValidationError::InvalidOptionType(
+                "Call leg must be a Call".to_string(),
+            ));
+        }
+        if put_leg.option_type != OptionType::Put {
+            return Err(ValidationError::InvalidOptionType(
+                "Put leg must be a Put".to_string(),
+            ));
+        }
+
+        Ok(Self { call_leg, put_leg })
+    }
+
+    pub fn symbol(&self) -> &str {
+        &self.call_leg.symbol
+    }
+
+    pub fn strike(&self) -> Strike {
+        self.call_leg.strike
+    }
+
+    pub fn expiration(&self) -> NaiveDate {
+        self.call_leg.expiration
+    }
+
+    pub fn dte(&self, from: NaiveDate) -> i32 {
+        (self.expiration() - from).num_days() as i32
     }
 }
 
@@ -411,6 +476,82 @@ impl IronButterflyResult {
     /// Distance from center to breakeven
     pub fn breakeven_width(&self) -> f64 {
         (self.breakeven_up - self.center_strike.value().try_into().unwrap_or(0.0)).abs()
+    }
+}
+
+/// Indicates how exit prices were determined
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PricingSource {
+    /// Prices from actual market data (minute bars)
+    Market,
+    /// Prices computed via Black-Scholes model
+    Model,
+}
+
+/// Long straddle trade result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StraddleResult {
+    // Identification
+    pub symbol: String,
+    pub earnings_date: NaiveDate,
+    pub earnings_time: EarningsTime,
+    pub strike: Strike,
+    pub expiration: NaiveDate,
+
+    // Entry (DEBIT paid)
+    pub entry_time: DateTime<Utc>,
+    pub call_entry_price: Decimal,
+    pub put_entry_price: Decimal,
+    pub entry_debit: Decimal,  // Total premium paid
+
+    // Exit (credit received)
+    pub exit_time: DateTime<Utc>,
+    pub call_exit_price: Decimal,
+    pub put_exit_price: Decimal,
+    pub exit_credit: Decimal,
+
+    // Pricing method used at exit
+    pub exit_pricing_method: PricingSource,
+
+    // P&L
+    pub pnl: Decimal,
+    pub pnl_pct: Decimal,
+
+    // Greeks at entry (net position)
+    pub net_delta: Option<f64>,
+    pub net_gamma: Option<f64>,
+    pub net_theta: Option<f64>,
+    pub net_vega: Option<f64>,
+
+    // IV at entry/exit
+    pub iv_entry: Option<f64>,
+    pub iv_exit: Option<f64>,
+    pub iv_change: Option<f64>,  // IV expansion (positive = good for long straddle)
+
+    // P&L Attribution
+    pub delta_pnl: Option<Decimal>,
+    pub gamma_pnl: Option<Decimal>,
+    pub theta_pnl: Option<Decimal>,
+    pub vega_pnl: Option<Decimal>,
+    pub unexplained_pnl: Option<Decimal>,
+
+    // Spot prices
+    pub spot_at_entry: f64,
+    pub spot_at_exit: f64,
+    pub spot_move: f64,
+    pub spot_move_pct: f64,
+
+    // Expected move context
+    pub expected_move_pct: Option<f64>,  // Straddle / Spot at entry
+
+    // Status
+    pub success: bool,
+    pub failure_reason: Option<FailureReason>,
+}
+
+impl StraddleResult {
+    pub fn is_winner(&self) -> bool {
+        self.success && self.pnl > Decimal::ZERO
     }
 }
 

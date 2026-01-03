@@ -46,6 +46,25 @@ impl TradingCalendar {
             }
         })
     }
+
+    /// Get N trading days before a date
+    ///
+    /// Example: n_trading_days_before(2025-01-10, 5)
+    ///          -> 2025-01-03 (skipping weekends)
+    pub fn n_trading_days_before(date: NaiveDate, n: usize) -> NaiveDate {
+        let mut result = date;
+        let mut count = 0;
+        while count < n {
+            result = Self::previous_trading_day(result);
+            count += 1;
+        }
+        result
+    }
+
+    /// Count trading days between two dates (exclusive of start, inclusive of end)
+    pub fn trading_days_count(start: NaiveDate, end: NaiveDate) -> usize {
+        Self::trading_days_between(start, end).count()
+    }
 }
 
 #[cfg(test)]
