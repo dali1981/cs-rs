@@ -5,7 +5,7 @@
 pub mod datetime;
 pub mod value_objects;
 pub mod entities;
-pub mod strategies;
+pub mod strike_selection;
 pub mod repositories;
 pub mod timing;
 pub mod infrastructure;
@@ -14,13 +14,13 @@ pub mod infrastructure;
 pub use datetime::{TradingDate, TradingTimestamp, MarketTime};
 pub use value_objects::*;
 pub use entities::*;
-pub use strategies::{
+pub use strike_selection::{
     SelectionStrategy, OptionStrategy, StrategyError, TradeSelectionCriteria, OptionChainData,
     ATMStrategy, DeltaStrategy, DeltaScanMode, StrikeMatchMode,
 };
 
 // Re-export deprecated trait for backwards compatibility
 #[allow(deprecated)]
-pub use strategies::TradingStrategy;
+pub use strike_selection::TradingStrategy;
 pub use repositories::*;
 pub use timing::*;

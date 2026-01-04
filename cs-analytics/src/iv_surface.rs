@@ -53,6 +53,26 @@ impl IVSurface {
     pub fn spot_price(&self) -> Decimal { self.spot_price }
     pub fn points(&self) -> &[IVPoint] { &self.points }
 
+    /// Get unique expirations from surface points
+    ///
+    /// Returns sorted list of unique expiration dates.
+    pub fn expirations(&self) -> Vec<NaiveDate> {
+        let mut exps: std::collections::BTreeSet<NaiveDate> = self.points.iter()
+            .map(|p| p.expiration)
+            .collect();
+        exps.into_iter().collect()
+    }
+
+    /// Get unique strikes from surface points
+    ///
+    /// Returns sorted list of unique strikes.
+    pub fn strikes(&self) -> Vec<Decimal> {
+        let mut strikes: std::collections::BTreeSet<Decimal> = self.points.iter()
+            .map(|p| p.strike)
+            .collect();
+        strikes.into_iter().collect()
+    }
+
     /// Interpolate IV for given strike/expiration
     pub fn get_iv(
         &self,
