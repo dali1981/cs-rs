@@ -8,9 +8,16 @@ use cs_analytics::{
     linspace,
 };
 
-use super::{OptionChainData, StrategyError, TradeSelectionCriteria, SelectionStrategy, StrikeMatchMode};
-use crate::entities::{CalendarSpread, EarningsEvent, OptionLeg};
+use super::{
+    OptionChainData, StrategyError, TradeSelectionCriteria, SelectionStrategy, StrikeMatchMode,
+    StrikeSelector, SelectionError, ExpirationCriteria, ATMStrategy,
+};
+use crate::entities::{
+    CalendarSpread, EarningsEvent, OptionLeg, Straddle, CalendarStraddle, IronButterfly
+};
 use crate::value_objects::SpotPrice;
+use cs_analytics::IVSurface;
+use rust_decimal::Decimal;
 
 /// Delta scan mode for strategy
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -191,6 +198,137 @@ impl SelectionStrategy for DeltaStrategy {
     }
 }
 
+// ============================================================================
+// NEW StrikeSelector trait implementation (uses IVSurface directly)
+// ============================================================================
+
+impl StrikeSelector for DeltaStrategy {
+    fn select_calendar_spread(
+        &self,
+        _spot: &SpotPrice,
+        surface: &IVSurface,
+        option_type: OptionType,
+        criteria: &ExpirationCriteria,
+    ) -> Result<CalendarSpread, SelectionError> {
+        // Build delta-parameterized surface
+        let delta_surface = DeltaVolSurface::from_iv_surface(surface, self.risk_free_rate);
+
+        // Get expirations from surface
+        let expirations = surface.expirations();
+
+        // Select expirations based on criteria (use surface as_of_time as reference)
+        let (short_exp, long_exp) = super::select_expirations(
+            &expirations,
+            surface.as_of_time().date_naive(),
+            criteria.min_short_dte,
+            criteria.max_short_dte,
+            criteria.min_long_dte,
+            criteria.max_long_dte,
+        )?;
+
+        // Determine target delta (fixed or via scanning)
+        let target_delta = match self.scan_mode {
+            DeltaScanMode::Fixed => self.target_delta,
+            DeltaScanMode::Scan { steps } => {
+                let config = OpportunityAnalyzerConfig {
+                    min_iv_ratio: self.criteria.min_iv_ratio.unwrap_or(1.0),
+                    delta_targets: linspace(self.delta_range.0, self.delta_range.1, steps),
+                };
+                let analyzer = OpportunityAnalyzer::new(config);
+                let opportunities = analyzer.find_opportunities(&delta_surface, short_exp, long_exp);
+
+                opportunities
+                    .first()
+                    .map(|opp| opp.target_delta)
+                    .unwrap_or(self.target_delta)
+            }
+        };
+
+        // For puts, use the equivalent put delta
+        let is_call = option_type == OptionType::Call;
+
+        // Map delta to theoretical strike for short leg
+        let theoretical_short_strike = delta_surface
+            .delta_to_strike(target_delta, short_exp, is_call)
+            .ok_or(SelectionError::NoIVSurface)?;
+
+        // Get strikes from surface and find closest tradable strike for short leg
+        let strikes: Vec<crate::value_objects::Strike> = surface.strikes()
+            .iter()
+            .filter_map(|&s| crate::value_objects::Strike::new(s).ok())
+            .collect();
+
+        let short_strike = super::find_closest_strike(&strikes, theoretical_short_strike)?;
+
+        // Determine long leg strike based on matching mode
+        let long_strike = match self.strike_match_mode {
+            StrikeMatchMode::SameStrike => short_strike,
+            StrikeMatchMode::SameDelta => {
+                // Map same delta to strike using LONG expiration
+                let theoretical_long_strike = delta_surface
+                    .delta_to_strike(target_delta, long_exp, is_call)
+                    .ok_or(SelectionError::NoIVSurface)?;
+                super::find_closest_strike(&strikes, theoretical_long_strike)?
+            }
+        };
+
+        // Build spread
+        let symbol = surface.underlying().to_string();
+        let short_leg = OptionLeg::new(
+            symbol.clone(),
+            short_strike,
+            short_exp,
+            option_type,
+        );
+        let long_leg = OptionLeg::new(
+            symbol,
+            long_strike,
+            long_exp,
+            option_type,
+        );
+
+        CalendarSpread::new(short_leg, long_leg).map_err(Into::into)
+    }
+
+    /// Straddles are ALWAYS ATM - delegate to ATMStrategy
+    fn select_straddle(
+        &self,
+        spot: &SpotPrice,
+        surface: &IVSurface,
+        min_dte: i32,
+    ) -> Result<Straddle, SelectionError> {
+        // Create an ATM strategy with our criteria and delegate
+        let atm_strategy = ATMStrategy::new(self.criteria.clone());
+        StrikeSelector::select_straddle(&atm_strategy, spot, surface, min_dte)
+    }
+
+    /// Calendar straddles are ALWAYS ATM - delegate to ATMStrategy
+    fn select_calendar_straddle(
+        &self,
+        spot: &SpotPrice,
+        surface: &IVSurface,
+        criteria: &ExpirationCriteria,
+    ) -> Result<CalendarStraddle, SelectionError> {
+        // Create an ATM strategy with our criteria and delegate
+        let atm_strategy = ATMStrategy::new(self.criteria.clone());
+        StrikeSelector::select_calendar_straddle(&atm_strategy, spot, surface, criteria)
+    }
+
+    /// Iron butterflies are ALWAYS ATM center - delegate to ATMStrategy
+    fn select_iron_butterfly(
+        &self,
+        spot: &SpotPrice,
+        surface: &IVSurface,
+        wing_width: Decimal,
+        min_dte: i32,
+        max_dte: i32,
+    ) -> Result<IronButterfly, SelectionError> {
+        // Create an ATM strategy with our criteria and delegate
+        let atm_strategy = ATMStrategy::new(self.criteria.clone());
+        StrikeSelector::select_iron_butterfly(&atm_strategy, spot, surface, wing_width, min_dte, max_dte)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,7 +441,7 @@ mod tests {
         let spot = SpotPrice::new(Decimal::new(100, 0), Utc::now());
         let chain_data = create_test_chain_data();
 
-        let result = strategy.select_calendar_spread(&event, &spot, &chain_data, OptionType::Call);
+        let result = SelectionStrategy::select_calendar_spread(&strategy, &event, &spot, &chain_data, OptionType::Call);
         assert!(result.is_ok(), "Strategy should select successfully: {:?}", result);
 
         let spread = result.unwrap();
@@ -328,7 +466,7 @@ mod tests {
         let spot = SpotPrice::new(Decimal::new(100, 0), Utc::now());
         let chain_data = create_test_chain_data();
 
-        let result = strategy.select_calendar_spread(&event, &spot, &chain_data, OptionType::Call);
+        let result = SelectionStrategy::select_calendar_spread(&strategy, &event, &spot, &chain_data, OptionType::Call);
         assert!(result.is_ok(), "Scan strategy should select successfully: {:?}", result);
     }
 
@@ -357,7 +495,7 @@ mod tests {
             iv_surface: None,
         };
 
-        let result = strategy.select_calendar_spread(&event, &spot, &chain_data, OptionType::Call);
+        let result = SelectionStrategy::select_calendar_spread(&strategy, &event, &spot, &chain_data, OptionType::Call);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), StrategyError::NoDeltaData));
     }
