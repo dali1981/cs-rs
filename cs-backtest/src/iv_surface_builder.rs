@@ -131,7 +131,11 @@ pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository>(
     let expirations = chain_df.column("expiration").ok()?.date().ok()?;
     let closes = chain_df.column("close").ok()?.f64().ok()?;
     let option_types = chain_df.column("option_type").ok()?.str().ok()?;
-    let timestamps = chain_df.column("timestamp").ok()?.i64().ok()?;
+
+    // Cast datetime[ms] to i64 to get milliseconds since epoch
+    let ts_col = chain_df.column("timestamp").ok()?;
+    let ts_cast = ts_col.cast(&polars::prelude::DataType::Int64).ok()?;
+    let timestamps_ms = ts_cast.i64().ok()?;
 
     let mut points = Vec::new();
     let mut latest_timestamp: Option<DateTime<Utc>> = None;
@@ -139,12 +143,12 @@ pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository>(
 
     for i in 0..chain_df.height() {
         // Extract row data, skip if any value is missing
-        let (strike_f64, exp_days, close, opt_type, ts_nanos) = match (
+        let (strike_f64, exp_days, close, opt_type, ts_ms) = match (
             strikes.get(i),
             expirations.get(i),
             closes.get(i),
             option_types.get(i),
-            timestamps.get(i),
+            timestamps_ms.get(i),
         ) {
             (Some(s), Some(e), Some(c), Some(t), Some(ts)) => (s, e, c, t, ts),
             _ => continue,
@@ -155,7 +159,8 @@ pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository>(
             continue;
         }
 
-        // Convert timestamp from nanoseconds to DateTime
+        // Convert milliseconds to nanoseconds, then to DateTime
+        let ts_nanos = ts_ms * 1_000_000;
         let opt_timestamp = TradingTimestamp::from_nanos(ts_nanos).to_datetime_utc();
 
         // Look up spot price at this option's trade timestamp
