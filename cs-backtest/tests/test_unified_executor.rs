@@ -3,10 +3,10 @@
 /// Tests that the new process_event_unified() method works correctly
 /// and achieves the IV surface optimization (build once, reuse for selection + entry)
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::NaiveDate;
 use cs_backtest::{BacktestUseCase, BacktestConfig, SpreadType, SelectionType, TradeStructure, TradeResult};
 use cs_domain::{
-    infrastructure::{FinqEquityRepository, FinqOptionsRepository, FinqEarningsRepository},
+    infrastructure::{FinqEquityRepository, FinqOptionsRepository, ParquetEarningsRepository},
     EarningsEvent, EarningsTime, TimingConfig,
 };
 use std::path::PathBuf;
@@ -15,7 +15,7 @@ use std::path::PathBuf;
 async fn test_unified_executor_calendar_spread() {
     // Setup repositories
     let data_dir = PathBuf::from("/Users/mohamedali/polygon/data");
-    let earnings_repo = FinqEarningsRepository::new(data_dir.clone());
+    let earnings_repo = ParquetEarningsRepository::new(data_dir.join("earnings/earnings.parquet"));
     let options_repo = FinqOptionsRepository::new(data_dir.clone());
     let equity_repo = FinqEquityRepository::new(data_dir);
 
@@ -90,7 +90,7 @@ async fn test_unified_executor_calendar_spread() {
 async fn test_unified_executor_straddle() {
     // Setup repositories
     let data_dir = PathBuf::from("/Users/mohamedali/polygon/data");
-    let earnings_repo = FinqEarningsRepository::new(data_dir.clone());
+    let earnings_repo = ParquetEarningsRepository::new(data_dir.join("earnings/earnings.parquet"));
     let options_repo = FinqOptionsRepository::new(data_dir.clone());
     let equity_repo = FinqEquityRepository::new(data_dir);
 
