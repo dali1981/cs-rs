@@ -31,8 +31,6 @@ pub struct CliOverrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_entry_iv: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub straddle: Option<CliStraddle>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub min_notional: Option<f64>,
 }
 
@@ -111,15 +109,4 @@ pub struct CliPricing {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vol_model: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Default)]
-#[serde(default)]
-pub struct CliStraddle {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub straddle_entry_days: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub straddle_exit_days: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_straddle_dte: Option<i32>,
 }

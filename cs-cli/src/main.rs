@@ -515,7 +515,6 @@ fn build_cli_overrides(
         min_market_cap,
         parallel: if no_parallel { Some(false) } else { None },
         max_entry_iv,
-        straddle: None,  // Straddle fields now in strategy
         min_notional,
     })
 }

@@ -11,6 +11,9 @@ use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 use anyhow::Result;
 
+use cs_backtest::{SpreadType, SelectionType};
+use cs_analytics::{PricingModel, InterpolationMode};
+use cs_domain::StrikeMatchMode;
 use crate::cli_args::CliOverrides;
 
 /// Full layered configuration
@@ -22,7 +25,8 @@ pub struct AppConfig {
     pub selection: SelectionConfig,
     pub strategy: StrategyConfig,
     pub pricing: PricingConfig,
-    pub strike_match_mode: String,
+    #[serde(default)]
+    pub strike_match_mode: StrikeMatchMode,
     pub symbols: Option<Vec<String>>,
     pub min_market_cap: Option<u64>,
     pub parallel: bool,
@@ -53,15 +57,16 @@ pub struct SelectionConfig {
     pub max_short_dte: i32,
     pub min_long_dte: i32,
     pub max_long_dte: i32,
-    pub target_delta: Option<f64>,
     pub min_iv_ratio: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StrategyConfig {
-    pub spread_type: String,
-    pub selection_type: String,
+    #[serde(default)]
+    pub spread_type: SpreadType,
+    #[serde(default)]
+    pub selection_type: SelectionType,
     pub target_delta: f64,
     pub delta_range: (f64, f64),
     pub delta_scan_steps: usize,
@@ -77,8 +82,10 @@ pub struct StrategyConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PricingConfig {
-    pub model: String,
-    pub vol_model: String,
+    #[serde(default)]
+    pub model: PricingModel,
+    #[serde(default)]
+    pub vol_model: InterpolationMode,
 }
 
 // Default implementations
@@ -90,7 +97,7 @@ impl Default for AppConfig {
             selection: SelectionConfig::default(),
             strategy: StrategyConfig::default(),
             pricing: PricingConfig::default(),
-            strike_match_mode: "same-strike".to_string(),
+            strike_match_mode: StrikeMatchMode::default(),
             symbols: None,
             min_market_cap: None,
             parallel: true,
@@ -129,7 +136,6 @@ impl Default for SelectionConfig {
             max_short_dte: 45,
             min_long_dte: 14,
             max_long_dte: 90,
-            target_delta: None,
             min_iv_ratio: None,
         }
     }
@@ -138,8 +144,8 @@ impl Default for SelectionConfig {
 impl Default for StrategyConfig {
     fn default() -> Self {
         Self {
-            spread_type: "calendar".to_string(),
-            selection_type: "atm".to_string(),
+            spread_type: SpreadType::default(),
+            selection_type: SelectionType::default(),
             target_delta: 0.50,
             delta_range: (0.25, 0.75),
             delta_scan_steps: 5,
@@ -157,8 +163,8 @@ impl Default for StrategyConfig {
 impl Default for PricingConfig {
     fn default() -> Self {
         Self {
-            model: "sticky_moneyness".to_string(),
-            vol_model: "linear".to_string(),
+            model: PricingModel::default(),
+            vol_model: InterpolationMode::default(),
         }
     }
 }
@@ -228,22 +234,21 @@ impl AppConfig {
                 max_short_dte: self.selection.max_short_dte,
                 min_long_dte: self.selection.min_long_dte,
                 max_long_dte: self.selection.max_long_dte,
-                target_delta: self.selection.target_delta,
+                target_delta: Some(self.strategy.target_delta),
                 min_iv_ratio: self.selection.min_iv_ratio,
                 max_bid_ask_spread_pct: None,
             },
-            spread: cs_backtest::SpreadType::from_string(&self.strategy.spread_type),
-            selection_strategy: cs_backtest::SelectionType::from_string(&self.strategy.selection_type),
+            spread: self.strategy.spread_type,
+            selection_strategy: self.strategy.selection_type,
             symbols: self.symbols.clone(),
             min_market_cap: self.min_market_cap,
             parallel: self.parallel,
-            pricing_model: cs_analytics::PricingModel::from_string(&self.pricing.model),
+            pricing_model: self.pricing.model,
             target_delta: self.strategy.target_delta,
             delta_range: self.strategy.delta_range,
             delta_scan_steps: self.strategy.delta_scan_steps,
-            vol_model: cs_analytics::InterpolationMode::from_string(&self.pricing.vol_model),
-            strike_match_mode: cs_domain::StrikeMatchMode::from_str(&self.strike_match_mode)
-                .unwrap_or(cs_domain::StrikeMatchMode::SameStrike),
+            vol_model: self.pricing.vol_model,
+            strike_match_mode: self.strike_match_mode,
             max_entry_iv: self.max_entry_iv,
             wing_width: self.strategy.wing_width,
             straddle_entry_days: self.strategy.straddle_entry_days,
