@@ -127,6 +127,7 @@ impl SpreadType {
 #[serde(rename_all = "snake_case")]
 pub enum SelectionType {
     #[default]
+    #[serde(rename = "atm")]
     ATM,
     /// Fixed delta strategy (uses target_delta)
     Delta,
