@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use chrono::NaiveDate;
 use tracing::{info, debug, warn};
+use rust_decimal::Decimal;
 
 use cs_domain::*;
 use cs_domain::timing::{EarningsTradeTiming, StraddleTradeTiming, PostEarningsStraddleTiming};
@@ -262,7 +263,9 @@ where
         let mut sessions_processed = 0;
         let mut total_opportunities = 0;
 
-        let strategy = self.create_strategy();
+        // NEW: Use unified flow with optimized IV surface building
+        let selector = self.create_selector();
+        let structure = TradeStructure::CalendarSpread(option_type);
 
         for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
             sessions_processed += 1;
@@ -285,34 +288,31 @@ where
             debug!(
                 session_date = %session_date,
                 events_count = to_enter.len(),
-                "Processing session"
+                "Processing session (UNIFIED EXECUTOR)"
             );
 
-            // Process events (parallel or sequential)
+            // Process events using OPTIMIZED unified executor
             let session_results: Vec<_> = if self.config.parallel {
-                // Use futures::future::join_all for concurrent async processing
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_earnings_event(event, &*strategy, OptionStrategy::CalendarSpread, Some(option_type)))
+                    .map(|event| self.process_event_unified(event, &*selector, structure))
                     .collect();
 
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(
-                        self.process_earnings_event(event, &*strategy, OptionStrategy::CalendarSpread, Some(option_type)).await
-                    );
+                    results.push(self.process_event_unified(event, &*selector, structure).await);
                 }
                 results
             };
 
-            // Collect results
+            // Collect results and apply IV filter
             let mut session_entries = 0;
             for result in session_results {
                 total_opportunities += 1;
                 match result {
-                    Ok(TradeResult::CalendarSpread(trade_result)) => {
+                    TradeResult::CalendarSpread(trade_result) => {
                         if self.passes_iv_filter(&trade_result) {
                             all_results.push(TradeResult::CalendarSpread(trade_result));
                             session_entries += 1;
@@ -327,19 +327,9 @@ where
                             });
                         }
                     }
-                    Ok(TradeResult::IronButterfly(_)) => {
-                        // This should never happen when processing calendar spreads
-                        unreachable!("Got iron butterfly result when processing calendar spread");
+                    _ => {
+                        warn!("Unexpected result type for calendar spread");
                     }
-                    Ok(TradeResult::Straddle(_)) => {
-                        // This should never happen when processing calendar spreads
-                        unreachable!("Got straddle result when processing calendar spread");
-                    }
-                    Ok(TradeResult::CalendarStraddle(_)) => {
-                        // This should never happen when processing calendar spreads
-                        unreachable!("Got calendar straddle result when processing calendar spread");
-                    }
-                    Err(e) => dropped_events.push(e),
                 }
             }
 
@@ -382,8 +372,11 @@ where
         let mut sessions_processed = 0;
         let mut total_opportunities = 0;
 
-        // Create iron butterfly strategy
-        let strategy = self.create_iron_butterfly_strategy();
+        // NEW: Use unified flow with optimized IV surface building
+        let selector = self.create_selector();
+        let structure = TradeStructure::IronButterfly {
+            wing_width: Decimal::try_from(self.config.wing_width).unwrap_or(Decimal::from(5)),
+        };
 
         for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
             sessions_processed += 1;
@@ -406,23 +399,20 @@ where
             debug!(
                 session_date = %session_date,
                 events_count = to_enter.len(),
-                "Processing iron butterfly session"
+                "Processing iron butterfly session (UNIFIED EXECUTOR)"
             );
 
-            // Process events (parallel or sequential)
+            // Process events using OPTIMIZED unified executor
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_earnings_event(event, &strategy, OptionStrategy::IronButterfly, None))
+                    .map(|event| self.process_event_unified(event, &*selector, structure))
                     .collect();
-
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(
-                        self.process_earnings_event(event, &strategy, OptionStrategy::IronButterfly, None).await
-                    );
+                    results.push(self.process_event_unified(event, &*selector, structure).await);
                 }
                 results
             };
@@ -432,23 +422,13 @@ where
             for result in session_results {
                 total_opportunities += 1;
                 match result {
-                    Ok(TradeResult::IronButterfly(trade_result)) => {
+                    TradeResult::IronButterfly(trade_result) => {
                         all_results.push(TradeResult::IronButterfly(trade_result));
                         session_entries += 1;
                     }
-                    Ok(TradeResult::CalendarSpread(_)) => {
-                        // This should never happen when processing iron butterflies
-                        unreachable!("Got calendar spread result when processing iron butterfly");
+                    _ => {
+                        warn!("Unexpected result type for iron butterfly");
                     }
-                    Ok(TradeResult::Straddle(_)) => {
-                        // This should never happen when processing iron butterflies
-                        unreachable!("Got straddle result when processing iron butterfly");
-                    }
-                    Ok(TradeResult::CalendarStraddle(_)) => {
-                        // This should never happen when processing iron butterflies
-                        unreachable!("Got calendar straddle result when processing iron butterfly");
-                    }
-                    Err(e) => dropped_events.push(e),
                 }
             }
 
@@ -491,6 +471,10 @@ where
         let mut sessions_processed = 0;
         let mut total_opportunities = 0;
 
+        // NEW: Use unified flow with optimized IV surface building
+        let selector = self.create_selector();
+        let structure = TradeStructure::Straddle;
+
         // Create straddle timing
         let timing = StraddleTradeTiming::new(self.config.timing)
             .with_entry_days(self.config.straddle_entry_days)
@@ -499,7 +483,7 @@ where
         info!(
             entry_days = self.config.straddle_entry_days,
             exit_days = self.config.straddle_exit_days,
-            "Starting straddle backtest"
+            "Starting straddle backtest (UNIFIED EXECUTOR)"
         );
 
         for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
@@ -536,22 +520,20 @@ where
             debug!(
                 session_date = %session_date,
                 events_count = to_enter.len(),
-                "Processing straddle session"
+                "Processing straddle session (UNIFIED EXECUTOR)"
             );
 
-            // Process events
+            // Process events using OPTIMIZED unified executor
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_straddle_event(event, &timing))
+                    .map(|event| self.process_event_unified(event, &*selector, structure))
                     .collect();
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(
-                        self.process_straddle_event(event, &timing).await
-                    );
+                    results.push(self.process_event_unified(event, &*selector, structure).await);
                 }
                 results
             };
@@ -560,11 +542,13 @@ where
             for result in session_results {
                 total_opportunities += 1;
                 match result {
-                    Ok(straddle_result) => {
-                        all_results.push(TradeResult::Straddle(straddle_result));
+                    TradeResult::Straddle(trade_result) => {
+                        all_results.push(TradeResult::Straddle(trade_result));
                         session_entries += 1;
                     }
-                    Err(e) => dropped_events.push(e),
+                    _ => {
+                        warn!("Unexpected result type for straddle");
+                    }
                 }
             }
 
@@ -612,13 +596,17 @@ where
         let mut sessions_processed = 0;
         let mut total_opportunities = 0;
 
+        // NEW: Use unified flow with optimized IV surface building
+        let selector = self.create_selector();
+        let structure = TradeStructure::Straddle;
+
         // Create post-earnings timing
         let timing = PostEarningsStraddleTiming::new(self.config.timing)
             .with_holding_days(self.config.post_earnings_holding_days);
 
         info!(
             holding_days = self.config.post_earnings_holding_days,
-            "Starting post-earnings straddle backtest"
+            "Starting post-earnings straddle backtest (UNIFIED EXECUTOR)"
         );
 
         for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
@@ -655,22 +643,20 @@ where
             debug!(
                 session_date = %session_date,
                 events_count = to_enter.len(),
-                "Processing post-earnings straddle session"
+                "Processing post-earnings straddle session (UNIFIED EXECUTOR)"
             );
 
-            // Process events
+            // Process events using OPTIMIZED unified executor
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_post_earnings_straddle_event(event, &timing))
+                    .map(|event| self.process_event_unified(event, &*selector, structure))
                     .collect();
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(
-                        self.process_post_earnings_straddle_event(event, &timing).await
-                    );
+                    results.push(self.process_event_unified(event, &*selector, structure).await);
                 }
                 results
             };
@@ -679,11 +665,13 @@ where
             for result in session_results {
                 total_opportunities += 1;
                 match result {
-                    Ok(straddle_result) => {
-                        all_results.push(TradeResult::Straddle(straddle_result));
+                    TradeResult::Straddle(trade_result) => {
+                        all_results.push(TradeResult::Straddle(trade_result));
                         session_entries += 1;
                     }
-                    Err(e) => dropped_events.push(e),
+                    _ => {
+                        warn!("Unexpected result type for post-earnings straddle");
+                    }
                 }
             }
 
@@ -731,7 +719,9 @@ where
         let mut sessions_processed = 0;
         let mut total_opportunities = 0;
 
-        let strategy = self.create_strategy();
+        // NEW: Use unified flow with optimized IV surface building
+        let selector = self.create_selector();
+        let structure = TradeStructure::CalendarStraddle;
 
         for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
             sessions_processed += 1;
@@ -754,33 +744,30 @@ where
             debug!(
                 session_date = %session_date,
                 events_count = to_enter.len(),
-                "Processing calendar straddle session"
+                "Processing calendar straddle session (UNIFIED EXECUTOR)"
             );
 
-            // Process events (parallel or sequential)
+            // Process events using OPTIMIZED unified executor
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_earnings_event(event, &*strategy, OptionStrategy::CalendarStraddle, None))
+                    .map(|event| self.process_event_unified(event, &*selector, structure))
                     .collect();
-
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(
-                        self.process_earnings_event(event, &*strategy, OptionStrategy::CalendarStraddle, None).await
-                    );
+                    results.push(self.process_event_unified(event, &*selector, structure).await);
                 }
                 results
             };
 
-            // Collect results
+            // Collect results and apply IV filter
             let mut session_entries = 0;
             for result in session_results {
                 total_opportunities += 1;
                 match result {
-                    Ok(TradeResult::CalendarStraddle(trade_result)) => {
+                    TradeResult::CalendarStraddle(trade_result) => {
                         // Apply IV ratio filter if configured
                         if self.passes_calendar_straddle_iv_filter(&trade_result) {
                             all_results.push(TradeResult::CalendarStraddle(trade_result));
@@ -796,10 +783,9 @@ where
                             });
                         }
                     }
-                    Ok(_) => {
-                        unreachable!("Got non-CalendarStraddle result when processing calendar straddle");
+                    _ => {
+                        warn!("Unexpected result type for calendar straddle");
                     }
-                    Err(e) => dropped_events.push(e),
                 }
             }
 
