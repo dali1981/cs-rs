@@ -131,7 +131,7 @@ impl IronButterflyStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::strategies::find_closest_strike;
+    use super::super::find_closest_strike;
     use chrono::Utc;
 
     #[test]

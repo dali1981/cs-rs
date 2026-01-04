@@ -8,6 +8,7 @@ use crate::value_objects::*;
 use chrono::NaiveDate;
 use cs_analytics::IVSurface;
 use finq_core::OptionType;
+use rust_decimal::Decimal;
 use thiserror::Error;
 
 pub use atm::ATMStrategy;
@@ -15,6 +16,40 @@ pub use delta::{DeltaStrategy, DeltaScanMode};
 pub use iron_butterfly::IronButterflyStrategy;
 pub use straddle::StraddleStrategy;
 
+/// Error type for strike selection
+#[derive(Error, Debug)]
+pub enum SelectionError {
+    #[error("No strikes available")]
+    NoStrikes,
+    #[error("No expirations available")]
+    NoExpirations,
+    #[error("Insufficient expirations: need {needed}, have {available}")]
+    InsufficientExpirations { needed: usize, available: usize },
+    #[error("No IV surface for delta-based selection")]
+    NoIVSurface,
+    #[error("Spread creation failed: {0}")]
+    SpreadCreation(#[from] ValidationError),
+    #[error("Unsupported strategy: {0}")]
+    UnsupportedStrategy(String),
+}
+
+// Convert from StrategyError to SelectionError
+impl From<StrategyError> for SelectionError {
+    fn from(err: StrategyError) -> Self {
+        match err {
+            StrategyError::NoStrikes => SelectionError::NoStrikes,
+            StrategyError::NoExpirations => SelectionError::NoExpirations,
+            StrategyError::InsufficientExpirations { needed, available } =>
+                SelectionError::InsufficientExpirations { needed, available },
+            StrategyError::NoDeltaData | StrategyError::NoLiquidityData =>
+                SelectionError::NoIVSurface,
+            StrategyError::SpreadCreation(e) => SelectionError::SpreadCreation(e),
+            StrategyError::UnsupportedStrategy(s) => SelectionError::UnsupportedStrategy(s),
+        }
+    }
+}
+
+// Backwards compatibility alias
 #[derive(Error, Debug)]
 pub enum StrategyError {
     #[error("No strikes available")]
@@ -85,7 +120,7 @@ impl StrikeMatchMode {
     }
 }
 
-/// Option chain data for strategy selection
+/// Option chain data for strategy selection (backwards compatibility)
 #[derive(Debug)]
 pub struct OptionChainData {
     pub expirations: Vec<NaiveDate>,
@@ -95,6 +130,84 @@ pub struct OptionChainData {
     pub iv_ratios: Option<Vec<(Strike, f64)>>,
     /// IV surface for delta-space strategies
     pub iv_surface: Option<IVSurface>,
+}
+
+/// Criteria for selecting expirations
+#[derive(Debug, Clone)]
+pub struct ExpirationCriteria {
+    pub min_short_dte: i32,
+    pub max_short_dte: i32,
+    pub min_long_dte: i32,
+    pub max_long_dte: i32,
+}
+
+impl ExpirationCriteria {
+    pub fn new(min_short_dte: i32, max_short_dte: i32, min_long_dte: i32, max_long_dte: i32) -> Self {
+        Self { min_short_dte, max_short_dte, min_long_dte, max_long_dte }
+    }
+}
+
+impl From<&TradeSelectionCriteria> for ExpirationCriteria {
+    fn from(criteria: &TradeSelectionCriteria) -> Self {
+        Self {
+            min_short_dte: criteria.min_short_dte,
+            max_short_dte: criteria.max_short_dte,
+            min_long_dte: criteria.min_long_dte,
+            max_long_dte: criteria.max_long_dte,
+        }
+    }
+}
+
+/// New trait for strike selection using IVSurface directly
+///
+/// All trade types default to ATM. Only calendar spreads can use delta-based selection.
+pub trait StrikeSelector: Send + Sync {
+    /// Select a calendar spread (can use ATM or Delta)
+    fn select_calendar_spread(
+        &self,
+        spot: &SpotPrice,
+        surface: &IVSurface,
+        option_type: OptionType,
+        criteria: &ExpirationCriteria,
+    ) -> Result<CalendarSpread, SelectionError>;
+
+    /// Select a straddle (always ATM)
+    fn select_straddle(
+        &self,
+        _spot: &SpotPrice,
+        _surface: &IVSurface,
+        _min_dte: i32,
+    ) -> Result<Straddle, SelectionError> {
+        Err(SelectionError::UnsupportedStrategy(
+            "Straddle not supported by this selector".to_string()
+        ))
+    }
+
+    /// Select a calendar straddle (always ATM)
+    fn select_calendar_straddle(
+        &self,
+        _spot: &SpotPrice,
+        _surface: &IVSurface,
+        _criteria: &ExpirationCriteria,
+    ) -> Result<CalendarStraddle, SelectionError> {
+        Err(SelectionError::UnsupportedStrategy(
+            "Calendar straddle not supported by this selector".to_string()
+        ))
+    }
+
+    /// Select an iron butterfly (ATM center + wings)
+    fn select_iron_butterfly(
+        &self,
+        _spot: &SpotPrice,
+        _surface: &IVSurface,
+        _wing_width: Decimal,
+        _min_dte: i32,
+        _max_dte: i32,
+    ) -> Result<IronButterfly, SelectionError> {
+        Err(SelectionError::UnsupportedStrategy(
+            "Iron butterfly not supported by this selector".to_string()
+        ))
+    }
 }
 
 /// Option strategy type (the trade structure)

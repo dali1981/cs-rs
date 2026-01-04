@@ -1,6 +1,6 @@
 use crate::entities::*;
 use crate::value_objects::*;
-use crate::strategies::{StrategyError, SelectionStrategy, OptionChainData};
+use super::{StrategyError, SelectionStrategy, OptionChainData};
 use chrono::NaiveDate;
 use finq_core::OptionType;
 

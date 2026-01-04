@@ -194,7 +194,7 @@ impl SelectionStrategy for DeltaStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::strategies::{find_closest_strike, select_expirations};
+    use super::super::{find_closest_strike, select_expirations};
     use crate::value_objects::Strike;
     use chrono::{DateTime, NaiveDate, Utc};
     use cs_analytics::{IVPoint, IVSurface};

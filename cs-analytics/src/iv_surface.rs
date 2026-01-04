@@ -57,7 +57,7 @@ impl IVSurface {
     ///
     /// Returns sorted list of unique expiration dates.
     pub fn expirations(&self) -> Vec<NaiveDate> {
-        let mut exps: std::collections::BTreeSet<NaiveDate> = self.points.iter()
+        let exps: std::collections::BTreeSet<NaiveDate> = self.points.iter()
             .map(|p| p.expiration)
             .collect();
         exps.into_iter().collect()
@@ -67,7 +67,7 @@ impl IVSurface {
     ///
     /// Returns sorted list of unique strikes.
     pub fn strikes(&self) -> Vec<Decimal> {
-        let mut strikes: std::collections::BTreeSet<Decimal> = self.points.iter()
+        let strikes: std::collections::BTreeSet<Decimal> = self.points.iter()
             .map(|p| p.strike)
             .collect();
         strikes.into_iter().collect()
