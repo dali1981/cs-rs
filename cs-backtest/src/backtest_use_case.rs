@@ -1336,7 +1336,7 @@ where
     ) -> TradeResult {
         use rust_decimal::Decimal;
 
-        let dummy_strike = Strike::new(Decimal::ZERO).unwrap();
+        let dummy_strike = Strike::new(Decimal::ONE).unwrap(); // Strike must be > 0
         let failure = FailureReason::PricingError(reason);
 
         match structure {

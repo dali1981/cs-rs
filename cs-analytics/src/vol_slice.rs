@@ -16,6 +16,7 @@ pub enum InterpolationMode {
     #[default]
     Linear,
     /// SVI parametric fit (M2)
+    #[serde(rename = "svi")]
     SVI,
 }
 
