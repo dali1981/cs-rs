@@ -1249,6 +1249,297 @@ where
         )
     }
 
+    /// Create strike selector based on config
+    fn create_selector(&self) -> Box<dyn StrikeSelector> {
+        match self.config.selection_strategy {
+            SelectionType::ATM => Box::new(
+                ATMStrategy::new(self.config.selection.clone())
+                    .with_strike_match_mode(self.config.strike_match_mode)
+            ),
+            SelectionType::Delta => Box::new(
+                DeltaStrategy::fixed(
+                    self.config.target_delta,
+                    self.config.selection.clone(),
+                )
+                .with_strike_match_mode(self.config.strike_match_mode)
+            ),
+            SelectionType::DeltaScan => Box::new(
+                DeltaStrategy::scanning(
+                    self.config.delta_range,
+                    self.config.delta_scan_steps,
+                    self.config.selection.clone(),
+                )
+                .with_strike_match_mode(self.config.strike_match_mode)
+            ),
+        }
+    }
+
+    /// Build expiration criteria from config
+    fn build_expiration_criteria(&self) -> ExpirationCriteria {
+        ExpirationCriteria::new(
+            self.config.selection.min_short_dte,
+            self.config.selection.max_short_dte,
+            self.config.selection.min_long_dte,
+            self.config.selection.max_long_dte,
+        )
+    }
+
+    /// NEW: Process earnings event using UnifiedExecutor (optimized IV surface building)
+    async fn process_event_unified(
+        &self,
+        event: &EarningsEvent,
+        selector: &dyn StrikeSelector,
+        structure: TradeStructure,
+    ) -> TradeResult {
+        // Determine entry/exit times
+        let entry_time = self.earnings_timing.entry_datetime(event);
+        let exit_time = self.earnings_timing.exit_datetime(event);
+
+        // Build IV surface ONCE for entry (used for both selection AND entry pricing)
+        let entry_chain = match self.options_repo
+            .get_option_bars_at_time(&event.symbol, entry_time)
+            .await
+        {
+            Ok(chain) => chain,
+            Err(e) => {
+                warn!("Failed to get option chain for {}: {}", event.symbol, e);
+                return self.create_failed_result(event, entry_time, exit_time, format!("No option data: {}", e), structure);
+            }
+        };
+
+        let entry_surface = match build_iv_surface_minute_aligned(
+            &entry_chain,
+            self.equity_repo.as_ref(),
+            &event.symbol,
+        ).await {
+            Some(surface) => surface,
+            None => {
+                warn!("Failed to build IV surface for {}", event.symbol);
+                return self.create_failed_result(event, entry_time, exit_time, "Failed to build IV surface".to_string(), structure);
+            }
+        };
+
+        // Build expiration criteria
+        let criteria = self.build_expiration_criteria();
+
+        // Create unified executor
+        let executor = UnifiedExecutor::new(self.options_repo.clone(), self.equity_repo.clone())
+            .with_pricing_model(self.config.pricing_model)
+            .with_max_entry_iv(self.config.max_entry_iv);
+
+        // Execute with pre-built entry surface (KEY OPTIMIZATION!)
+        executor.execute_with_selection(
+            event,
+            entry_time,
+            exit_time,
+            &entry_surface,  // Passed in - already built
+            selector,
+            structure,
+            &criteria,
+        ).await
+    }
+
+    /// Create a failed trade result
+    fn create_failed_result(
+        &self,
+        event: &EarningsEvent,
+        entry_time: chrono::DateTime<chrono::Utc>,
+        exit_time: chrono::DateTime<chrono::Utc>,
+        reason: String,
+        structure: TradeStructure,
+    ) -> TradeResult {
+        use rust_decimal::Decimal;
+
+        let dummy_strike = Strike::new(Decimal::ZERO).unwrap();
+        let failure = FailureReason::PricingError(reason);
+
+        match structure {
+            TradeStructure::CalendarSpread(option_type) => {
+                TradeResult::CalendarSpread(CalendarSpreadResult {
+                    symbol: event.symbol.clone(),
+                    earnings_date: event.earnings_date,
+                    earnings_time: event.earnings_time,
+                    strike: dummy_strike,
+                    long_strike: None,
+                    option_type,
+                    short_expiry: event.earnings_date,
+                    long_expiry: event.earnings_date,
+                    entry_time,
+                    short_entry_price: Decimal::ZERO,
+                    long_entry_price: Decimal::ZERO,
+                    entry_cost: Decimal::ZERO,
+                    exit_time,
+                    short_exit_price: Decimal::ZERO,
+                    long_exit_price: Decimal::ZERO,
+                    exit_value: Decimal::ZERO,
+                    entry_surface_time: None,
+                    exit_surface_time: None,
+                    pnl: Decimal::ZERO,
+                    pnl_per_contract: Decimal::ZERO,
+                    pnl_pct: Decimal::ZERO,
+                    short_delta: None,
+                    short_gamma: None,
+                    short_theta: None,
+                    short_vega: None,
+                    long_delta: None,
+                    long_gamma: None,
+                    long_theta: None,
+                    long_vega: None,
+                    iv_short_entry: None,
+                    iv_long_entry: None,
+                    iv_short_exit: None,
+                    iv_long_exit: None,
+                    iv_ratio_entry: None,
+                    delta_pnl: None,
+                    gamma_pnl: None,
+                    theta_pnl: None,
+                    vega_pnl: None,
+                    unexplained_pnl: None,
+                    spot_at_entry: 0.0,
+                    spot_at_exit: 0.0,
+                    success: false,
+                    failure_reason: Some(failure),
+                })
+            }
+            TradeStructure::Straddle => {
+                TradeResult::Straddle(StraddleResult {
+                    symbol: event.symbol.clone(),
+                    earnings_date: event.earnings_date,
+                    earnings_time: event.earnings_time,
+                    strike: dummy_strike,
+                    expiration: event.earnings_date,
+                    entry_time,
+                    call_entry_price: Decimal::ZERO,
+                    put_entry_price: Decimal::ZERO,
+                    entry_debit: Decimal::ZERO,
+                    exit_time,
+                    call_exit_price: Decimal::ZERO,
+                    put_exit_price: Decimal::ZERO,
+                    exit_credit: Decimal::ZERO,
+                    entry_surface_time: None,
+                    exit_surface_time: None,
+                    exit_pricing_method: PricingSource::Model,
+                    pnl: Decimal::ZERO,
+                    pnl_pct: Decimal::ZERO,
+                    net_delta: None,
+                    net_gamma: None,
+                    net_theta: None,
+                    net_vega: None,
+                    iv_entry: None,
+                    iv_exit: None,
+                    iv_change: None,
+                    delta_pnl: None,
+                    gamma_pnl: None,
+                    theta_pnl: None,
+                    vega_pnl: None,
+                    unexplained_pnl: None,
+                    spot_at_entry: 0.0,
+                    spot_at_exit: 0.0,
+                    spot_move: 0.0,
+                    spot_move_pct: 0.0,
+                    expected_move_pct: None,
+                    success: false,
+                    failure_reason: Some(failure),
+                })
+            }
+            TradeStructure::CalendarStraddle => {
+                TradeResult::CalendarStraddle(CalendarStraddleResult {
+                    symbol: event.symbol.clone(),
+                    earnings_date: event.earnings_date,
+                    earnings_time: event.earnings_time,
+                    short_strike: dummy_strike,
+                    long_strike: dummy_strike,
+                    short_expiry: event.earnings_date,
+                    long_expiry: event.earnings_date,
+                    entry_time,
+                    short_call_entry: Decimal::ZERO,
+                    short_put_entry: Decimal::ZERO,
+                    long_call_entry: Decimal::ZERO,
+                    long_put_entry: Decimal::ZERO,
+                    entry_cost: Decimal::ZERO,
+                    exit_time,
+                    short_call_exit: Decimal::ZERO,
+                    short_put_exit: Decimal::ZERO,
+                    long_call_exit: Decimal::ZERO,
+                    long_put_exit: Decimal::ZERO,
+                    exit_value: Decimal::ZERO,
+                    entry_surface_time: None,
+                    exit_surface_time: None,
+                    pnl: Decimal::ZERO,
+                    pnl_pct: Decimal::ZERO,
+                    net_delta: None,
+                    net_gamma: None,
+                    net_theta: None,
+                    net_vega: None,
+                    short_iv_entry: None,
+                    long_iv_entry: None,
+                    short_iv_exit: None,
+                    long_iv_exit: None,
+                    iv_ratio_entry: None,
+                    delta_pnl: None,
+                    gamma_pnl: None,
+                    theta_pnl: None,
+                    vega_pnl: None,
+                    unexplained_pnl: None,
+                    spot_at_entry: 0.0,
+                    spot_at_exit: 0.0,
+                    success: false,
+                    failure_reason: Some(failure),
+                })
+            }
+            TradeStructure::IronButterfly { wing_width } => {
+                TradeResult::IronButterfly(IronButterflyResult {
+                    symbol: event.symbol.clone(),
+                    earnings_date: event.earnings_date,
+                    earnings_time: event.earnings_time,
+                    center_strike: dummy_strike,
+                    upper_strike: dummy_strike,
+                    lower_strike: dummy_strike,
+                    expiration: event.earnings_date,
+                    wing_width,
+                    entry_time,
+                    short_call_entry: Decimal::ZERO,
+                    short_put_entry: Decimal::ZERO,
+                    long_call_entry: Decimal::ZERO,
+                    long_put_entry: Decimal::ZERO,
+                    entry_credit: Decimal::ZERO,
+                    exit_time,
+                    short_call_exit: Decimal::ZERO,
+                    short_put_exit: Decimal::ZERO,
+                    long_call_exit: Decimal::ZERO,
+                    long_put_exit: Decimal::ZERO,
+                    exit_cost: Decimal::ZERO,
+                    entry_surface_time: None,
+                    exit_surface_time: None,
+                    pnl: Decimal::ZERO,
+                    pnl_pct: Decimal::ZERO,
+                    max_loss: Decimal::ZERO,
+                    net_delta: None,
+                    net_gamma: None,
+                    net_theta: None,
+                    net_vega: None,
+                    iv_entry: None,
+                    iv_exit: None,
+                    iv_crush: None,
+                    delta_pnl: None,
+                    gamma_pnl: None,
+                    theta_pnl: None,
+                    vega_pnl: None,
+                    unexplained_pnl: None,
+                    spot_at_entry: 0.0,
+                    spot_at_exit: 0.0,
+                    spot_move: 0.0,
+                    spot_move_pct: 0.0,
+                    breakeven_up: 0.0,
+                    breakeven_down: 0.0,
+                    within_breakeven: false,
+                    success: false,
+                    failure_reason: Some(failure),
+                })
+            }
+        }
+    }
+
     /// Unified earnings event processor - handles both calendar spreads and iron butterflies
     async fn process_earnings_event(
         &self,

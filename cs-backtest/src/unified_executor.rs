@@ -163,13 +163,13 @@ where
     /// For now, this method selects the trade and then delegates to the appropriate
     /// executor. In the future, the executors will be modified to accept the
     /// pre-built entry_surface to avoid redundant IV surface builds.
-    pub async fn execute_with_selection<S: StrikeSelector>(
+    pub async fn execute_with_selection(
         &self,
         event: &EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
         entry_surface: &IVSurface,
-        selector: &S,
+        selector: &dyn StrikeSelector,
         structure: TradeStructure,
         criteria: &ExpirationCriteria,
     ) -> TradeResult {
