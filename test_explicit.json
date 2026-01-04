@@ -1,0 +1,41 @@
+[
+  {
+    "Straddle": {
+      "symbol": "PHR",
+      "earnings_date": "2025-12-08",
+      "earnings_time": "AfterMarketClose",
+      "strike": "20",
+      "expiration": "2025-12-19",
+      "entry_time": "2025-12-01T14:35:00Z",
+      "call_entry_price": "1.369950827812325",
+      "put_entry_price": "1.15",
+      "entry_debit": "2.519950827812325",
+      "exit_time": "2025-12-05T20:55:00Z",
+      "call_exit_price": "1.5",
+      "put_exit_price": "1.1",
+      "exit_credit": "2.6",
+      "exit_pricing_method": "Market",
+      "pnl": "0.080049172187675",
+      "pnl_pct": "3.1766164364869390577321559900",
+      "net_delta": 0.11793467515433809,
+      "net_gamma": 0.24885118631140224,
+      "net_theta": -0.06852536335564843,
+      "net_vega": 0.03559669992449018,
+      "iv_entry": 0.7030280225647739,
+      "iv_exit": 0.8258171174393506,
+      "iv_change": 0.12278909487457668,
+      "delta_pnl": "0.00825542726080328",
+      "gamma_pnl": "0.000609685406462879",
+      "theta_pnl": "-0.2912327942615058",
+      "vega_pnl": "0.4370886564250062",
+      "unexplained_pnl": "-0.0746718026430915",
+      "spot_at_entry": 20.17,
+      "spot_at_exit": 20.24,
+      "spot_move": 0.06999999999999673,
+      "spot_move_pct": 0.34705007436785684,
+      "expected_move_pct": 12.493558888509297,
+      "success": true,
+      "failure_reason": null
+    }
+  }
+]
