@@ -97,6 +97,8 @@ pub enum SpreadType {
     Calendar,
     IronButterfly,
     Straddle,
+    /// Calendar straddle: short near-term straddle + long far-term straddle
+    CalendarStraddle,
 }
 
 impl SpreadType {
@@ -104,6 +106,7 @@ impl SpreadType {
         match s.to_lowercase().replace('-', "_").as_str() {
             "iron_butterfly" | "ironbutterfly" | "butterfly" => SpreadType::IronButterfly,
             "straddle" | "long_straddle" => SpreadType::Straddle,
+            "calendar_straddle" | "calendarstraddle" => SpreadType::CalendarStraddle,
             _ => SpreadType::Calendar,
         }
     }

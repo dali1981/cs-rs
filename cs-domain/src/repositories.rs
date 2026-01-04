@@ -53,6 +53,19 @@ pub trait OptionsDataRepository: Send + Sync {
         target_time: DateTime<Utc>,
     ) -> Result<polars::frame::DataFrame, RepositoryError>;
 
+    /// Get option chain snapshot at or after a specific time (forward-looking)
+    ///
+    /// For exit pricing when no data exists at the exact time (illiquid stocks).
+    /// First tries backward lookup, then looks forward up to max_forward_minutes.
+    /// Returns (DataFrame, actual_snapshot_time) where snapshot_time is the
+    /// timestamp of the data actually used.
+    async fn get_option_bars_at_or_after_time(
+        &self,
+        underlying: &str,
+        target_time: DateTime<Utc>,
+        max_forward_minutes: u32,
+    ) -> Result<(polars::frame::DataFrame, DateTime<Utc>), RepositoryError>;
+
     async fn get_available_expirations(
         &self,
         underlying: &str,

@@ -107,6 +107,8 @@ pub enum OptionStrategy {
     IronButterfly,
     /// Long straddle (long ATM call + long ATM put)
     Straddle,
+    /// Calendar straddle (short near-term straddle + long far-term straddle)
+    CalendarStraddle,
 }
 
 impl Default for OptionStrategy {
@@ -156,6 +158,22 @@ pub trait SelectionStrategy: Send + Sync {
     ) -> Result<crate::entities::Straddle, StrategyError> {
         Err(StrategyError::UnsupportedStrategy(
             "Straddle not supported by this selection strategy".to_string()
+        ))
+    }
+
+    /// Select a calendar straddle opportunity
+    ///
+    /// Combines two calendar spreads (call and put) at the same ATM strike.
+    /// Short near-term straddle + long far-term straddle.
+    /// Default implementation returns UnsupportedStrategy error.
+    fn select_calendar_straddle(
+        &self,
+        _event: &EarningsEvent,
+        _spot: &SpotPrice,
+        _chain_data: &OptionChainData,
+    ) -> Result<CalendarStraddle, StrategyError> {
+        Err(StrategyError::UnsupportedStrategy(
+            "Calendar straddle not supported by this selection strategy".to_string()
         ))
     }
 }

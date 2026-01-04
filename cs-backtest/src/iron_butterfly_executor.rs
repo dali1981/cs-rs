@@ -92,8 +92,8 @@ where
             .get_option_bars_at_time(butterfly.symbol(), entry_time)
             .await?;
 
-        let exit_chain = self.options_repo
-            .get_option_bars_at_time(butterfly.symbol(), exit_time)
+        let (exit_chain, exit_surface_time) = self.options_repo
+            .get_option_bars_at_or_after_time(butterfly.symbol(), exit_time, 30)
             .await?;
 
         // Build IV surface with per-option spot prices (minute-aligned)
@@ -102,6 +102,9 @@ where
             self.equity_repo.as_ref(),
             butterfly.symbol(),
         ).await;
+
+        // Capture entry surface timestamp
+        let entry_surface_time = entry_surface.as_ref().map(|s| s.as_of_time());
 
         // Price at entry using pre-built minute-aligned surface
         let entry_pricing = self.pricer.price_with_surface(
@@ -224,6 +227,8 @@ where
             long_call_exit: exit_pricing.long_call.price,
             long_put_exit: exit_pricing.long_put.price,
             exit_cost: exit_pricing.net_credit,
+            entry_surface_time,
+            exit_surface_time: Some(exit_surface_time),
             pnl,
             pnl_pct,
             max_loss,
@@ -287,6 +292,8 @@ where
             long_call_exit: Decimal::ZERO,
             long_put_exit: Decimal::ZERO,
             exit_cost: Decimal::ZERO,
+            entry_surface_time: None,
+            exit_surface_time: None,
             pnl: Decimal::ZERO,
             pnl_pct: Decimal::ZERO,
             max_loss: Decimal::ZERO,

@@ -113,9 +113,9 @@ where
             .get_option_bars_at_time(spread.symbol(), entry_time)
             .await?;
 
-        // Get option chain data for exit
-        let exit_chain = self.options_repo
-            .get_option_bars_at_time(spread.symbol(), exit_time)
+        // Get option chain data for exit (with forward lookup for illiquid stocks)
+        let (exit_chain, exit_surface_time) = self.options_repo
+            .get_option_bars_at_or_after_time(spread.symbol(), exit_time, 30)
             .await?;
 
         // Build IV surface with per-option spot prices (minute-aligned)
@@ -124,6 +124,9 @@ where
             self.equity_repo.as_ref(),
             spread.symbol(),
         ).await;
+
+        // Capture entry surface timestamp
+        let entry_surface_time = entry_surface.as_ref().map(|s| s.as_of_time());
 
         // Price at entry using pre-built minute-aligned surface
         let entry_pricing = self.pricer.price_spread_with_surface(
@@ -266,6 +269,8 @@ where
             short_exit_price: exit_pricing.short_leg.price,
             long_exit_price: exit_pricing.long_leg.price,
             exit_value: exit_pricing.net_cost,
+            entry_surface_time,
+            exit_surface_time: Some(exit_surface_time),
             pnl,
             pnl_per_contract: pnl,
             pnl_pct,
@@ -333,6 +338,8 @@ where
             short_exit_price: Decimal::ZERO,
             long_exit_price: Decimal::ZERO,
             exit_value: Decimal::ZERO,
+            entry_surface_time: None,
+            exit_surface_time: None,
             pnl: Decimal::ZERO,
             pnl_per_contract: Decimal::ZERO,
             pnl_pct: Decimal::ZERO,

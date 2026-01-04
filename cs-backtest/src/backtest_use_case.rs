@@ -9,14 +9,16 @@ use crate::config::{BacktestConfig, SpreadType, SelectionType};
 use crate::trade_executor::TradeExecutor;
 use crate::iron_butterfly_executor::IronButterflyExecutor;
 use crate::straddle_executor::StraddleExecutor;
+use crate::calendar_straddle_executor::CalendarStraddleExecutor;
 use crate::iv_surface_builder::build_iv_surface_minute_aligned;
 
-/// Unified trade result (either calendar spread, iron butterfly, or straddle)
+/// Unified trade result (calendar spread, iron butterfly, straddle, or calendar straddle)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TradeResult {
     CalendarSpread(CalendarSpreadResult),
     IronButterfly(IronButterflyResult),
     Straddle(StraddleResult),
+    CalendarStraddle(CalendarStraddleResult),
 }
 
 impl TradeResult {
@@ -25,6 +27,7 @@ impl TradeResult {
             TradeResult::CalendarSpread(r) => r.is_winner(),
             TradeResult::IronButterfly(r) => r.is_winner(),
             TradeResult::Straddle(r) => r.is_winner(),
+            TradeResult::CalendarStraddle(r) => r.is_winner(),
         }
     }
 
@@ -33,6 +36,7 @@ impl TradeResult {
             TradeResult::CalendarSpread(r) => r.success,
             TradeResult::IronButterfly(r) => r.success,
             TradeResult::Straddle(r) => r.success,
+            TradeResult::CalendarStraddle(r) => r.success,
         }
     }
 
@@ -41,6 +45,7 @@ impl TradeResult {
             TradeResult::CalendarSpread(r) => r.pnl,
             TradeResult::IronButterfly(r) => r.pnl,
             TradeResult::Straddle(r) => r.pnl,
+            TradeResult::CalendarStraddle(r) => r.pnl,
         }
     }
 
@@ -49,6 +54,7 @@ impl TradeResult {
             TradeResult::CalendarSpread(r) => r.pnl_pct,
             TradeResult::IronButterfly(r) => r.pnl_pct,
             TradeResult::Straddle(r) => r.pnl_pct,
+            TradeResult::CalendarStraddle(r) => r.pnl_pct,
         }
     }
 
@@ -57,6 +63,7 @@ impl TradeResult {
             TradeResult::CalendarSpread(r) => &r.symbol,
             TradeResult::IronButterfly(r) => &r.symbol,
             TradeResult::Straddle(r) => &r.symbol,
+            TradeResult::CalendarStraddle(r) => &r.symbol,
         }
     }
 
@@ -65,6 +72,7 @@ impl TradeResult {
             TradeResult::CalendarSpread(r) => Some(r.option_type),
             TradeResult::IronButterfly(_) => None, // Has both call and put
             TradeResult::Straddle(_) => None, // Has both call and put
+            TradeResult::CalendarStraddle(_) => None, // Has both call and put
         }
     }
 
@@ -73,6 +81,7 @@ impl TradeResult {
             TradeResult::CalendarSpread(r) => r.strike,
             TradeResult::IronButterfly(r) => r.center_strike,
             TradeResult::Straddle(r) => r.strike,
+            TradeResult::CalendarStraddle(r) => r.short_strike, // Use short strike as reference
         }
     }
 }
@@ -305,6 +314,9 @@ where
             SpreadType::Straddle => {
                 self.execute_straddle(start_date, end_date, on_progress).await
             }
+            SpreadType::CalendarStraddle => {
+                self.execute_calendar_straddle(start_date, end_date, on_progress).await
+            }
         }
     }
 
@@ -392,6 +404,10 @@ where
                     Ok(TradeResult::Straddle(_)) => {
                         // This should never happen when processing calendar spreads
                         unreachable!("Got straddle result when processing calendar spread");
+                    }
+                    Ok(TradeResult::CalendarStraddle(_)) => {
+                        // This should never happen when processing calendar spreads
+                        unreachable!("Got calendar straddle result when processing calendar spread");
                     }
                     Err(e) => dropped_events.push(e),
                 }
@@ -497,6 +513,10 @@ where
                     Ok(TradeResult::Straddle(_)) => {
                         // This should never happen when processing iron butterflies
                         unreachable!("Got straddle result when processing iron butterfly");
+                    }
+                    Ok(TradeResult::CalendarStraddle(_)) => {
+                        // This should never happen when processing iron butterflies
+                        unreachable!("Got calendar straddle result when processing iron butterfly");
                     }
                     Err(e) => dropped_events.push(e),
                 }
@@ -635,6 +655,122 @@ where
             results_count = total_entries,
             dropped_count = dropped_events.len(),
             "Straddle backtest completed"
+        );
+
+        Ok(BacktestResult {
+            results: all_results,
+            sessions_processed,
+            total_entries,
+            total_opportunities,
+            dropped_events,
+        })
+    }
+
+    /// Execute calendar straddle backtest
+    ///
+    /// Calendar straddle uses the same timing as calendar spreads (EarningsTradeTiming):
+    /// - Entry: Day of/before earnings (AMC/BMO aware)
+    /// - Exit: Day after earnings (post IV crush)
+    async fn execute_calendar_straddle(
+        &self,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
+    ) -> Result<BacktestResult, BacktestError> {
+        let mut all_results: Vec<TradeResult> = Vec::new();
+        let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
+        let mut sessions_processed = 0;
+        let mut total_opportunities = 0;
+
+        let strategy = self.create_strategy();
+
+        for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
+            sessions_processed += 1;
+
+            // Load earnings for this session
+            let events = self.load_earnings_window(session_date).await?;
+            let to_enter = self.filter_for_entry(&events, session_date);
+
+            if to_enter.is_empty() {
+                if let Some(ref callback) = on_progress {
+                    callback(SessionProgress {
+                        session_date,
+                        entries_count: 0,
+                        events_found: 0,
+                    });
+                }
+                continue;
+            }
+
+            debug!(
+                session_date = %session_date,
+                events_count = to_enter.len(),
+                "Processing calendar straddle session"
+            );
+
+            // Process events (parallel or sequential)
+            let session_results: Vec<_> = if self.config.parallel {
+                let futures: Vec<_> = to_enter
+                    .iter()
+                    .map(|event| self.process_earnings_event(event, &*strategy, OptionStrategy::CalendarStraddle, None))
+                    .collect();
+
+                futures::future::join_all(futures).await
+            } else {
+                let mut results = Vec::new();
+                for event in &to_enter {
+                    results.push(
+                        self.process_earnings_event(event, &*strategy, OptionStrategy::CalendarStraddle, None).await
+                    );
+                }
+                results
+            };
+
+            // Collect results
+            let mut session_entries = 0;
+            for result in session_results {
+                total_opportunities += 1;
+                match result {
+                    Ok(TradeResult::CalendarStraddle(trade_result)) => {
+                        // Apply IV ratio filter if configured
+                        if self.passes_calendar_straddle_iv_filter(&trade_result) {
+                            all_results.push(TradeResult::CalendarStraddle(trade_result));
+                            session_entries += 1;
+                        } else {
+                            dropped_events.push(TradeGenerationError {
+                                symbol: trade_result.symbol.clone(),
+                                earnings_date: trade_result.earnings_date,
+                                earnings_time: trade_result.earnings_time,
+                                reason: "IV_RATIO_FILTER".into(),
+                                details: trade_result.iv_ratio().map(|r| format!("IV ratio: {:.2}", r)),
+                                phase: "filter".into(),
+                            });
+                        }
+                    }
+                    Ok(_) => {
+                        unreachable!("Got non-CalendarStraddle result when processing calendar straddle");
+                    }
+                    Err(e) => dropped_events.push(e),
+                }
+            }
+
+            if let Some(ref callback) = on_progress {
+                callback(SessionProgress {
+                    session_date,
+                    entries_count: session_entries,
+                    events_found: to_enter.len(),
+                });
+            }
+        }
+
+        let total_entries = all_results.len();
+
+        info!(
+            sessions_processed,
+            total_opportunities,
+            results_count = total_entries,
+            dropped_count = dropped_events.len(),
+            "Calendar straddle backtest completed"
         );
 
         Ok(BacktestResult {
@@ -1074,10 +1210,53 @@ where
 
                 Ok(TradeResult::Straddle(result))
             }
+            OptionStrategy::CalendarStraddle => {
+                // Select calendar straddle
+                let calendar_straddle = strategy.select_calendar_straddle(event, &spot, &chain_data)
+                    .map_err(|e| TradeGenerationError {
+                        symbol: event.symbol.clone(),
+                        earnings_date: event.earnings_date,
+                        earnings_time: event.earnings_time,
+                        reason: "STRATEGY_ERROR".into(),
+                        details: Some(e.to_string()),
+                        phase: "strategy".into(),
+                    })?;
+
+                // Execute trade
+                let executor = CalendarStraddleExecutor::new(
+                    self.options_repo.clone(),
+                    self.equity_repo.clone(),
+                )
+                .with_pricing_model(self.config.pricing_model)
+                .with_max_entry_iv(self.config.max_entry_iv);
+
+                let result = executor.execute_trade(&calendar_straddle, event, entry_time, exit_time).await;
+
+                if !result.success {
+                    return Err(TradeGenerationError {
+                        symbol: result.symbol,
+                        earnings_date: result.earnings_date,
+                        earnings_time: result.earnings_time,
+                        reason: result.failure_reason.map(|r| format!("{:?}", r)).unwrap_or_else(|| "UNKNOWN".into()),
+                        details: None,
+                        phase: "execution".into(),
+                    });
+                }
+
+                Ok(TradeResult::CalendarStraddle(result))
+            }
         }
     }
 
     fn passes_iv_filter(&self, result: &CalendarSpreadResult) -> bool {
+        match (self.config.selection.min_iv_ratio, result.iv_ratio()) {
+            (Some(min), Some(ratio)) => ratio >= min,
+            (Some(_), None) => false,
+            (None, _) => true,
+        }
+    }
+
+    fn passes_calendar_straddle_iv_filter(&self, result: &CalendarStraddleResult) -> bool {
         match (self.config.selection.min_iv_ratio, result.iv_ratio()) {
             (Some(min), Some(ratio)) => ratio >= min,
             (Some(_), None) => false,

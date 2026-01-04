@@ -59,7 +59,7 @@ enum Commands {
         /// End date (YYYY-MM-DD)
         #[arg(long)]
         end: String,
-        /// Trade structure (calendar, iron-butterfly)
+        /// Trade structure (calendar, iron-butterfly, straddle, calendar-straddle)
         #[arg(long)]
         spread: Option<String>,
         /// Strike selection method (atm, delta, delta-scan)
@@ -563,7 +563,8 @@ async fn run_backtest(
             "calendar" => "calendar",
             "iron_butterfly" | "ironbutterfly" | "butterfly" => "iron_butterfly",
             "straddle" | "long_straddle" => "straddle",
-            _ => anyhow::bail!("Invalid spread type: {}. Must be 'calendar', 'iron-butterfly', or 'straddle'", spread_str),
+            "calendar_straddle" | "calendarstraddle" => "calendar_straddle",
+            _ => anyhow::bail!("Invalid spread type: {}. Must be 'calendar', 'iron-butterfly', 'straddle', or 'calendar-straddle'", spread_str),
         };
 
         // Validate arguments based on spread type
@@ -595,6 +596,14 @@ async fn run_backtest(
                 // Default to Call for straddle (will be ignored in execution)
                 finq_core::OptionType::Call
             }
+            "calendar_straddle" => {
+                // Calendar straddle FORBIDS option-type
+                if option_type_str.is_some() {
+                    anyhow::bail!("--option-type is invalid for calendar-straddle (uses both calls and puts)");
+                }
+                // Default to Call for calendar straddle (will be ignored in execution)
+                finq_core::OptionType::Call
+            }
             _ => unreachable!(),
         };
 
@@ -614,6 +623,14 @@ async fn run_backtest(
         }
         if spread == "straddle" && wing_width.is_some() {
             anyhow::bail!("--wing-width is not applicable to straddle strategy");
+        }
+
+        // Additional validation for calendar straddle
+        if spread == "calendar_straddle" && strike_match_mode_str.is_some() {
+            anyhow::bail!("--strike-match-mode is not applicable to calendar-straddle (always uses same strike for straddles)");
+        }
+        if spread == "calendar_straddle" && wing_width.is_some() {
+            anyhow::bail!("--wing-width is not applicable to calendar-straddle strategy");
         }
 
         // Parse selection type if provided
@@ -724,6 +741,11 @@ async fn run_backtest(
             println!("  Exit:          {} trading day(s) before earnings", backtest_config.straddle_exit_days);
             println!("  Expiration:    First expiry after earnings");
         }
+        cs_backtest::SpreadType::CalendarStraddle => {
+            println!("  Spread:        Calendar Straddle");
+            println!("  Structure:     Short near-term straddle + Long far-term straddle");
+            println!("  Delta:         Neutral (call + put at same strike)");
+        }
     }
 
     // Display selection strategy
@@ -753,6 +775,10 @@ async fn run_backtest(
             cs_domain::StrikeMatchMode::SameDelta => "same-delta (diagonal)",
         };
         println!("  Strike match:  {}", strike_mode);
+    }
+    // Calendar straddle always uses same strike
+    if matches!(spread, cs_backtest::SpreadType::CalendarStraddle) {
+        println!("  Strike match:  same-strike (straddle pairs)");
     }
     if let Some(iv) = backtest_config.selection.min_iv_ratio {
         println!("  Min IV ratio:  {:.3}", iv);
@@ -868,10 +894,14 @@ async fn run_backtest(
     if !result.results.is_empty() {
         println!("{}", style("Sample Trades:").bold());
         for (i, trade) in result.results.iter().take(5).enumerate() {
-            let option_type_str = match trade.option_type() {
-                Some(finq_core::OptionType::Call) => "Call",
-                Some(finq_core::OptionType::Put) => "Put",
-                None => "Straddle",
+            let option_type_str = match trade {
+                cs_backtest::TradeResult::CalendarSpread(r) => match r.option_type {
+                    finq_core::OptionType::Call => "Call",
+                    finq_core::OptionType::Put => "Put",
+                },
+                cs_backtest::TradeResult::IronButterfly(_) => "IronButterfly",
+                cs_backtest::TradeResult::Straddle(_) => "Straddle",
+                cs_backtest::TradeResult::CalendarStraddle(_) => "CalStraddle",
             };
             println!("  {}. {} {} @ {} | P&L: ${:.2} ({:.2}%)",
                 i + 1,
@@ -881,6 +911,25 @@ async fn run_backtest(
                 trade.pnl(),
                 trade.pnl_pct(),
             );
+
+            // Display surface time deltas if exit surface time differs from requested exit time
+            let (exit_time, exit_surface_time) = match trade {
+                cs_backtest::TradeResult::CalendarSpread(r) => (r.exit_time, r.exit_surface_time),
+                cs_backtest::TradeResult::IronButterfly(r) => (r.exit_time, r.exit_surface_time),
+                cs_backtest::TradeResult::Straddle(r) => (r.exit_time, r.exit_surface_time),
+                cs_backtest::TradeResult::CalendarStraddle(r) => (r.exit_time, r.exit_surface_time),
+            };
+
+            if let Some(surface_time) = exit_surface_time {
+                if surface_time != exit_time {
+                    let delta_minutes = (surface_time - exit_time).num_minutes();
+                    println!("     {} Exit surface: {} ({:+} min from requested)",
+                        style("↳").dim(),
+                        surface_time.format("%H:%M:%S"),
+                        delta_minutes
+                    );
+                }
+            }
         }
         if result.results.len() > 5 {
             println!("  ... and {} more", result.results.len() - 5);
@@ -953,7 +1002,7 @@ async fn run_backtest(
                 .collect();
 
             if calendar_results.is_empty() {
-                println!("{}", style("Warning: No calendar spread results to save to parquet. Use .json extension for iron butterfly results.").yellow());
+                println!("{}", style("Warning: No calendar spread results to save to parquet. Use .json extension for other strategy results.").yellow());
             } else {
                 results_repo.save_results(&calendar_results, run_id).await?;
                 println!("{}", style(format!("Results saved to {:?}", output_path)).green());

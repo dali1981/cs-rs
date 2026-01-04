@@ -5,34 +5,38 @@ use std::sync::Arc;
 
 use cs_analytics::PricingModel;
 use cs_domain::{
-    Straddle, StraddleResult, EarningsEvent, FailureReason, PricingSource,
+    CalendarStraddle, CalendarStraddleResult, EarningsEvent, FailureReason,
     EquityDataRepository, OptionsDataRepository,
 };
 use crate::iv_surface_builder::build_iv_surface_minute_aligned;
-use crate::straddle_pricer::{StraddlePricer, StraddlePricing};
+use crate::calendar_straddle_pricer::{CalendarStraddlePricer, CalendarStraddlePricing};
 use crate::spread_pricer::SpreadPricer;
 use crate::trade_executor::ExecutionError;
 
-/// Executor for straddle trades
+/// Executor for calendar straddle trades
 ///
-/// Entry: Buy ATM call + put (debit)
-/// Exit: Sell call + put (credit)
+/// Structure:
+/// - Short near-term straddle (short call + short put at near expiration)
+/// - Long far-term straddle (long call + long put at far expiration)
+///
+/// Entry: Sell near-term straddle + Buy far-term straddle (net debit)
+/// Exit: Close all 4 legs
 /// P&L = Exit value - Entry cost
 ///
 /// Uses minute data when available, falls back to PricingModel for
-/// options that may not have market prices at exit (e.g., spot moved significantly).
-pub struct StraddleExecutor<O, E>
+/// options that may not have market prices.
+pub struct CalendarStraddleExecutor<O, E>
 where
     O: OptionsDataRepository,
     E: EquityDataRepository,
 {
     options_repo: Arc<O>,
     equity_repo: Arc<E>,
-    pricer: StraddlePricer,
+    pricer: CalendarStraddlePricer,
     max_entry_iv: Option<f64>,
 }
 
-impl<O, E> StraddleExecutor<O, E>
+impl<O, E> CalendarStraddleExecutor<O, E>
 where
     O: OptionsDataRepository,
     E: EquityDataRepository,
@@ -42,7 +46,7 @@ where
         Self {
             options_repo,
             equity_repo,
-            pricer: StraddlePricer::new(spread_pricer),
+            pricer: CalendarStraddlePricer::new(spread_pricer),
             max_entry_iv: None,
         }
     }
@@ -57,14 +61,14 @@ where
         self
     }
 
-    /// Execute a complete straddle trade (entry + exit)
+    /// Execute a complete calendar straddle trade (entry + exit)
     pub async fn execute_trade(
         &self,
-        straddle: &Straddle,
+        straddle: &CalendarStraddle,
         event: &EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
-    ) -> StraddleResult {
+    ) -> CalendarStraddleResult {
         match self.try_execute_trade(straddle, event, entry_time, exit_time).await {
             Ok(result) => result,
             Err(e) => self.create_failed_result(straddle, event, entry_time, exit_time, e),
@@ -73,11 +77,11 @@ where
 
     async fn try_execute_trade(
         &self,
-        straddle: &Straddle,
+        straddle: &CalendarStraddle,
         event: &EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
-    ) -> Result<StraddleResult, ExecutionError> {
+    ) -> Result<CalendarStraddleResult, ExecutionError> {
         // Get spot prices
         let entry_spot = self.equity_repo
             .get_spot_price(straddle.symbol(), entry_time)
@@ -103,7 +107,7 @@ where
         // Capture entry surface timestamp
         let entry_surface_time = entry_surface.as_ref().map(|s| s.as_of_time());
 
-        // Price at entry (debit we pay) using pre-built minute-aligned surface
+        // Price at entry using pre-built minute-aligned surface
         let entry_pricing = self.pricer.price_with_surface(
             straddle,
             &entry_chain,
@@ -112,21 +116,22 @@ where
             entry_surface.as_ref(),
         )?;
 
-        // Validate minimum straddle price
-        let min_straddle = Decimal::new(50, 2); // $0.50 minimum
-        if entry_pricing.total_price < min_straddle {
+        // Validate minimum position cost
+        let min_cost = Decimal::new(10, 2); // $0.10 minimum net cost
+        if entry_pricing.net_cost.abs() < min_cost {
             return Err(ExecutionError::InvalidSpread(format!(
-                "Straddle price too small: {} < {}",
-                entry_pricing.total_price, min_straddle
+                "Calendar straddle net cost too small: {} < {}",
+                entry_pricing.net_cost, min_cost
             )));
         }
 
-        // Validate entry IV
+        // Validate entry IV on the short leg (near-term)
         if let Some(max_iv) = self.max_entry_iv {
-            if let Some(iv) = entry_pricing.call.iv {
+            let short_iv = compute_short_iv(&entry_pricing);
+            if let Some(iv) = short_iv {
                 if iv > max_iv {
                     return Err(ExecutionError::InvalidSpread(format!(
-                        "IV too high: {:.1}% > {:.1}%",
+                        "Short IV too high: {:.1}% > {:.1}%",
                         iv * 100.0, max_iv * 100.0
                     )));
                 }
@@ -140,8 +145,7 @@ where
             straddle.symbol(),
         ).await;
 
-        // Price at exit (credit we receive) using pre-built minute-aligned surface
-        // This may use model pricing if market data unavailable
+        // Price at exit using pre-built minute-aligned surface
         let exit_pricing = self.pricer.price_with_surface(
             straddle,
             &exit_chain,
@@ -150,33 +154,28 @@ where
             exit_surface.as_ref(),
         )?;
 
-        // P&L = Exit value - Entry cost (profit when straddle appreciated)
-        let pnl = exit_pricing.total_price - entry_pricing.total_price;
-        let pnl_pct = if entry_pricing.total_price != Decimal::ZERO {
-            (pnl / entry_pricing.total_price) * Decimal::from(100)
+        // P&L = Exit value - Entry cost
+        // For calendar straddle: we pay debit at entry (positive cost), receive at exit
+        // If exit_value > entry_cost, profit
+        let pnl = exit_pricing.net_cost - entry_pricing.net_cost;
+        let pnl_pct = if entry_pricing.net_cost != Decimal::ZERO {
+            (pnl / entry_pricing.net_cost.abs()) * Decimal::from(100)
         } else {
             Decimal::ZERO
         };
 
-        // Net Greeks (long call + long put)
+        // Net Greeks at entry (short=-1, long=+1)
         let (net_delta, net_gamma, net_theta, net_vega) = compute_net_greeks(&entry_pricing);
 
-        // IV change (positive = good for long straddle)
-        let (iv_entry, iv_exit, iv_change) = compute_iv_change(&entry_pricing, &exit_pricing);
+        // IV tracking
+        let short_iv_entry = compute_short_iv(&entry_pricing);
+        let long_iv_entry = compute_long_iv(&entry_pricing);
+        let short_iv_exit = compute_short_iv(&exit_pricing);
+        let long_iv_exit = compute_long_iv(&exit_pricing);
 
-        // Expected move at entry
-        let expected_move_pct = if entry_spot.to_f64() > 0.0 {
-            Some((entry_pricing.total_price.to_f64().unwrap_or(0.0) / entry_spot.to_f64()) * 100.0)
-        } else {
-            None
-        };
-
-        // Spot move
-        let spot_move = exit_spot.to_f64() - entry_spot.to_f64();
-        let spot_move_pct = if entry_spot.to_f64() != 0.0 {
-            (spot_move / entry_spot.to_f64()) * 100.0
-        } else {
-            0.0
+        let iv_ratio_entry = match (short_iv_entry, long_iv_entry) {
+            (Some(short), Some(long)) if long > 0.0 => Some(short / long),
+            _ => None,
         };
 
         // P&L attribution
@@ -191,32 +190,39 @@ where
                 pnl,
             );
 
-        Ok(StraddleResult {
+        Ok(CalendarStraddleResult {
             symbol: straddle.symbol().to_string(),
             earnings_date: event.earnings_date,
             earnings_time: event.earnings_time,
-            strike: straddle.strike(),
-            expiration: straddle.expiration(),
+            short_strike: straddle.short_strike(),
+            long_strike: straddle.long_strike(),
+            short_expiry: straddle.short_expiry(),
+            long_expiry: straddle.long_expiry(),
             entry_time,
-            call_entry_price: entry_pricing.call.price,
-            put_entry_price: entry_pricing.put.price,
-            entry_debit: entry_pricing.total_price,
+            short_call_entry: entry_pricing.short_call.price,
+            short_put_entry: entry_pricing.short_put.price,
+            long_call_entry: entry_pricing.long_call.price,
+            long_put_entry: entry_pricing.long_put.price,
+            entry_cost: entry_pricing.net_cost,
             exit_time,
-            call_exit_price: exit_pricing.call.price,
-            put_exit_price: exit_pricing.put.price,
-            exit_credit: exit_pricing.total_price,
+            short_call_exit: exit_pricing.short_call.price,
+            short_put_exit: exit_pricing.short_put.price,
+            long_call_exit: exit_pricing.long_call.price,
+            long_put_exit: exit_pricing.long_put.price,
+            exit_value: exit_pricing.net_cost,
             entry_surface_time,
             exit_surface_time: Some(exit_surface_time),
-            exit_pricing_method: exit_pricing.source,
             pnl,
             pnl_pct,
             net_delta,
             net_gamma,
             net_theta,
             net_vega,
-            iv_entry,
-            iv_exit,
-            iv_change,
+            short_iv_entry,
+            long_iv_entry,
+            short_iv_exit,
+            long_iv_exit,
+            iv_ratio_entry,
             delta_pnl,
             gamma_pnl,
             theta_pnl,
@@ -224,9 +230,6 @@ where
             unexplained_pnl,
             spot_at_entry: entry_spot.to_f64(),
             spot_at_exit: exit_spot.to_f64(),
-            spot_move,
-            spot_move_pct,
-            expected_move_pct,
             success: true,
             failure_reason: None,
         })
@@ -238,7 +241,6 @@ where
         symbol: &str,
         timestamp: DateTime<Utc>,
     ) -> Result<polars::prelude::DataFrame, ExecutionError> {
-        // Use minute bars with timestamps for per-option spot lookup
         self.options_repo
             .get_option_bars_at_time(symbol, timestamp)
             .await
@@ -247,12 +249,12 @@ where
 
     fn create_failed_result(
         &self,
-        straddle: &Straddle,
+        straddle: &CalendarStraddle,
         event: &EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
         error: ExecutionError,
-    ) -> StraddleResult {
+    ) -> CalendarStraddleResult {
         let failure_reason = match error {
             ExecutionError::NoSpotPrice => FailureReason::NoSpotPrice,
             ExecutionError::Repository(_) => FailureReason::NoOptionsData,
@@ -260,32 +262,39 @@ where
             ExecutionError::InvalidSpread(_) => FailureReason::DegenerateSpread,
         };
 
-        StraddleResult {
+        CalendarStraddleResult {
             symbol: straddle.symbol().to_string(),
             earnings_date: event.earnings_date,
             earnings_time: event.earnings_time,
-            strike: straddle.strike(),
-            expiration: straddle.expiration(),
+            short_strike: straddle.short_strike(),
+            long_strike: straddle.long_strike(),
+            short_expiry: straddle.short_expiry(),
+            long_expiry: straddle.long_expiry(),
             entry_time,
-            call_entry_price: Decimal::ZERO,
-            put_entry_price: Decimal::ZERO,
-            entry_debit: Decimal::ZERO,
+            short_call_entry: Decimal::ZERO,
+            short_put_entry: Decimal::ZERO,
+            long_call_entry: Decimal::ZERO,
+            long_put_entry: Decimal::ZERO,
+            entry_cost: Decimal::ZERO,
             exit_time,
-            call_exit_price: Decimal::ZERO,
-            put_exit_price: Decimal::ZERO,
-            exit_credit: Decimal::ZERO,
+            short_call_exit: Decimal::ZERO,
+            short_put_exit: Decimal::ZERO,
+            long_call_exit: Decimal::ZERO,
+            long_put_exit: Decimal::ZERO,
+            exit_value: Decimal::ZERO,
             entry_surface_time: None,
             exit_surface_time: None,
-            exit_pricing_method: PricingSource::Market,
             pnl: Decimal::ZERO,
             pnl_pct: Decimal::ZERO,
             net_delta: None,
             net_gamma: None,
             net_theta: None,
             net_vega: None,
-            iv_entry: None,
-            iv_exit: None,
-            iv_change: None,
+            short_iv_entry: None,
+            long_iv_entry: None,
+            short_iv_exit: None,
+            long_iv_exit: None,
+            iv_ratio_entry: None,
             delta_pnl: None,
             gamma_pnl: None,
             theta_pnl: None,
@@ -293,24 +302,52 @@ where
             unexplained_pnl: None,
             spot_at_entry: 0.0,
             spot_at_exit: 0.0,
-            spot_move: 0.0,
-            spot_move_pct: 0.0,
-            expected_move_pct: None,
             success: false,
             failure_reason: Some(failure_reason),
         }
     }
 }
 
-/// Compute net Greeks for long straddle (long call + long put)
-fn compute_net_greeks(pricing: &StraddlePricing) -> (Option<f64>, Option<f64>, Option<f64>, Option<f64>) {
-    match (pricing.call.greeks, pricing.put.greeks) {
-        (Some(call_g), Some(put_g)) => {
-            // Long both legs: add greeks
-            let net_delta = call_g.delta + put_g.delta;  // ~0 for ATM straddle
-            let net_gamma = call_g.gamma + put_g.gamma;  // Positive (long gamma)
-            let net_theta = call_g.theta + put_g.theta;  // Negative (time decay)
-            let net_vega = call_g.vega + put_g.vega;     // Positive (want IV expansion)
+/// Compute short (near-term) IV as average of short call and put IV
+fn compute_short_iv(pricing: &CalendarStraddlePricing) -> Option<f64> {
+    match (pricing.short_call.iv, pricing.short_put.iv) {
+        (Some(c), Some(p)) => Some((c + p) / 2.0),
+        (Some(c), None) => Some(c),
+        (None, Some(p)) => Some(p),
+        _ => None,
+    }
+}
+
+/// Compute long (far-term) IV as average of long call and put IV
+fn compute_long_iv(pricing: &CalendarStraddlePricing) -> Option<f64> {
+    match (pricing.long_call.iv, pricing.long_put.iv) {
+        (Some(c), Some(p)) => Some((c + p) / 2.0),
+        (Some(c), None) => Some(c),
+        (None, Some(p)) => Some(p),
+        _ => None,
+    }
+}
+
+/// Compute net Greeks for calendar straddle
+///
+/// Position signs:
+/// - Short call: -1
+/// - Short put: -1
+/// - Long call: +1
+/// - Long put: +1
+fn compute_net_greeks(pricing: &CalendarStraddlePricing) -> (Option<f64>, Option<f64>, Option<f64>, Option<f64>) {
+    let short_call_g = pricing.short_call.greeks;
+    let short_put_g = pricing.short_put.greeks;
+    let long_call_g = pricing.long_call.greeks;
+    let long_put_g = pricing.long_put.greeks;
+
+    match (short_call_g, short_put_g, long_call_g, long_put_g) {
+        (Some(sc), Some(sp), Some(lc), Some(lp)) => {
+            // Net = -short + long
+            let net_delta = -sc.delta - sp.delta + lc.delta + lp.delta;
+            let net_gamma = -sc.gamma - sp.gamma + lc.gamma + lp.gamma;
+            let net_theta = -sc.theta - sp.theta + lc.theta + lp.theta;
+            let net_vega = -sc.vega - sp.vega + lc.vega + lp.vega;
 
             (Some(net_delta), Some(net_gamma), Some(net_theta), Some(net_vega))
         }
@@ -318,38 +355,10 @@ fn compute_net_greeks(pricing: &StraddlePricing) -> (Option<f64>, Option<f64>, O
     }
 }
 
-/// Compute IV change between entry and exit
-fn compute_iv_change(
-    entry_pricing: &StraddlePricing,
-    exit_pricing: &StraddlePricing,
-) -> (Option<f64>, Option<f64>, Option<f64>) {
-    // Use average of call and put IV
-    let iv_entry = match (entry_pricing.call.iv, entry_pricing.put.iv) {
-        (Some(c), Some(p)) => Some((c + p) / 2.0),
-        (Some(c), None) => Some(c),
-        (None, Some(p)) => Some(p),
-        _ => None,
-    };
-
-    let iv_exit = match (exit_pricing.call.iv, exit_pricing.put.iv) {
-        (Some(c), Some(p)) => Some((c + p) / 2.0),
-        (Some(c), None) => Some(c),
-        (None, Some(p)) => Some(p),
-        _ => None,
-    };
-
-    let iv_change = match (iv_entry, iv_exit) {
-        (Some(entry), Some(exit)) => Some(exit - entry),
-        _ => None,
-    };
-
-    (iv_entry, iv_exit, iv_change)
-}
-
 /// Calculate P&L attribution using leg-by-leg approach
 fn calculate_pnl_attribution(
-    entry_pricing: &StraddlePricing,
-    exit_pricing: &StraddlePricing,
+    entry_pricing: &CalendarStraddlePricing,
+    exit_pricing: &CalendarStraddlePricing,
     entry_spot: f64,
     exit_spot: f64,
     entry_time: DateTime<Utc>,
@@ -359,31 +368,51 @@ fn calculate_pnl_attribution(
     let spot_change = exit_spot - entry_spot;
     let days_held = (exit_time - entry_time).num_hours() as f64 / 24.0;
 
-    // Calculate P&L for call leg (long position, sign = +1.0)
-    let call_pnl = cs_domain::calculate_option_leg_pnl(
-        entry_pricing.call.greeks.as_ref(),
-        entry_pricing.call.iv,
-        exit_pricing.call.iv,
+    // Short call (sign = -1)
+    let short_call_pnl = cs_domain::calculate_option_leg_pnl(
+        entry_pricing.short_call.greeks.as_ref(),
+        entry_pricing.short_call.iv,
+        exit_pricing.short_call.iv,
         spot_change,
         days_held,
-        1.0, // Long call
+        -1.0,
     );
 
-    // Calculate P&L for put leg (long position, sign = +1.0)
-    let put_pnl = cs_domain::calculate_option_leg_pnl(
-        entry_pricing.put.greeks.as_ref(),
-        entry_pricing.put.iv,
-        exit_pricing.put.iv,
+    // Short put (sign = -1)
+    let short_put_pnl = cs_domain::calculate_option_leg_pnl(
+        entry_pricing.short_put.greeks.as_ref(),
+        entry_pricing.short_put.iv,
+        exit_pricing.short_put.iv,
         spot_change,
         days_held,
-        1.0, // Long put
+        -1.0,
     );
 
-    // Sum the legs
-    let delta_pnl = call_pnl.delta + put_pnl.delta;
-    let gamma_pnl = call_pnl.gamma + put_pnl.gamma;
-    let theta_pnl = call_pnl.theta + put_pnl.theta;
-    let vega_pnl = call_pnl.vega + put_pnl.vega;
+    // Long call (sign = +1)
+    let long_call_pnl = cs_domain::calculate_option_leg_pnl(
+        entry_pricing.long_call.greeks.as_ref(),
+        entry_pricing.long_call.iv,
+        exit_pricing.long_call.iv,
+        spot_change,
+        days_held,
+        1.0,
+    );
+
+    // Long put (sign = +1)
+    let long_put_pnl = cs_domain::calculate_option_leg_pnl(
+        entry_pricing.long_put.greeks.as_ref(),
+        entry_pricing.long_put.iv,
+        exit_pricing.long_put.iv,
+        spot_change,
+        days_held,
+        1.0,
+    );
+
+    // Sum all legs
+    let delta_pnl = short_call_pnl.delta + short_put_pnl.delta + long_call_pnl.delta + long_put_pnl.delta;
+    let gamma_pnl = short_call_pnl.gamma + short_put_pnl.gamma + long_call_pnl.gamma + long_put_pnl.gamma;
+    let theta_pnl = short_call_pnl.theta + short_put_pnl.theta + long_call_pnl.theta + long_put_pnl.theta;
+    let vega_pnl = short_call_pnl.vega + short_put_pnl.vega + long_call_pnl.vega + long_put_pnl.vega;
 
     let explained = delta_pnl + gamma_pnl + theta_pnl + vega_pnl;
     let unexplained = total_pnl.to_f64().unwrap_or(0.0) - explained;

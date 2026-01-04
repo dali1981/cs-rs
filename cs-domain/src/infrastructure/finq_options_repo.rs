@@ -111,6 +111,108 @@ impl OptionsDataRepository for FinqOptionsRepository {
         Ok(filtered)
     }
 
+    async fn get_option_bars_at_or_after_time(
+        &self,
+        underlying: &str,
+        target_time: DateTime<Utc>,
+        max_forward_minutes: u32,
+    ) -> Result<(DataFrame, DateTime<Utc>), RepositoryError> {
+        let date = target_time.date_naive();
+
+        // Load minute bars for the target date
+        let df = self.repository
+            .get_bars(underlying, Timeframe::MINUTE, date, date)
+            .await
+            .map_err(|e| RepositoryError::NotFound(format!(
+                "Failed to load minute option bars for {} on {}: {}",
+                underlying, date, e
+            )))?;
+
+        if df.is_empty() {
+            return Err(RepositoryError::NotFound(format!(
+                "No minute bars found for {} on {}",
+                underlying, date
+            )));
+        }
+
+        let target_nanos = TradingTimestamp::from_datetime_utc(target_time).to_nanos();
+
+        // First try backward lookup (at or before target time)
+        let backward = df
+            .clone()
+            .lazy()
+            .filter(col("timestamp").lt_eq(lit(target_nanos)))
+            .sort(
+                ["strike", "expiration", "option_type", "timestamp"],
+                SortMultipleOptions::default()
+                    .with_order_descending_multi(vec![false, false, false, true])
+            )
+            .group_by([col("strike"), col("expiration"), col("option_type")])
+            .agg([
+                col("close").first().alias("close"),
+                col("timestamp").first().alias("timestamp"),
+                col("open").first().alias("open"),
+                col("high").first().alias("high"),
+                col("low").first().alias("low"),
+                col("volume").first().alias("volume"),
+            ])
+            .collect()
+            .map_err(|e| RepositoryError::Polars(e.to_string()))?;
+
+        if !backward.is_empty() {
+            // Found data at or before target time - return with target_time as snapshot
+            return Ok((backward, target_time));
+        }
+
+        // No backward data - look forward up to max_forward_minutes
+        let max_forward_nanos = target_nanos + (max_forward_minutes as i64 * 60 * 1_000_000_000);
+
+        let forward = df
+            .lazy()
+            .filter(
+                col("timestamp").gt(lit(target_nanos))
+                    .and(col("timestamp").lt_eq(lit(max_forward_nanos)))
+            )
+            .sort(
+                ["strike", "expiration", "option_type", "timestamp"],
+                SortMultipleOptions::default()
+                    .with_order_descending_multi(vec![false, false, false, false]) // ascending timestamp
+            )
+            .group_by([col("strike"), col("expiration"), col("option_type")])
+            .agg([
+                col("close").first().alias("close"),
+                col("timestamp").first().alias("timestamp"),
+                col("open").first().alias("open"),
+                col("high").first().alias("high"),
+                col("low").first().alias("low"),
+                col("volume").first().alias("volume"),
+            ])
+            .collect()
+            .map_err(|e| RepositoryError::Polars(e.to_string()))?;
+
+        if forward.is_empty() {
+            return Err(RepositoryError::NotFound(format!(
+                "No option bars within {} minutes of {} for {} on {}",
+                max_forward_minutes, target_time, underlying, date
+            )));
+        }
+
+        // Get the actual snapshot time (max timestamp in the forward-looked data)
+        let timestamps = forward
+            .column("timestamp")
+            .map_err(|e| RepositoryError::Polars(e.to_string()))?
+            .i64()
+            .map_err(|e| RepositoryError::Polars(e.to_string()))?;
+
+        let max_ts = timestamps
+            .max()
+            .ok_or_else(|| RepositoryError::NotFound("No timestamp in forward data".to_string()))?;
+
+        let actual_snapshot_time = TradingTimestamp::from_nanos(max_ts).to_datetime_utc();
+
+        Ok((forward, actual_snapshot_time))
+    }
+
     async fn get_available_expirations(
         &self,
         underlying: &str,

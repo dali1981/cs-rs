@@ -147,6 +147,66 @@ impl SelectionStrategy for ATMStrategy {
 
         CalendarSpread::new(short_leg, long_leg).map_err(Into::into)
     }
+
+    fn select_calendar_straddle(
+        &self,
+        event: &EarningsEvent,
+        spot: &SpotPrice,
+        chain_data: &OptionChainData,
+    ) -> Result<CalendarStraddle, StrategyError> {
+        if chain_data.strikes.is_empty() {
+            return Err(StrategyError::NoStrikes);
+        }
+
+        // Find ATM strike (same for all 4 legs)
+        let spot_f64: f64 = spot.value.try_into().unwrap_or(0.0);
+        let atm_strike = chain_data.strikes
+            .iter()
+            .min_by(|a, b| {
+                let a_diff = (f64::from(**a) - spot_f64).abs();
+                let b_diff = (f64::from(**b) - spot_f64).abs();
+                a_diff.partial_cmp(&b_diff).unwrap()
+            })
+            .ok_or(StrategyError::NoStrikes)?;
+
+        // Select expirations (short near-term, long far-term)
+        let (short_exp, long_exp) = select_expirations(
+            &chain_data.expirations,
+            event.earnings_date,
+            self.criteria.min_short_dte,
+            self.criteria.max_short_dte,
+            self.criteria.min_long_dte,
+            self.criteria.max_long_dte,
+        )?;
+
+        // Build all 4 legs at the same ATM strike
+        let short_call = OptionLeg::new(
+            event.symbol.clone(),
+            *atm_strike,
+            short_exp,
+            OptionType::Call,
+        );
+        let short_put = OptionLeg::new(
+            event.symbol.clone(),
+            *atm_strike,
+            short_exp,
+            OptionType::Put,
+        );
+        let long_call = OptionLeg::new(
+            event.symbol.clone(),
+            *atm_strike,
+            long_exp,
+            OptionType::Call,
+        );
+        let long_put = OptionLeg::new(
+            event.symbol.clone(),
+            *atm_strike,
+            long_exp,
+            OptionType::Put,
+        );
+
+        CalendarStraddle::new(short_call, short_put, long_call, long_put).map_err(Into::into)
+    }
 }
 
 fn select_expirations(
@@ -334,5 +394,74 @@ mod tests {
         // All expirations exceed max_short_dte, so no valid short leg
         let result = select_expirations(&expirations, base_date, 3, 45, 14, 90);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_atm_strategy_select_calendar_straddle() {
+        // Nov 2025 dates
+        let strategy = ATMStrategy::default();
+        let event = EarningsEvent::new(
+            "TEST".to_string(),
+            NaiveDate::from_ymd_opt(2025, 11, 6).unwrap(),
+            EarningsTime::AfterMarketClose,
+        );
+        let spot = SpotPrice::new(Decimal::new(100, 0), Utc::now());
+
+        let chain_data = OptionChainData {
+            expirations: vec![
+                NaiveDate::from_ymd_opt(2025, 11, 14).unwrap(),  // 8 days from earnings
+                NaiveDate::from_ymd_opt(2025, 11, 21).unwrap(),  // 15 days from earnings
+                NaiveDate::from_ymd_opt(2025, 12, 5).unwrap(),   // 29 days from earnings
+            ],
+            strikes: vec![
+                Strike::new(Decimal::new(95, 0)).unwrap(),
+                Strike::new(Decimal::new(100, 0)).unwrap(),
+                Strike::new(Decimal::new(105, 0)).unwrap(),
+            ],
+            deltas: None,
+            volumes: None,
+            iv_ratios: None,
+            iv_surface: None,
+        };
+
+        let result = strategy.select_calendar_straddle(&event, &spot, &chain_data);
+        assert!(result.is_ok());
+
+        let straddle = result.unwrap();
+        assert_eq!(straddle.symbol(), "TEST");
+        // Should select ATM strike of 100
+        assert_eq!(straddle.short_strike().value(), Decimal::new(100, 0));
+        assert_eq!(straddle.long_strike().value(), Decimal::new(100, 0));
+        // Short expiry should be first valid one (Nov 14)
+        assert_eq!(straddle.short_expiry(), NaiveDate::from_ymd_opt(2025, 11, 14).unwrap());
+        // Long expiry should be second valid one (Nov 21)
+        assert_eq!(straddle.long_expiry(), NaiveDate::from_ymd_opt(2025, 11, 21).unwrap());
+    }
+
+    #[test]
+    fn test_atm_strategy_select_calendar_straddle_no_strikes() {
+        let strategy = ATMStrategy::default();
+        let event = EarningsEvent::new(
+            "TEST".to_string(),
+            NaiveDate::from_ymd_opt(2025, 11, 6).unwrap(),
+            EarningsTime::AfterMarketClose,
+        );
+        let spot = SpotPrice::new(Decimal::new(100, 0), Utc::now());
+
+        let chain_data = OptionChainData {
+            expirations: vec![
+                NaiveDate::from_ymd_opt(2025, 11, 14).unwrap(),
+                NaiveDate::from_ymd_opt(2025, 11, 21).unwrap(),
+            ],
+            strikes: vec![],  // No strikes
+            deltas: None,
+            volumes: None,
+            iv_ratios: None,
+            iv_surface: None,
+        };
+
+        let result = strategy.select_calendar_straddle(&event, &spot, &chain_data);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), StrategyError::NoStrikes));
     }
 }
