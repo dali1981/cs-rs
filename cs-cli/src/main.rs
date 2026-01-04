@@ -83,18 +83,12 @@ enum Commands {
         /// Output file path
         #[arg(long)]
         output: Option<PathBuf>,
-        /// Entry hour (0-23)
+        /// Entry time in HH:MM format (default: 09:35)
         #[arg(long)]
-        entry_hour: Option<u32>,
-        /// Entry minute (0-59)
+        entry_time: Option<String>,
+        /// Exit time in HH:MM format (default: 15:55)
         #[arg(long)]
-        entry_minute: Option<u32>,
-        /// Exit hour (0-23)
-        #[arg(long)]
-        exit_hour: Option<u32>,
-        /// Exit minute (0-59)
-        #[arg(long)]
-        exit_minute: Option<u32>,
+        exit_time: Option<String>,
         /// Minimum market cap filter
         #[arg(long)]
         min_market_cap: Option<u64>,
@@ -276,10 +270,8 @@ async fn main() -> Result<()> {
             delta_scan_steps,
             symbols,
             output,
-            entry_hour,
-            entry_minute,
-            exit_hour,
-            exit_minute,
+            entry_time,
+            exit_time,
             min_market_cap,
             min_short_dte,
             max_short_dte,
@@ -315,10 +307,8 @@ async fn main() -> Result<()> {
                 delta_scan_steps,
                 symbols,
                 output,
-                entry_hour,
-                entry_minute,
-                exit_hour,
-                exit_minute,
+                entry_time,
+                exit_time,
                 min_market_cap,
                 min_short_dte,
                 max_short_dte,
@@ -538,10 +528,8 @@ async fn run_backtest(
     delta_scan_steps: Option<usize>,
     symbols: Option<Vec<String>>,
     output: Option<PathBuf>,
-    entry_hour: Option<u32>,
-    entry_minute: Option<u32>,
-    exit_hour: Option<u32>,
-    exit_minute: Option<u32>,
+    entry_time: Option<String>,
+    exit_time: Option<String>,
     min_market_cap: Option<u64>,
     min_short_dte: Option<i32>,
     max_short_dte: Option<i32>,
@@ -696,6 +684,35 @@ async fn run_backtest(
 
         (None, selection, option_type)
     };
+
+    // Parse time strings (HH:MM format)
+    let parse_time = |time_str: Option<String>| -> Result<(Option<u32>, Option<u32>)> {
+        match time_str {
+            None => Ok((None, None)),
+            Some(s) => {
+                let parts: Vec<&str> = s.split(':').collect();
+                if parts.len() != 2 {
+                    anyhow::bail!("Invalid time format '{}'. Expected HH:MM (e.g., 09:35)", s);
+                }
+                let hour: u32 = parts[0].parse()
+                    .map_err(|_| anyhow::anyhow!("Invalid hour in time '{}'", s))?;
+                let minute: u32 = parts[1].parse()
+                    .map_err(|_| anyhow::anyhow!("Invalid minute in time '{}'", s))?;
+
+                if hour > 23 {
+                    anyhow::bail!("Hour must be 0-23, got {}", hour);
+                }
+                if minute > 59 {
+                    anyhow::bail!("Minute must be 0-59, got {}", minute);
+                }
+
+                Ok((Some(hour), Some(minute)))
+            }
+        }
+    };
+
+    let (entry_hour, entry_minute) = parse_time(entry_time)?;
+    let (exit_hour, exit_minute) = parse_time(exit_time)?;
 
     // Build CLI overrides
     let cli_overrides = build_cli_overrides(
