@@ -175,34 +175,32 @@ pub struct TradeGenerationError {
 }
 
 /// Main backtest use case
-pub struct BacktestUseCase<Earn, Opt, Eq>
+pub struct BacktestUseCase<Opt, Eq>
 where
-    Earn: EarningsRepository,
     Opt: OptionsDataRepository,
     Eq: EquityDataRepository,
 {
-    earnings_repo: Arc<Earn>,
+    earnings_repo: Arc<dyn EarningsRepository>,
     options_repo: Arc<Opt>,
     equity_repo: Arc<Eq>,
     config: BacktestConfig,
     earnings_timing: EarningsTradeTiming,
 }
 
-impl<Earn, Opt, Eq> BacktestUseCase<Earn, Opt, Eq>
+impl<Opt, Eq> BacktestUseCase<Opt, Eq>
 where
-    Earn: EarningsRepository + 'static,
     Opt: OptionsDataRepository + 'static,
     Eq: EquityDataRepository + 'static,
 {
     pub fn new(
-        earnings_repo: Earn,
+        earnings_repo: Box<dyn EarningsRepository>,
         options_repo: Opt,
         equity_repo: Eq,
         config: BacktestConfig,
     ) -> Self {
         let earnings_timing = EarningsTradeTiming::new(config.timing);
         Self {
-            earnings_repo: Arc::new(earnings_repo),
+            earnings_repo: Arc::from(earnings_repo),
             options_repo: Arc::new(options_repo),
             equity_repo: Arc::new(equity_repo),
             config,
@@ -327,6 +325,10 @@ where
                             });
                         }
                     }
+                    TradeResult::Failed(failed_trade) => {
+                        // Failed trades are already recorded in dropped_events by the executor
+                        // Just count them as opportunities
+                    }
                     _ => {
                         warn!("Unexpected result type for calendar spread");
                     }
@@ -425,6 +427,9 @@ where
                     TradeResult::IronButterfly(trade_result) => {
                         all_results.push(TradeResult::IronButterfly(trade_result));
                         session_entries += 1;
+                    }
+                    TradeResult::Failed(_) => {
+                        // Failed trades are already recorded
                     }
                     _ => {
                         warn!("Unexpected result type for iron butterfly");
@@ -545,6 +550,9 @@ where
                     TradeResult::Straddle(trade_result) => {
                         all_results.push(TradeResult::Straddle(trade_result));
                         session_entries += 1;
+                    }
+                    TradeResult::Failed(_) => {
+                        // Failed trades are already recorded
                     }
                     _ => {
                         warn!("Unexpected result type for straddle");
@@ -669,6 +677,9 @@ where
                         all_results.push(TradeResult::Straddle(trade_result));
                         session_entries += 1;
                     }
+                    TradeResult::Failed(_) => {
+                        // Failed trades are already recorded
+                    }
                     _ => {
                         warn!("Unexpected result type for post-earnings straddle");
                     }
@@ -782,6 +793,9 @@ where
                                 phase: "filter".into(),
                             });
                         }
+                    }
+                    TradeResult::Failed(_) => {
+                        // Failed trades are already recorded
                     }
                     _ => {
                         warn!("Unexpected result type for calendar straddle");
@@ -1329,445 +1343,24 @@ where
     fn create_failed_result(
         &self,
         event: &EarningsEvent,
-        entry_time: chrono::DateTime<chrono::Utc>,
-        exit_time: chrono::DateTime<chrono::Utc>,
+        _entry_time: chrono::DateTime<chrono::Utc>,
+        _exit_time: chrono::DateTime<chrono::Utc>,
         reason: String,
         structure: TradeStructure,
     ) -> TradeResult {
-        use rust_decimal::Decimal;
+        use crate::unified_executor::FailedTrade;
 
-        let dummy_strike = Strike::new(Decimal::ONE).unwrap(); // Strike must be > 0
-        let failure = FailureReason::PricingError(reason);
-
-        match structure {
-            TradeStructure::CalendarSpread(option_type) => {
-                TradeResult::CalendarSpread(CalendarSpreadResult {
-                    symbol: event.symbol.clone(),
-                    earnings_date: event.earnings_date,
-                    earnings_time: event.earnings_time,
-                    strike: dummy_strike,
-                    long_strike: None,
-                    option_type,
-                    short_expiry: event.earnings_date,
-                    long_expiry: event.earnings_date,
-                    entry_time,
-                    short_entry_price: Decimal::ZERO,
-                    long_entry_price: Decimal::ZERO,
-                    entry_cost: Decimal::ZERO,
-                    exit_time,
-                    short_exit_price: Decimal::ZERO,
-                    long_exit_price: Decimal::ZERO,
-                    exit_value: Decimal::ZERO,
-                    entry_surface_time: None,
-                    exit_surface_time: None,
-                    pnl: Decimal::ZERO,
-                    pnl_per_contract: Decimal::ZERO,
-                    pnl_pct: Decimal::ZERO,
-                    short_delta: None,
-                    short_gamma: None,
-                    short_theta: None,
-                    short_vega: None,
-                    long_delta: None,
-                    long_gamma: None,
-                    long_theta: None,
-                    long_vega: None,
-                    iv_short_entry: None,
-                    iv_long_entry: None,
-                    iv_short_exit: None,
-                    iv_long_exit: None,
-                    iv_ratio_entry: None,
-                    delta_pnl: None,
-                    gamma_pnl: None,
-                    theta_pnl: None,
-                    vega_pnl: None,
-                    unexplained_pnl: None,
-                    spot_at_entry: 0.0,
-                    spot_at_exit: 0.0,
-                    success: false,
-                    failure_reason: Some(failure),
-                })
-            }
-            TradeStructure::Straddle => {
-                TradeResult::Straddle(StraddleResult {
-                    symbol: event.symbol.clone(),
-                    earnings_date: event.earnings_date,
-                    earnings_time: event.earnings_time,
-                    strike: dummy_strike,
-                    expiration: event.earnings_date,
-                    entry_time,
-                    call_entry_price: Decimal::ZERO,
-                    put_entry_price: Decimal::ZERO,
-                    entry_debit: Decimal::ZERO,
-                    exit_time,
-                    call_exit_price: Decimal::ZERO,
-                    put_exit_price: Decimal::ZERO,
-                    exit_credit: Decimal::ZERO,
-                    entry_surface_time: None,
-                    exit_surface_time: None,
-                    exit_pricing_method: PricingSource::Model,
-                    pnl: Decimal::ZERO,
-                    pnl_pct: Decimal::ZERO,
-                    net_delta: None,
-                    net_gamma: None,
-                    net_theta: None,
-                    net_vega: None,
-                    iv_entry: None,
-                    iv_exit: None,
-                    iv_change: None,
-                    delta_pnl: None,
-                    gamma_pnl: None,
-                    theta_pnl: None,
-                    vega_pnl: None,
-                    unexplained_pnl: None,
-                    spot_at_entry: 0.0,
-                    spot_at_exit: 0.0,
-                    spot_move: 0.0,
-                    spot_move_pct: 0.0,
-                    expected_move_pct: None,
-                    success: false,
-                    failure_reason: Some(failure),
-                })
-            }
-            TradeStructure::CalendarStraddle => {
-                TradeResult::CalendarStraddle(CalendarStraddleResult {
-                    symbol: event.symbol.clone(),
-                    earnings_date: event.earnings_date,
-                    earnings_time: event.earnings_time,
-                    short_strike: dummy_strike,
-                    long_strike: dummy_strike,
-                    short_expiry: event.earnings_date,
-                    long_expiry: event.earnings_date,
-                    entry_time,
-                    short_call_entry: Decimal::ZERO,
-                    short_put_entry: Decimal::ZERO,
-                    long_call_entry: Decimal::ZERO,
-                    long_put_entry: Decimal::ZERO,
-                    entry_cost: Decimal::ZERO,
-                    exit_time,
-                    short_call_exit: Decimal::ZERO,
-                    short_put_exit: Decimal::ZERO,
-                    long_call_exit: Decimal::ZERO,
-                    long_put_exit: Decimal::ZERO,
-                    exit_value: Decimal::ZERO,
-                    entry_surface_time: None,
-                    exit_surface_time: None,
-                    pnl: Decimal::ZERO,
-                    pnl_pct: Decimal::ZERO,
-                    net_delta: None,
-                    net_gamma: None,
-                    net_theta: None,
-                    net_vega: None,
-                    short_iv_entry: None,
-                    long_iv_entry: None,
-                    short_iv_exit: None,
-                    long_iv_exit: None,
-                    iv_ratio_entry: None,
-                    delta_pnl: None,
-                    gamma_pnl: None,
-                    theta_pnl: None,
-                    vega_pnl: None,
-                    unexplained_pnl: None,
-                    spot_at_entry: 0.0,
-                    spot_at_exit: 0.0,
-                    success: false,
-                    failure_reason: Some(failure),
-                })
-            }
-            TradeStructure::IronButterfly { wing_width } => {
-                TradeResult::IronButterfly(IronButterflyResult {
-                    symbol: event.symbol.clone(),
-                    earnings_date: event.earnings_date,
-                    earnings_time: event.earnings_time,
-                    center_strike: dummy_strike,
-                    upper_strike: dummy_strike,
-                    lower_strike: dummy_strike,
-                    expiration: event.earnings_date,
-                    wing_width,
-                    entry_time,
-                    short_call_entry: Decimal::ZERO,
-                    short_put_entry: Decimal::ZERO,
-                    long_call_entry: Decimal::ZERO,
-                    long_put_entry: Decimal::ZERO,
-                    entry_credit: Decimal::ZERO,
-                    exit_time,
-                    short_call_exit: Decimal::ZERO,
-                    short_put_exit: Decimal::ZERO,
-                    long_call_exit: Decimal::ZERO,
-                    long_put_exit: Decimal::ZERO,
-                    exit_cost: Decimal::ZERO,
-                    entry_surface_time: None,
-                    exit_surface_time: None,
-                    pnl: Decimal::ZERO,
-                    pnl_pct: Decimal::ZERO,
-                    max_loss: Decimal::ZERO,
-                    net_delta: None,
-                    net_gamma: None,
-                    net_theta: None,
-                    net_vega: None,
-                    iv_entry: None,
-                    iv_exit: None,
-                    iv_crush: None,
-                    delta_pnl: None,
-                    gamma_pnl: None,
-                    theta_pnl: None,
-                    vega_pnl: None,
-                    unexplained_pnl: None,
-                    spot_at_entry: 0.0,
-                    spot_at_exit: 0.0,
-                    spot_move: 0.0,
-                    spot_move_pct: 0.0,
-                    breakeven_up: 0.0,
-                    breakeven_down: 0.0,
-                    within_breakeven: false,
-                    success: false,
-                    failure_reason: Some(failure),
-                })
-            }
-        }
+        TradeResult::Failed(FailedTrade {
+            symbol: event.symbol.clone(),
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
+            trade_structure: structure,
+            reason: FailureReason::PricingError(reason.clone()),
+            phase: "iv_surface_build".to_string(),
+            details: Some(reason),
+        })
     }
 
-    /// Unified earnings event processor - handles both calendar spreads and iron butterflies
-    async fn process_earnings_event(
-        &self,
-        event: &EarningsEvent,
-        strategy: &dyn SelectionStrategy,
-        option_strategy: OptionStrategy,
-        option_type: Option<finq_core::OptionType>,
-    ) -> Result<TradeResult, TradeGenerationError> {
-        // Use event-based timing for entry/exit
-        let entry_time = self.earnings_timing.entry_datetime(event);
-        let entry_date = entry_time.date_naive();
-
-        // Get spot price
-        let spot = self.equity_repo
-            .get_spot_price(&event.symbol, entry_time)
-            .await
-            .map_err(|_| TradeGenerationError {
-                symbol: event.symbol.clone(),
-                earnings_date: event.earnings_date,
-                earnings_time: event.earnings_time,
-                reason: "NO_SPOT_PRICE".into(),
-                details: Some(format!("No spot price at {}", entry_time)),
-                phase: "spot_price".into(),
-            })?;
-
-        // Get option chain data with timestamps for minute-aligned IV computation
-        let chain_df = self.options_repo
-            .get_option_bars_at_time(&event.symbol, entry_time)
-            .await
-            .map_err(|_| TradeGenerationError {
-                symbol: event.symbol.clone(),
-                earnings_date: event.earnings_date,
-                earnings_time: event.earnings_time,
-                reason: "NO_OPTIONS_DATA".into(),
-                details: Some(format!("No option data at {}", entry_time)),
-                phase: "option_data".into(),
-            })?;
-
-        // Check minimum daily notional filter
-        if !self.passes_notional_filter(&chain_df, spot.value, event)? {
-            return Err(TradeGenerationError {
-                symbol: event.symbol.clone(),
-                earnings_date: event.earnings_date,
-                earnings_time: event.earnings_time,
-                reason: "INSUFFICIENT_NOTIONAL".into(),
-                details: Some("Daily option notional below minimum threshold".to_string()),
-                phase: "notional_filter".into(),
-            });
-        }
-
-        // Build IV surface with per-option spot prices (minute-aligned)
-        let iv_surface = build_iv_surface_minute_aligned(
-            &chain_df,
-            self.equity_repo.as_ref(),
-            &event.symbol,
-        ).await;
-
-        // Get available expirations and strikes
-        let expirations = self.options_repo
-            .get_available_expirations(&event.symbol, entry_date)
-            .await
-            .unwrap_or_default();
-
-        let strikes = if !expirations.is_empty() {
-            self.options_repo
-                .get_available_strikes(&event.symbol, expirations[0], entry_date)
-                .await
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-
-        if expirations.is_empty() || strikes.is_empty() {
-            return Err(TradeGenerationError {
-                symbol: event.symbol.clone(),
-                earnings_date: event.earnings_date,
-                earnings_time: event.earnings_time,
-                reason: "INSUFFICIENT_CHAIN_DATA".into(),
-                details: Some(format!("expirations: {}, strikes: {}", expirations.len(), strikes.len())),
-                phase: "chain_data".into(),
-            });
-        }
-
-        // Build chain data for strategy
-        let chain_data = OptionChainData {
-            expirations,
-            strikes,
-            deltas: None,
-            volumes: None,
-            iv_ratios: None,
-            iv_surface,
-        };
-
-        let exit_time = self.earnings_timing.exit_datetime(event);
-
-        // Execute based on option strategy type
-        match option_strategy {
-            OptionStrategy::CalendarSpread => {
-                let option_type = option_type.expect("CalendarSpread requires option_type");
-
-                // Select spread
-                let spread = strategy.select_calendar_spread(event, &spot, &chain_data, option_type)
-                    .map_err(|e| TradeGenerationError {
-                        symbol: event.symbol.clone(),
-                        earnings_date: event.earnings_date,
-                        earnings_time: event.earnings_time,
-                        reason: "STRATEGY_SELECTION_FAILED".into(),
-                        details: Some(e.to_string()),
-                        phase: "strategy".into(),
-                    })?;
-
-                // Execute trade
-                let executor = TradeExecutor::new(
-                    self.options_repo.clone(),
-                    self.equity_repo.clone(),
-                )
-                .with_pricing_model(self.config.pricing_model)
-                .with_max_entry_iv(self.config.max_entry_iv);
-
-                let result = executor.execute_trade(&spread, event, entry_time, exit_time).await;
-
-                // Apply IV filter
-                if !self.passes_iv_filter(&result) {
-                    return Err(TradeGenerationError {
-                        symbol: result.symbol.clone(),
-                        earnings_date: result.earnings_date,
-                        earnings_time: result.earnings_time,
-                        reason: "IV_RATIO_FILTER".into(),
-                        details: result.iv_ratio().map(|r| format!("IV ratio: {:.2}", r)),
-                        phase: "filter".into(),
-                    });
-                }
-
-                Ok(TradeResult::CalendarSpread(result))
-            }
-            OptionStrategy::IronButterfly => {
-                // Select iron butterfly
-                let butterfly = strategy.select_iron_butterfly(event, &spot, &chain_data)
-                    .map_err(|e| TradeGenerationError {
-                        symbol: event.symbol.clone(),
-                        earnings_date: event.earnings_date,
-                        earnings_time: event.earnings_time,
-                        reason: "STRATEGY_ERROR".into(),
-                        details: Some(e.to_string()),
-                        phase: "strategy".into(),
-                    })?;
-
-                // Execute trade
-                let executor = IronButterflyExecutor::new(
-                    self.options_repo.clone(),
-                    self.equity_repo.clone(),
-                )
-                .with_pricing_model(self.config.pricing_model)
-                .with_max_entry_iv(self.config.max_entry_iv);
-
-                let result = executor.execute_trade(&butterfly, event, entry_time, exit_time).await;
-
-                if !result.success {
-                    return Err(TradeGenerationError {
-                        symbol: result.symbol,
-                        earnings_date: result.earnings_date,
-                        earnings_time: result.earnings_time,
-                        reason: result.failure_reason.map(|r| format!("{:?}", r)).unwrap_or_else(|| "UNKNOWN".into()),
-                        details: None,
-                        phase: "execution".into(),
-                    });
-                }
-
-                Ok(TradeResult::IronButterfly(result))
-            }
-            OptionStrategy::Straddle => {
-                // Select straddle
-                let straddle = strategy.select_straddle(event, &spot, &chain_data)
-                    .map_err(|e| TradeGenerationError {
-                        symbol: event.symbol.clone(),
-                        earnings_date: event.earnings_date,
-                        earnings_time: event.earnings_time,
-                        reason: "STRATEGY_ERROR".into(),
-                        details: Some(e.to_string()),
-                        phase: "strategy".into(),
-                    })?;
-
-                // Execute trade
-                let executor = StraddleExecutor::new(
-                    self.options_repo.clone(),
-                    self.equity_repo.clone(),
-                )
-                .with_pricing_model(self.config.pricing_model)
-                .with_max_entry_iv(self.config.max_entry_iv);
-
-                let result = executor.execute_trade(&straddle, event, entry_time, exit_time).await;
-
-                if !result.success {
-                    return Err(TradeGenerationError {
-                        symbol: result.symbol,
-                        earnings_date: result.earnings_date,
-                        earnings_time: result.earnings_time,
-                        reason: result.failure_reason.map(|r| format!("{:?}", r)).unwrap_or_else(|| "UNKNOWN".into()),
-                        details: None,
-                        phase: "execution".into(),
-                    });
-                }
-
-                Ok(TradeResult::Straddle(result))
-            }
-            OptionStrategy::CalendarStraddle => {
-                // Select calendar straddle
-                let calendar_straddle = strategy.select_calendar_straddle(event, &spot, &chain_data)
-                    .map_err(|e| TradeGenerationError {
-                        symbol: event.symbol.clone(),
-                        earnings_date: event.earnings_date,
-                        earnings_time: event.earnings_time,
-                        reason: "STRATEGY_ERROR".into(),
-                        details: Some(e.to_string()),
-                        phase: "strategy".into(),
-                    })?;
-
-                // Execute trade
-                let executor = CalendarStraddleExecutor::new(
-                    self.options_repo.clone(),
-                    self.equity_repo.clone(),
-                )
-                .with_pricing_model(self.config.pricing_model)
-                .with_max_entry_iv(self.config.max_entry_iv);
-
-                let result = executor.execute_trade(&calendar_straddle, event, entry_time, exit_time).await;
-
-                if !result.success {
-                    return Err(TradeGenerationError {
-                        symbol: result.symbol,
-                        earnings_date: result.earnings_date,
-                        earnings_time: result.earnings_time,
-                        reason: result.failure_reason.map(|r| format!("{:?}", r)).unwrap_or_else(|| "UNKNOWN".into()),
-                        details: None,
-                        phase: "execution".into(),
-                    });
-                }
-
-                Ok(TradeResult::CalendarStraddle(result))
-            }
-        }
-    }
 
     fn passes_iv_filter(&self, result: &CalendarSpreadResult) -> bool {
         match (self.config.selection.min_iv_ratio, result.iv_ratio()) {

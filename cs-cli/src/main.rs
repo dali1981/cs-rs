@@ -50,9 +50,12 @@ enum Commands {
         /// Configuration file(s) - can specify multiple, each merges on top of previous
         #[arg(long, short = 'c')]
         conf: Vec<PathBuf>,
-        /// Earnings data directory
-        #[arg(long, env = "EARNINGS_DATA_DIR")]
+        /// Earnings data directory (for earnings-rs adapter)
+        #[arg(long, env = "EARNINGS_DATA_DIR", conflicts_with = "earnings_file")]
         earnings_dir: Option<PathBuf>,
+        /// Custom earnings file (parquet or JSON) - alternative to --earnings-dir
+        #[arg(long, conflicts_with = "earnings_dir")]
+        earnings_file: Option<PathBuf>,
         /// Start date (YYYY-MM-DD)
         #[arg(long)]
         start: String,
@@ -263,6 +266,7 @@ async fn main() -> Result<()> {
         Commands::Backtest {
             conf,
             earnings_dir,
+            earnings_file,
             start,
             end,
             spread,
@@ -301,6 +305,7 @@ async fn main() -> Result<()> {
                 conf,
                 cli.data_dir,
                 earnings_dir,
+                earnings_file,
                 &start,
                 &end,
                 spread.as_deref(),
@@ -523,6 +528,7 @@ async fn run_backtest(
     conf: Vec<PathBuf>,
     data_dir: Option<PathBuf>,
     earnings_dir: Option<PathBuf>,
+    earnings_file: Option<PathBuf>,
     start_str: &str,
     end_str: &str,
     spread_str: Option<&str>,
@@ -820,8 +826,18 @@ async fn run_backtest(
     // Create repositories
     info!("Initializing repositories...");
 
-    // Earnings data repository
-    let earnings_repo = EarningsReaderAdapter::new(earnings_data_dir.clone());
+    // Earnings data repository - choose between custom file or earnings-rs adapter
+    use cs_domain::infrastructure::{CustomFileEarningsReader, EarningsReaderAdapter};
+    let earnings_repo: Box<dyn cs_domain::repositories::EarningsRepository> = match (earnings_file, earnings_data_dir.clone()) {
+        (Some(file), _) => {
+            info!("Using custom earnings file: {:?}", file);
+            Box::new(CustomFileEarningsReader::from_file(file)?)
+        },
+        (None, dir) => {
+            info!("Using earnings-rs adapter with directory: {:?}", dir);
+            Box::new(EarningsReaderAdapter::new(dir))
+        },
+    };
 
     // Options and equity data from FINQ_DATA_DIR
     let options_repo = FinqOptionsRepository::new(data_dir.clone());
@@ -925,12 +941,16 @@ async fn run_backtest(
                 cs_backtest::TradeResult::IronButterfly(_) => "IronButterfly",
                 cs_backtest::TradeResult::Straddle(_) => "Straddle",
                 cs_backtest::TradeResult::CalendarStraddle(_) => "CalStraddle",
+                cs_backtest::TradeResult::Failed(_) => "Failed",
             };
+            let strike_str = trade.strike()
+                .map(|s| s.value().to_string())
+                .unwrap_or_else(|| "N/A".to_string());
             println!("  {}. {} {} @ {} | P&L: ${:.2} ({:.2}%)",
                 i + 1,
                 trade.symbol(),
                 option_type_str,
-                trade.strike().value(),
+                strike_str,
                 trade.pnl(),
                 trade.pnl_pct(),
             );
@@ -941,6 +961,7 @@ async fn run_backtest(
                 cs_backtest::TradeResult::IronButterfly(r) => (r.exit_time, r.exit_surface_time),
                 cs_backtest::TradeResult::Straddle(r) => (r.exit_time, r.exit_surface_time),
                 cs_backtest::TradeResult::CalendarStraddle(r) => (r.exit_time, r.exit_surface_time),
+                cs_backtest::TradeResult::Failed(_) => continue, // Skip failed trades for this display
             };
 
             if let Some(surface_time) = exit_surface_time {
