@@ -19,7 +19,8 @@ pub mod minute_aligned_iv_use_case;
 pub mod earnings_analysis_use_case;
 
 pub use config::{BacktestConfig, SpreadType, SelectionType};
-pub use backtest_use_case::{BacktestUseCase, BacktestResult, SessionProgress, TradeGenerationError, TradeResult};
+pub use backtest_use_case::{BacktestUseCase, BacktestResult, SessionProgress, TradeGenerationError};
+pub use unified_executor::TradeResult;
 pub use trade_executor::{TradeExecutor, ExecutionError};
 pub use spread_pricer::{SpreadPricer, SpreadPricing, LegPricing, PricingError};
 pub use iron_butterfly_pricer::{IronButterflyPricer, IronButterflyPricing};

@@ -6,7 +6,7 @@ use cs_analytics::{IVSurface, PricingModel};
 use cs_domain::{
     CalendarSpreadResult, StraddleResult,
     CalendarStraddleResult, IronButterflyResult,
-    EarningsEvent, SpotPrice,
+    EarningsEvent, SpotPrice, Strike,
     EquityDataRepository, OptionsDataRepository,
 };
 use cs_domain::strike_selection::{StrikeSelector, ExpirationCriteria, SelectionError};
@@ -27,12 +27,77 @@ pub enum TradeStructure {
 }
 
 /// Unified result type for any trade
-#[derive(Debug)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TradeResult {
     CalendarSpread(CalendarSpreadResult),
     Straddle(StraddleResult),
     CalendarStraddle(CalendarStraddleResult),
     IronButterfly(IronButterflyResult),
+}
+
+impl TradeResult {
+    pub fn is_winner(&self) -> bool {
+        match self {
+            TradeResult::CalendarSpread(r) => r.is_winner(),
+            TradeResult::IronButterfly(r) => r.is_winner(),
+            TradeResult::Straddle(r) => r.is_winner(),
+            TradeResult::CalendarStraddle(r) => r.is_winner(),
+        }
+    }
+
+    pub fn success(&self) -> bool {
+        match self {
+            TradeResult::CalendarSpread(r) => r.success,
+            TradeResult::IronButterfly(r) => r.success,
+            TradeResult::Straddle(r) => r.success,
+            TradeResult::CalendarStraddle(r) => r.success,
+        }
+    }
+
+    pub fn pnl(&self) -> Decimal {
+        match self {
+            TradeResult::CalendarSpread(r) => r.pnl,
+            TradeResult::IronButterfly(r) => r.pnl,
+            TradeResult::Straddle(r) => r.pnl,
+            TradeResult::CalendarStraddle(r) => r.pnl,
+        }
+    }
+
+    pub fn pnl_pct(&self) -> Decimal {
+        match self {
+            TradeResult::CalendarSpread(r) => r.pnl_pct,
+            TradeResult::IronButterfly(r) => r.pnl_pct,
+            TradeResult::Straddle(r) => r.pnl_pct,
+            TradeResult::CalendarStraddle(r) => r.pnl_pct,
+        }
+    }
+
+    pub fn symbol(&self) -> &str {
+        match self {
+            TradeResult::CalendarSpread(r) => &r.symbol,
+            TradeResult::IronButterfly(r) => &r.symbol,
+            TradeResult::Straddle(r) => &r.symbol,
+            TradeResult::CalendarStraddle(r) => &r.symbol,
+        }
+    }
+
+    pub fn option_type(&self) -> Option<OptionType> {
+        match self {
+            TradeResult::CalendarSpread(r) => Some(r.option_type),
+            TradeResult::IronButterfly(_) => None,
+            TradeResult::Straddle(_) => None,
+            TradeResult::CalendarStraddle(_) => None,
+        }
+    }
+
+    pub fn strike(&self) -> Strike {
+        match self {
+            TradeResult::CalendarSpread(r) => r.strike,
+            TradeResult::IronButterfly(r) => r.center_strike,
+            TradeResult::Straddle(r) => r.strike,
+            TradeResult::CalendarStraddle(r) => r.short_strike,
+        }
+    }
 }
 
 /// Error type for unified executor

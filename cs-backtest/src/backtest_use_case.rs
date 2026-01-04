@@ -1,90 +1,17 @@
 use std::sync::Arc;
 use chrono::NaiveDate;
-use tracing::{info, debug};
+use tracing::{info, debug, warn};
 
 use cs_domain::*;
 use cs_domain::timing::{EarningsTradeTiming, StraddleTradeTiming, PostEarningsStraddleTiming};
-use cs_domain::strike_selection::{DeltaStrategy, IronButterflyStrategy, StraddleStrategy};
+use cs_domain::strike_selection::{StrikeSelector, ATMStrategy, DeltaStrategy, ExpirationCriteria, IronButterflyStrategy, StraddleStrategy};
 use crate::config::{BacktestConfig, SpreadType, SelectionType};
+use crate::unified_executor::{UnifiedExecutor, TradeStructure, TradeResult};
 use crate::trade_executor::TradeExecutor;
 use crate::iron_butterfly_executor::IronButterflyExecutor;
 use crate::straddle_executor::StraddleExecutor;
 use crate::calendar_straddle_executor::CalendarStraddleExecutor;
 use crate::iv_surface_builder::build_iv_surface_minute_aligned;
-
-/// Unified trade result (calendar spread, iron butterfly, straddle, or calendar straddle)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum TradeResult {
-    CalendarSpread(CalendarSpreadResult),
-    IronButterfly(IronButterflyResult),
-    Straddle(StraddleResult),
-    CalendarStraddle(CalendarStraddleResult),
-}
-
-impl TradeResult {
-    pub fn is_winner(&self) -> bool {
-        match self {
-            TradeResult::CalendarSpread(r) => r.is_winner(),
-            TradeResult::IronButterfly(r) => r.is_winner(),
-            TradeResult::Straddle(r) => r.is_winner(),
-            TradeResult::CalendarStraddle(r) => r.is_winner(),
-        }
-    }
-
-    pub fn success(&self) -> bool {
-        match self {
-            TradeResult::CalendarSpread(r) => r.success,
-            TradeResult::IronButterfly(r) => r.success,
-            TradeResult::Straddle(r) => r.success,
-            TradeResult::CalendarStraddle(r) => r.success,
-        }
-    }
-
-    pub fn pnl(&self) -> rust_decimal::Decimal {
-        match self {
-            TradeResult::CalendarSpread(r) => r.pnl,
-            TradeResult::IronButterfly(r) => r.pnl,
-            TradeResult::Straddle(r) => r.pnl,
-            TradeResult::CalendarStraddle(r) => r.pnl,
-        }
-    }
-
-    pub fn pnl_pct(&self) -> rust_decimal::Decimal {
-        match self {
-            TradeResult::CalendarSpread(r) => r.pnl_pct,
-            TradeResult::IronButterfly(r) => r.pnl_pct,
-            TradeResult::Straddle(r) => r.pnl_pct,
-            TradeResult::CalendarStraddle(r) => r.pnl_pct,
-        }
-    }
-
-    pub fn symbol(&self) -> &str {
-        match self {
-            TradeResult::CalendarSpread(r) => &r.symbol,
-            TradeResult::IronButterfly(r) => &r.symbol,
-            TradeResult::Straddle(r) => &r.symbol,
-            TradeResult::CalendarStraddle(r) => &r.symbol,
-        }
-    }
-
-    pub fn option_type(&self) -> Option<finq_core::OptionType> {
-        match self {
-            TradeResult::CalendarSpread(r) => Some(r.option_type),
-            TradeResult::IronButterfly(_) => None, // Has both call and put
-            TradeResult::Straddle(_) => None, // Has both call and put
-            TradeResult::CalendarStraddle(_) => None, // Has both call and put
-        }
-    }
-
-    pub fn strike(&self) -> Strike {
-        match self {
-            TradeResult::CalendarSpread(r) => r.strike,
-            TradeResult::IronButterfly(r) => r.center_strike,
-            TradeResult::Straddle(r) => r.strike,
-            TradeResult::CalendarStraddle(r) => r.short_strike, // Use short strike as reference
-        }
-    }
-}
 
 /// Backtest execution result
 #[derive(Debug)]
