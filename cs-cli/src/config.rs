@@ -69,6 +69,8 @@ pub struct StrategyConfig {
     pub straddle_entry_days: usize,
     pub straddle_exit_days: usize,
     pub min_straddle_dte: i32,
+    pub min_entry_price: Option<f64>,
+    pub max_entry_price: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,6 +146,8 @@ impl Default for StrategyConfig {
             straddle_entry_days: 5,
             straddle_exit_days: 1,
             min_straddle_dte: 7,
+            min_entry_price: None,
+            max_entry_price: None,
         }
     }
 }
@@ -151,7 +155,7 @@ impl Default for StrategyConfig {
 impl Default for PricingConfig {
     fn default() -> Self {
         Self {
-            model: "sticky_strike".to_string(),
+            model: "sticky_moneyness".to_string(),
             vol_model: "linear".to_string(),
         }
     }
@@ -244,6 +248,8 @@ impl AppConfig {
             straddle_exit_days: self.strategy.straddle_exit_days,
             min_notional: self.min_notional,
             min_straddle_dte: self.strategy.min_straddle_dte,
+            min_entry_price: self.strategy.min_entry_price,
+            max_entry_price: self.strategy.max_entry_price,
         }
     }
 }

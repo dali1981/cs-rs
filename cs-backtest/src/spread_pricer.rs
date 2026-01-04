@@ -52,7 +52,7 @@ impl SpreadPricer {
         Self {
             bs_config: BSConfig::default(),
             market_close: MarketTime::new(16, 0), // Default 4 PM
-            pricing_model: PricingModel::default(),         // Sticky strike
+            pricing_model: PricingModel::default(),         // Sticky moneyness
         }
     }
 
@@ -174,10 +174,22 @@ impl SpreadPricer {
             .map_err(|e| PricingError::Polars(e.to_string()))?;
 
         if filtered.is_empty() {
-            // No market data, use Black-Scholes with interpolated IV
+            // No market data for this option type
+            // First try put-call parity if the opposite type has market data
             let ttm = self.calculate_ttm(pricing_time, expiration);
 
-            // Use configured pricing model for interpolation - fail if not available
+            if let Some(parity_result) = self.try_put_call_parity(
+                strike_f64,
+                expiration,
+                option_type,
+                chain_df,
+                spot_price,
+                ttm,
+            ) {
+                return Ok(parity_result);
+            }
+
+            // Fall back to IV surface interpolation
             let estimated_iv = iv_surface
                 .and_then(|surface| {
                     pricing_provider.get_iv(
@@ -188,7 +200,7 @@ impl SpreadPricer {
                     )
                 })
                 .ok_or_else(|| PricingError::InvalidIV(format!(
-                    "Cannot determine IV for {} strike {}, expiration {} - no market data and interpolation failed",
+                    "Cannot determine IV for {} strike {}, expiration {} - no market data, put-call parity failed, and interpolation failed",
                     if option_type == OptionType::Call { "call" } else { "put" },
                     strike_f64,
                     expiration
@@ -254,6 +266,105 @@ impl SpreadPricer {
 
         Ok(LegPricing {
             price: Decimal::try_from(market_price).unwrap_or_default(),
+            iv,
+            greeks,
+        })
+    }
+
+    /// Try to derive option price using put-call parity when market data is missing.
+    ///
+    /// Put-call parity: C - P = S - K × e^(-rT)
+    /// - If we need call price but have put: C = P + S - K × e^(-rT)
+    /// - If we need put price but have call: P = C - S + K × e^(-rT)
+    fn try_put_call_parity(
+        &self,
+        strike: f64,
+        expiration: NaiveDate,
+        needed_type: OptionType,
+        chain_df: &DataFrame,
+        spot_price: f64,
+        ttm: f64,
+    ) -> Option<LegPricing> {
+        // Look for the opposite option type at the same strike/expiration
+        let opposite_type = match needed_type {
+            OptionType::Call => "put",
+            OptionType::Put => "call",
+        };
+
+        let expiration_polars = TradingDate::from_naive_date(expiration).to_polars_date();
+
+        let filtered = chain_df
+            .clone()
+            .lazy()
+            .filter(
+                col("strike").eq(lit(strike))
+                    .and(col("expiration").eq(lit(expiration_polars)))
+                    .and(col("option_type").eq(lit(opposite_type)))
+            )
+            .collect()
+            .ok()?;
+
+        if filtered.is_empty() {
+            return None;
+        }
+
+        // Get the opposite option's market price
+        let opposite_price = filtered
+            .column("close")
+            .ok()?
+            .f64()
+            .ok()?
+            .get(0)?;
+
+        if opposite_price <= 0.0 {
+            return None;
+        }
+
+        // Calculate discount factor
+        let discount = (-self.bs_config.risk_free_rate * ttm).exp();
+        let pv_strike = strike * discount;
+
+        // Apply put-call parity
+        let derived_price = match needed_type {
+            OptionType::Call => {
+                // C = P + S - K × e^(-rT)
+                opposite_price + spot_price - pv_strike
+            }
+            OptionType::Put => {
+                // P = C - S + K × e^(-rT)
+                opposite_price - spot_price + pv_strike
+            }
+        };
+
+        // Price must be non-negative
+        if derived_price <= 0.0 {
+            return None;
+        }
+
+        // Compute IV from the derived price
+        let iv = bs_implied_volatility(
+            derived_price,
+            spot_price,
+            strike,
+            ttm,
+            needed_type == OptionType::Call,
+            &self.bs_config,
+        );
+
+        // Compute greeks if we have valid IV
+        let greeks = iv.map(|vol| {
+            bs_greeks(
+                spot_price,
+                strike,
+                ttm,
+                vol,
+                needed_type == OptionType::Call,
+                self.bs_config.risk_free_rate,
+            )
+        });
+
+        Some(LegPricing {
+            price: Decimal::try_from(derived_price).unwrap_or_default(),
             iv,
             greeks,
         })
@@ -378,7 +489,7 @@ mod tests {
     #[test]
     fn test_spread_pricer_default_pricing_model() {
         let pricer = SpreadPricer::new();
-        assert_eq!(pricer.pricing_model(), PricingModel::StickyStrike);
+        assert_eq!(pricer.pricing_model(), PricingModel::StickyMoneyness);
     }
 
     #[test]

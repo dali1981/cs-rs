@@ -463,8 +463,8 @@ impl DeltaSmile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PricingModel {
-    #[default]
     StickyStrike,
+    #[default]
     StickyMoneyness,
     StickyDelta,
 }
@@ -472,9 +472,10 @@ pub enum PricingModel {
 impl PricingModel {
     pub fn from_string(s: &str) -> Self {
         match s.to_lowercase().replace('-', "_").as_str() {
+            "sticky_strike" | "strike" => PricingModel::StickyStrike,
             "sticky_moneyness" | "moneyness" => PricingModel::StickyMoneyness,
             "sticky_delta" | "delta" => PricingModel::StickyDelta,
-            _ => PricingModel::StickyStrike,
+            _ => PricingModel::default(),  // Use code default for unrecognized strings
         }
     }
 

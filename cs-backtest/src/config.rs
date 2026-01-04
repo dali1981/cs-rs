@@ -53,6 +53,12 @@ pub struct BacktestConfig {
     /// Straddle: Minimum days from entry to expiration (default: 7)
     #[serde(default = "default_min_straddle_dte")]
     pub min_straddle_dte: i32,
+    /// Straddle: Minimum entry price (total debit paid for call + put)
+    #[serde(default)]
+    pub min_entry_price: Option<f64>,
+    /// Straddle: Maximum entry price (caps max loss exposure)
+    #[serde(default)]
+    pub max_entry_price: Option<f64>,
 }
 
 fn default_wing_width() -> f64 {
@@ -151,6 +157,8 @@ impl Default for BacktestConfig {
             straddle_exit_days: default_straddle_exit_days(),
             min_notional: None, // No filtering by default
             min_straddle_dte: default_min_straddle_dte(),
+            min_entry_price: None, // No filtering by default
+            max_entry_price: None, // No filtering by default
         }
     }
 }
