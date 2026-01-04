@@ -343,28 +343,6 @@ fn compute_net_greeks(pricing: &IronButterflyPricing) -> (Option<f64>, Option<f6
     }
 }
 
-/// Calculate P&L attribution for a single leg (DEPRECATED - use domain function)
-///
-/// This is kept for backwards compatibility but should use cs_domain::calculate_option_leg_pnl
-#[deprecated(note = "Use cs_domain::calculate_option_leg_pnl instead")]
-fn calculate_leg_attribution(
-    entry_leg: &LegPricing,
-    exit_leg: &LegPricing,
-    spot_change: f64,
-    days_held: f64,
-    leg_sign: f64, // +1 for long, -1 for short
-) -> (f64, f64, f64, f64) {
-    let pnl = cs_domain::calculate_option_leg_pnl(
-        entry_leg.greeks.as_ref(),
-        entry_leg.iv,
-        exit_leg.iv,
-        spot_change,
-        days_held,
-        leg_sign,
-    );
-    (pnl.delta, pnl.gamma, pnl.theta, pnl.vega)
-}
-
 fn calculate_pnl_attribution(
     entry_pricing: &IronButterflyPricing,
     exit_pricing: &IronButterflyPricing,
@@ -380,43 +358,47 @@ fn calculate_pnl_attribution(
     // Calculate attribution for each leg
     // Short legs: we SOLD them (negative position, sign = -1)
     // Long legs: we BOUGHT them (positive position, sign = +1)
-    let (sc_delta, sc_gamma, sc_theta, sc_vega) = calculate_leg_attribution(
-        &entry_pricing.short_call,
-        &exit_pricing.short_call,
+    let sc = cs_domain::calculate_option_leg_pnl(
+        entry_pricing.short_call.greeks.as_ref(),
+        entry_pricing.short_call.iv,
+        exit_pricing.short_call.iv,
         spot_change,
         days_held,
         -1.0, // Short position
     );
 
-    let (sp_delta, sp_gamma, sp_theta, sp_vega) = calculate_leg_attribution(
-        &entry_pricing.short_put,
-        &exit_pricing.short_put,
+    let sp = cs_domain::calculate_option_leg_pnl(
+        entry_pricing.short_put.greeks.as_ref(),
+        entry_pricing.short_put.iv,
+        exit_pricing.short_put.iv,
         spot_change,
         days_held,
         -1.0, // Short position
     );
 
-    let (lc_delta, lc_gamma, lc_theta, lc_vega) = calculate_leg_attribution(
-        &entry_pricing.long_call,
-        &exit_pricing.long_call,
+    let lc = cs_domain::calculate_option_leg_pnl(
+        entry_pricing.long_call.greeks.as_ref(),
+        entry_pricing.long_call.iv,
+        exit_pricing.long_call.iv,
         spot_change,
         days_held,
         1.0, // Long position
     );
 
-    let (lp_delta, lp_gamma, lp_theta, lp_vega) = calculate_leg_attribution(
-        &entry_pricing.long_put,
-        &exit_pricing.long_put,
+    let lp = cs_domain::calculate_option_leg_pnl(
+        entry_pricing.long_put.greeks.as_ref(),
+        entry_pricing.long_put.iv,
+        exit_pricing.long_put.iv,
         spot_change,
         days_held,
         1.0, // Long position
     );
 
     // Sum across all legs
-    let delta_pnl = sc_delta + sp_delta + lc_delta + lp_delta;
-    let gamma_pnl = sc_gamma + sp_gamma + lc_gamma + lp_gamma;
-    let theta_pnl = sc_theta + sp_theta + lc_theta + lp_theta;
-    let vega_pnl = sc_vega + sp_vega + lc_vega + lp_vega;
+    let delta_pnl = sc.delta + sp.delta + lc.delta + lp.delta;
+    let gamma_pnl = sc.gamma + sp.gamma + lc.gamma + lp.gamma;
+    let theta_pnl = sc.theta + sp.theta + lc.theta + lp.theta;
+    let vega_pnl = sc.vega + sp.vega + lc.vega + lp.vega;
 
     let explained = delta_pnl + gamma_pnl + theta_pnl + vega_pnl;
     let unexplained = total_pnl.to_f64().unwrap_or(0.0) - explained;
