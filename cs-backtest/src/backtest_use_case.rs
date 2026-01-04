@@ -1250,7 +1250,7 @@ where
     }
 
     /// Create strike selector based on config
-    fn create_selector(&self) -> Box<dyn StrikeSelector> {
+    pub fn create_selector(&self) -> Box<dyn StrikeSelector> {
         match self.config.selection_strategy {
             SelectionType::ATM => Box::new(
                 ATMStrategy::new(self.config.selection.clone())
@@ -1285,7 +1285,7 @@ where
     }
 
     /// NEW: Process earnings event using UnifiedExecutor (optimized IV surface building)
-    async fn process_event_unified(
+    pub async fn process_event_unified(
         &self,
         event: &EarningsEvent,
         selector: &dyn StrikeSelector,
