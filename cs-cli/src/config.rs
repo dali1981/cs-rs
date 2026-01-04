@@ -71,6 +71,7 @@ pub struct StrategyConfig {
     pub min_straddle_dte: i32,
     pub min_entry_price: Option<f64>,
     pub max_entry_price: Option<f64>,
+    pub post_earnings_holding_days: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,6 +149,7 @@ impl Default for StrategyConfig {
             min_straddle_dte: 7,
             min_entry_price: None,
             max_entry_price: None,
+            post_earnings_holding_days: 5,
         }
     }
 }
@@ -250,6 +252,7 @@ impl AppConfig {
             min_straddle_dte: self.strategy.min_straddle_dte,
             min_entry_price: self.strategy.min_entry_price,
             max_entry_price: self.strategy.max_entry_price,
+            post_earnings_holding_days: self.strategy.post_earnings_holding_days,
         }
     }
 }

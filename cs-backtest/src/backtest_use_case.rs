@@ -3,7 +3,7 @@ use chrono::NaiveDate;
 use tracing::{info, debug};
 
 use cs_domain::*;
-use cs_domain::services::{EarningsTradeTiming, StraddleTradeTiming};
+use cs_domain::services::{EarningsTradeTiming, StraddleTradeTiming, PostEarningsStraddleTiming};
 use cs_domain::strategies::{DeltaStrategy, IronButterflyStrategy, StraddleStrategy};
 use crate::config::{BacktestConfig, SpreadType, SelectionType};
 use crate::trade_executor::TradeExecutor;
@@ -316,6 +316,9 @@ where
             }
             SpreadType::CalendarStraddle => {
                 self.execute_calendar_straddle(start_date, end_date, on_progress).await
+            }
+            SpreadType::PostEarningsStraddle => {
+                self.execute_post_earnings_straddle(start_date, end_date, on_progress).await
             }
         }
     }
@@ -666,6 +669,125 @@ where
         })
     }
 
+    /// Execute post-earnings straddle backtest
+    ///
+    /// Post-earnings straddle enters AFTER earnings (when IV has crushed) and holds
+    /// for ~1 week to capture continued stock movement. Unlike pre-earnings straddle,
+    /// this benefits from lower entry IV.
+    async fn execute_post_earnings_straddle(
+        &self,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
+    ) -> Result<BacktestResult, BacktestError> {
+        let mut all_results: Vec<TradeResult> = Vec::new();
+        let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
+        let mut sessions_processed = 0;
+        let mut total_opportunities = 0;
+
+        // Create post-earnings timing
+        let timing = PostEarningsStraddleTiming::new(self.config.timing)
+            .with_holding_days(self.config.post_earnings_holding_days);
+
+        info!(
+            holding_days = self.config.post_earnings_holding_days,
+            "Starting post-earnings straddle backtest"
+        );
+
+        for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
+            sessions_processed += 1;
+
+            // Load earnings events (look backwards since we enter AFTER earnings)
+            // Entry can be same day (BMO) or next day (AMC), so check 1-2 days back
+            let lookback_days = 3;  // Buffer for weekends
+            let events_start = session_date - chrono::Duration::days(lookback_days);
+            let events = self.earnings_repo
+                .load_earnings(events_start, session_date, self.config.symbols.as_deref())
+                .await
+                .map_err(|e| BacktestError::Repository(e.to_string()))?;
+
+            // Filter: Entry date == session_date
+            let to_enter: Vec<_> = events
+                .iter()
+                .filter(|e| timing.entry_date(e) == session_date)
+                .filter(|e| self.passes_market_cap_filter(e))
+                .cloned()
+                .collect();
+
+            if to_enter.is_empty() {
+                if let Some(ref callback) = on_progress {
+                    callback(SessionProgress {
+                        session_date,
+                        entries_count: 0,
+                        events_found: 0,
+                    });
+                }
+                continue;
+            }
+
+            debug!(
+                session_date = %session_date,
+                events_count = to_enter.len(),
+                "Processing post-earnings straddle session"
+            );
+
+            // Process events
+            let session_results: Vec<_> = if self.config.parallel {
+                let futures: Vec<_> = to_enter
+                    .iter()
+                    .map(|event| self.process_post_earnings_straddle_event(event, &timing))
+                    .collect();
+                futures::future::join_all(futures).await
+            } else {
+                let mut results = Vec::new();
+                for event in &to_enter {
+                    results.push(
+                        self.process_post_earnings_straddle_event(event, &timing).await
+                    );
+                }
+                results
+            };
+
+            let mut session_entries = 0;
+            for result in session_results {
+                total_opportunities += 1;
+                match result {
+                    Ok(straddle_result) => {
+                        all_results.push(TradeResult::Straddle(straddle_result));
+                        session_entries += 1;
+                    }
+                    Err(e) => dropped_events.push(e),
+                }
+            }
+
+            if let Some(ref callback) = on_progress {
+                callback(SessionProgress {
+                    session_date,
+                    entries_count: session_entries,
+                    events_found: to_enter.len(),
+                });
+            }
+        }
+
+        let total_entries = all_results.len();
+
+        info!(
+            sessions_processed,
+            total_opportunities,
+            results_count = total_entries,
+            dropped_count = dropped_events.len(),
+            "Post-earnings straddle backtest completed"
+        );
+
+        Ok(BacktestResult {
+            results: all_results,
+            sessions_processed,
+            total_entries,
+            total_opportunities,
+            dropped_events,
+        })
+    }
+
     /// Execute calendar straddle backtest
     ///
     /// Calendar straddle uses the same timing as calendar spreads (EarningsTradeTiming):
@@ -866,6 +988,201 @@ where
                 earnings_time: event.earnings_time,
                 reason: "NO_POST_EARNINGS_EXPIRATION".into(),
                 details: Some("Need expiration after earnings date".into()),
+                phase: "chain_data".into(),
+            });
+        }
+
+        // Get strikes available across ALL valid expirations
+        let mut all_strikes = std::collections::HashSet::new();
+        for &expiration in &valid_expirations {
+            let exp_strikes = self.options_repo
+                .get_available_strikes(&event.symbol, expiration, entry_date)
+                .await
+                .unwrap_or_default();
+            all_strikes.extend(exp_strikes);
+        }
+        let mut strikes: Vec<_> = all_strikes.into_iter().collect();
+        strikes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        if strikes.is_empty() {
+            return Err(TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "NO_STRIKES".into(),
+                details: None,
+                phase: "chain_data".into(),
+            });
+        }
+
+        // Build IV surface with per-option spot prices (minute-aligned)
+        let iv_surface = build_iv_surface_minute_aligned(
+            &chain_df,
+            self.equity_repo.as_ref(),
+            &event.symbol,
+        ).await;
+
+        let chain_data = OptionChainData {
+            expirations: valid_expirations,
+            strikes,
+            deltas: None,
+            volumes: None,
+            iv_ratios: None,
+            iv_surface,
+        };
+
+        // Select straddle
+        let straddle = strategy.select_straddle(event, &spot, &chain_data)
+            .map_err(|e| TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "STRATEGY_SELECTION_FAILED".into(),
+                details: Some(e.to_string()),
+                phase: "strategy".into(),
+            })?;
+
+        // Execute trade
+        let executor = StraddleExecutor::new(
+            self.options_repo.clone(),
+            self.equity_repo.clone(),
+        )
+        .with_pricing_model(self.config.pricing_model)
+        .with_max_entry_iv(self.config.max_entry_iv);
+
+        let result = executor.execute_trade(&straddle, event, entry_time, exit_time).await;
+
+        if !result.success {
+            return Err(TradeGenerationError {
+                symbol: result.symbol,
+                earnings_date: result.earnings_date,
+                earnings_time: result.earnings_time,
+                reason: result.failure_reason.map(|r| format!("{:?}", r)).unwrap_or("UNKNOWN".into()),
+                details: None,
+                phase: "execution".into(),
+            });
+        }
+
+        // Filter by entry price if configured
+        let entry_price: f64 = result.entry_debit.to_string().parse().unwrap_or(0.0);
+
+        if let Some(min_price) = self.config.min_entry_price {
+            if entry_price < min_price {
+                return Err(TradeGenerationError {
+                    symbol: result.symbol,
+                    earnings_date: result.earnings_date,
+                    earnings_time: result.earnings_time,
+                    reason: "ENTRY_PRICE_TOO_LOW".into(),
+                    details: Some(format!("Entry price ${:.2} < min ${:.2}", entry_price, min_price)),
+                    phase: "entry_price_filter".into(),
+                });
+            }
+        }
+
+        if let Some(max_price) = self.config.max_entry_price {
+            if entry_price > max_price {
+                return Err(TradeGenerationError {
+                    symbol: result.symbol,
+                    earnings_date: result.earnings_date,
+                    earnings_time: result.earnings_time,
+                    reason: "ENTRY_PRICE_TOO_HIGH".into(),
+                    details: Some(format!("Entry price ${:.2} > max ${:.2}", entry_price, max_price)),
+                    phase: "entry_price_filter".into(),
+                });
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Process a single post-earnings straddle event
+    async fn process_post_earnings_straddle_event(
+        &self,
+        event: &EarningsEvent,
+        timing: &PostEarningsStraddleTiming,
+    ) -> Result<StraddleResult, TradeGenerationError> {
+        let entry_time = timing.entry_datetime(event);
+        let exit_time = timing.exit_datetime(event);
+        let entry_date = entry_time.date_naive();
+
+        // Create strategy with entry date and min DTE from config
+        // For post-earnings straddle, we need expiration beyond the exit date
+        let strategy = StraddleStrategy::with_min_dte(
+            self.config.min_straddle_dte,
+            entry_date
+        );
+
+        // Get spot price at entry
+        let spot = self.equity_repo
+            .get_spot_price(&event.symbol, entry_time)
+            .await
+            .map_err(|_| TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "NO_SPOT_PRICE".into(),
+                details: Some(format!("No spot price at {}", entry_time)),
+                phase: "spot_price".into(),
+            })?;
+
+        // Get option chain data with timestamps for minute-aligned IV computation
+        let chain_df = self.options_repo
+            .get_option_bars_at_time(&event.symbol, entry_time)
+            .await
+            .map_err(|_| TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "NO_OPTIONS_DATA".into(),
+                details: Some(format!("No option data at {}", entry_time)),
+                phase: "option_data".into(),
+            })?;
+
+        // Check minimum daily notional filter
+        if !self.passes_notional_filter(&chain_df, spot.value, event)? {
+            return Err(TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "INSUFFICIENT_NOTIONAL".into(),
+                details: Some("Daily option notional below minimum threshold".to_string()),
+                phase: "notional_filter".into(),
+            });
+        }
+
+        // Get available expirations and strikes at entry
+        let expirations = self.options_repo
+            .get_available_expirations(&event.symbol, entry_date)
+            .await
+            .unwrap_or_default();
+
+        if expirations.is_empty() {
+            return Err(TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "NO_EXPIRATIONS".into(),
+                details: None,
+                phase: "chain_data".into(),
+            });
+        }
+
+        // For post-earnings straddle, we want expirations AFTER the exit date
+        // to ensure we can hold the position for the full holding period
+        let exit_date = timing.exit_date(event);
+        let valid_expirations: Vec<_> = expirations
+            .iter()
+            .filter(|&&exp| exp > exit_date)
+            .copied()
+            .collect();
+
+        if valid_expirations.is_empty() {
+            return Err(TradeGenerationError {
+                symbol: event.symbol.clone(),
+                earnings_date: event.earnings_date,
+                earnings_time: event.earnings_time,
+                reason: "NO_POST_EXIT_EXPIRATION".into(),
+                details: Some(format!("Need expiration after exit date {}", exit_date)),
                 phase: "chain_data".into(),
             });
         }

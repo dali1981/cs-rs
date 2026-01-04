@@ -100,6 +100,8 @@ pub struct CliStrategy {
     pub min_entry_price: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_entry_price: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_earnings_holding_days: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

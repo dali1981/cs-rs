@@ -61,6 +61,20 @@ impl TradingCalendar {
         result
     }
 
+    /// Get N trading days after a date
+    ///
+    /// Example: n_trading_days_after(2025-01-10, 5)
+    ///          -> 2025-01-17 (skipping weekends)
+    pub fn n_trading_days_after(date: NaiveDate, n: usize) -> NaiveDate {
+        let mut result = date;
+        let mut count = 0;
+        while count < n {
+            result = Self::next_trading_day(result);
+            count += 1;
+        }
+        result
+    }
+
     /// Count trading days between two dates (exclusive of start, inclusive of end)
     pub fn trading_days_count(start: NaiveDate, end: NaiveDate) -> usize {
         Self::trading_days_between(start, end).count()
@@ -187,5 +201,21 @@ mod tests {
 
         let days: Vec<_> = TradingCalendar::trading_days_between(start, end).collect();
         assert_eq!(days.len(), 0); // No trading days on weekend
+    }
+
+    #[test]
+    fn test_n_trading_days_after_same_week() {
+        // Monday + 4 days = Friday
+        let monday = NaiveDate::from_ymd_opt(2025, 6, 2).unwrap();
+        let result = TradingCalendar::n_trading_days_after(monday, 4);
+        assert_eq!(result, NaiveDate::from_ymd_opt(2025, 6, 6).unwrap());
+    }
+
+    #[test]
+    fn test_n_trading_days_after_with_weekend() {
+        // Friday + 3 days = Wednesday (skip weekend)
+        let friday = NaiveDate::from_ymd_opt(2025, 6, 6).unwrap();
+        let result = TradingCalendar::n_trading_days_after(friday, 3);
+        assert_eq!(result, NaiveDate::from_ymd_opt(2025, 6, 11).unwrap());
     }
 }

@@ -146,6 +146,9 @@ enum Commands {
         /// Straddle: Maximum entry price - caps max loss (e.g., 10.00)
         #[arg(long)]
         max_entry_price: Option<f64>,
+        /// Post-earnings straddle: holding period in trading days (default: 5)
+        #[arg(long, default_value = "5")]
+        post_earnings_holding_days: usize,
         /// Minimum daily option notional: sum(all option volumes) × 100 × stock_price (e.g., 100000 for $100k)
         #[arg(long)]
         min_notional: Option<f64>,
@@ -291,6 +294,7 @@ async fn main() -> Result<()> {
             min_straddle_dte,
             min_entry_price,
             max_entry_price,
+            post_earnings_holding_days,
             min_notional,
         } => {
             run_backtest(
@@ -328,6 +332,7 @@ async fn main() -> Result<()> {
                 min_straddle_dte,
                 min_entry_price,
                 max_entry_price,
+                post_earnings_holding_days,
                 min_notional,
             )
             .await?;
@@ -433,6 +438,7 @@ fn build_cli_overrides(
     min_straddle_dte: Option<i32>,
     min_entry_price: Option<f64>,
     max_entry_price: Option<f64>,
+    post_earnings_holding_days: Option<usize>,
     min_notional: Option<f64>,
 ) -> Result<CliOverrides> {
     // Parse delta range if provided
@@ -478,7 +484,7 @@ fn build_cli_overrides(
         } else {
             None
         },
-        strategy: if spread.is_some() || selection.is_some() || delta_range.is_some() || delta_scan_steps.is_some() || wing_width.is_some() || straddle_entry_days.is_some() || straddle_exit_days.is_some() || min_straddle_dte.is_some() || min_entry_price.is_some() || max_entry_price.is_some() {
+        strategy: if spread.is_some() || selection.is_some() || delta_range.is_some() || delta_scan_steps.is_some() || wing_width.is_some() || straddle_entry_days.is_some() || straddle_exit_days.is_some() || min_straddle_dte.is_some() || min_entry_price.is_some() || max_entry_price.is_some() || post_earnings_holding_days.is_some() {
             Some(CliStrategy {
                 spread_type: spread.map(|s| s.to_string()),
                 selection_type: selection.map(|s| s.to_string()),
@@ -491,6 +497,7 @@ fn build_cli_overrides(
                 min_straddle_dte,
                 min_entry_price,
                 max_entry_price,
+                post_earnings_holding_days,
             })
         } else {
             None
@@ -548,6 +555,7 @@ async fn run_backtest(
     min_straddle_dte: i32,
     min_entry_price: Option<f64>,
     max_entry_price: Option<f64>,
+    post_earnings_holding_days: usize,
     min_notional: Option<f64>,
 ) -> Result<()> {
     // Parse dates
@@ -564,7 +572,8 @@ async fn run_backtest(
             "iron_butterfly" | "ironbutterfly" | "butterfly" => "iron_butterfly",
             "straddle" | "long_straddle" => "straddle",
             "calendar_straddle" | "calendarstraddle" => "calendar_straddle",
-            _ => anyhow::bail!("Invalid spread type: {}. Must be 'calendar', 'iron-butterfly', 'straddle', or 'calendar-straddle'", spread_str),
+            "post_earnings_straddle" | "postearningstraddle" | "post_straddle" => "post_earnings_straddle",
+            _ => anyhow::bail!("Invalid spread type: {}. Must be 'calendar', 'iron-butterfly', 'straddle', 'calendar-straddle', or 'post-earnings-straddle'", spread_str),
         };
 
         // Validate arguments based on spread type
@@ -602,6 +611,14 @@ async fn run_backtest(
                     anyhow::bail!("--option-type is invalid for calendar-straddle (uses both calls and puts)");
                 }
                 // Default to Call for calendar straddle (will be ignored in execution)
+                finq_core::OptionType::Call
+            }
+            "post_earnings_straddle" => {
+                // Post-earnings straddle FORBIDS option-type
+                if option_type_str.is_some() {
+                    anyhow::bail!("--option-type is invalid for post-earnings-straddle (uses both calls and puts)");
+                }
+                // Default to Call for post-earnings straddle (will be ignored in execution)
                 finq_core::OptionType::Call
             }
             _ => unreachable!(),
@@ -706,6 +723,7 @@ async fn run_backtest(
         Some(min_straddle_dte),
         min_entry_price,
         max_entry_price,
+        Some(post_earnings_holding_days),
         min_notional,
     )?;
 
@@ -745,6 +763,12 @@ async fn run_backtest(
             println!("  Spread:        Calendar Straddle");
             println!("  Structure:     Short near-term straddle + Long far-term straddle");
             println!("  Delta:         Neutral (call + put at same strike)");
+        }
+        cs_backtest::SpreadType::PostEarningsStraddle => {
+            println!("  Spread:        Post-Earnings Straddle");
+            println!("  Entry:         Day after earnings (BMO: same day, AMC: next day)");
+            println!("  Exit:          {} trading days after entry", backtest_config.post_earnings_holding_days);
+            println!("  Expiration:    First expiry after exit date");
         }
     }
 

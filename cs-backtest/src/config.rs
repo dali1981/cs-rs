@@ -59,10 +59,17 @@ pub struct BacktestConfig {
     /// Straddle: Maximum entry price (caps max loss exposure)
     #[serde(default)]
     pub max_entry_price: Option<f64>,
+    /// Post-earnings straddle: holding period in trading days (default: 5)
+    #[serde(default = "default_post_earnings_holding_days")]
+    pub post_earnings_holding_days: usize,
 }
 
 fn default_wing_width() -> f64 {
     10.0
+}
+
+fn default_post_earnings_holding_days() -> usize {
+    5  // 1 trading week
 }
 
 fn default_straddle_entry_days() -> usize {
@@ -99,6 +106,8 @@ pub enum SpreadType {
     Straddle,
     /// Calendar straddle: short near-term straddle + long far-term straddle
     CalendarStraddle,
+    /// Post-earnings straddle: enter day after earnings, hold for ~1 week
+    PostEarningsStraddle,
 }
 
 impl SpreadType {
@@ -107,6 +116,7 @@ impl SpreadType {
             "iron_butterfly" | "ironbutterfly" | "butterfly" => SpreadType::IronButterfly,
             "straddle" | "long_straddle" => SpreadType::Straddle,
             "calendar_straddle" | "calendarstraddle" => SpreadType::CalendarStraddle,
+            "post_earnings_straddle" | "postearningstraddle" | "post_straddle" => SpreadType::PostEarningsStraddle,
             _ => SpreadType::Calendar,
         }
     }
@@ -162,6 +172,7 @@ impl Default for BacktestConfig {
             min_straddle_dte: default_min_straddle_dte(),
             min_entry_price: None, // No filtering by default
             max_entry_price: None, // No filtering by default
+            post_earnings_holding_days: default_post_earnings_holding_days(),
         }
     }
 }
