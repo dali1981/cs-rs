@@ -1,6 +1,5 @@
 // Delta-space trading strategy for calendar spreads
 
-use chrono::NaiveDate;
 use finq_core::OptionType;
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +10,7 @@ use cs_analytics::{
 
 use super::{OptionChainData, StrategyError, TradeSelectionCriteria, SelectionStrategy, StrikeMatchMode};
 use crate::entities::{CalendarSpread, EarningsEvent, OptionLeg};
-use crate::value_objects::{SpotPrice, Strike};
+use crate::value_objects::SpotPrice;
 
 /// Delta scan mode for strategy
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -196,7 +195,8 @@ impl SelectionStrategy for DeltaStrategy {
 mod tests {
     use super::*;
     use crate::strategies::{find_closest_strike, select_expirations};
-    use chrono::{DateTime, Utc};
+    use crate::value_objects::Strike;
+    use chrono::{DateTime, NaiveDate, Utc};
     use cs_analytics::{IVPoint, IVSurface};
     use rust_decimal::Decimal;
 

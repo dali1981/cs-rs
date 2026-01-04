@@ -112,8 +112,8 @@ mod tests {
 
     #[test]
     fn test_select_expiration_after_earnings() {
-        let strategy = StraddleStrategy::default();
         let earnings_date = NaiveDate::from_ymd_opt(2025, 1, 30).unwrap();
+        let strategy = StraddleStrategy::with_min_dte(1, earnings_date);
 
         let expirations = vec![
             NaiveDate::from_ymd_opt(2025, 1, 24).unwrap(),  // Before earnings
@@ -121,7 +121,7 @@ mod tests {
             NaiveDate::from_ymd_opt(2025, 2, 7).unwrap(),   // After earnings
         ];
 
-        let selected = strategy.select_expiration(&expirations, earnings_date);
+        let selected = strategy.select_expiration(&expirations);
         assert_eq!(selected, Some(NaiveDate::from_ymd_opt(2025, 1, 31).unwrap()));
     }
 
@@ -161,10 +161,11 @@ mod tests {
 
     #[test]
     fn test_select_straddle_no_post_earnings_expiration() {
-        let strategy = StraddleStrategy::default();
+        let earnings_date = NaiveDate::from_ymd_opt(2025, 1, 30).unwrap();
+        let strategy = StraddleStrategy::with_min_dte(7, earnings_date);
         let event = EarningsEvent::new(
             "AAPL".into(),
-            NaiveDate::from_ymd_opt(2025, 1, 30).unwrap(),
+            earnings_date,
             EarningsTime::AfterMarketClose,
         );
 

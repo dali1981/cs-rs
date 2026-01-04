@@ -126,8 +126,8 @@ mod tests {
         // Entry: Monday Nov 10 (skip weekend)
         assert_eq!(timing.entry_date(&event), NaiveDate::from_ymd_opt(2025, 11, 10).unwrap());
 
-        // Exit: Friday Nov 14
-        assert_eq!(timing.exit_date(&event), NaiveDate::from_ymd_opt(2025, 11, 14).unwrap());
+        // Exit: Monday Nov 17 (5 trading days: Nov 11, 12, 13, 14, 17)
+        assert_eq!(timing.exit_date(&event), NaiveDate::from_ymd_opt(2025, 11, 17).unwrap());
     }
 
     #[test]

@@ -131,14 +131,15 @@ mod tests {
         let timing = default_timing();
         let event = EarningsEvent::new(
             "TEST".into(),
-            NaiveDate::from_ymd_opt(2025, 11, 3).unwrap(),  // Nov 3 is in EST (UTC-5)
+            NaiveDate::from_ymd_opt(2025, 11, 3).unwrap(),  // Nov 3 earnings
             EarningsTime::AfterMarketClose,
         );
 
         let entry_dt = timing.entry_datetime(&event);
 
-        // Config: 09:35 ET → should be 14:35 UTC (EST = UTC-5)
-        assert_eq!(entry_dt.time().hour(), 14);
+        // Entry is 5 days before Nov 3 = Oct 27 (still in EDT, UTC-4)
+        // Config: 09:35 ET → should be 13:35 UTC (EDT = UTC-4)
+        assert_eq!(entry_dt.time().hour(), 13);
         assert_eq!(entry_dt.time().minute(), 35);
     }
 }

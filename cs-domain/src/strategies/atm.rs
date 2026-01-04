@@ -1,5 +1,4 @@
 use super::*;
-use chrono::NaiveDate;
 use cs_analytics::{DeltaVolSurface, bs_delta};
 
 /// ATM strategy - select strike closest to spot
@@ -198,7 +197,7 @@ impl SelectionStrategy for ATMStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
+    use chrono::{NaiveDate, Utc};
     use rust_decimal::Decimal;
 
     fn create_test_chain_data() -> OptionChainData {

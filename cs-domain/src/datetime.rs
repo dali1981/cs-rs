@@ -258,7 +258,8 @@ mod tests {
         let time = MarketTime { hour: 9, minute: 35 };
         let ts = date.with_time(&time);
         let dt = ts.to_datetime_utc();
-        assert_eq!(dt.hour(), 9);
+        // Nov 3, 2025 is EST (UTC-5), so 9:35 EST = 14:35 UTC
+        assert_eq!(dt.hour(), 14);
         assert_eq!(dt.minute(), 35);
     }
 

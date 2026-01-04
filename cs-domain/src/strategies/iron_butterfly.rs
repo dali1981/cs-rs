@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn test_iron_butterfly_strategy_atm_strike() {
-        let strategy = IronButterflyStrategy::new(
+        let _strategy = IronButterflyStrategy::new(
             Decimal::new(10, 0),
             3,
             45,

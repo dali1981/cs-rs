@@ -94,6 +94,8 @@ mod tests {
             short_exit_price: Decimal::new(2, 0),
             long_exit_price: Decimal::new(4, 0),
             exit_value: Decimal::new(2, 0),
+            entry_surface_time: None,
+            exit_surface_time: None,
             pnl: Decimal::new(1, 0),
             pnl_per_contract: Decimal::new(1, 0),
             pnl_pct: Decimal::new(100, 0),
