@@ -60,7 +60,7 @@ impl StraddlePricer {
         iv_surface: Option<&IVSurface>,
     ) -> Result<StraddlePricing, PricingError> {
         // Create pricing provider
-        let pricing_provider = self.spread_pricer.pricing_model().to_provider_with_rate(0.0);
+        let pricing_provider = self.spread_pricer.pricing_model().to_provider_with_rate(self.spread_pricer.risk_free_rate());
 
         // Price call leg
         let call_pricing = self.spread_pricer.price_leg(

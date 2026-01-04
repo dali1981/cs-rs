@@ -77,6 +77,11 @@ impl SpreadPricer {
         self.pricing_model
     }
 
+    /// Get the configured risk-free rate
+    pub fn risk_free_rate(&self) -> f64 {
+        self.bs_config.risk_free_rate
+    }
+
     /// Price a calendar spread using option chain data
     pub fn price_spread(
         &self,

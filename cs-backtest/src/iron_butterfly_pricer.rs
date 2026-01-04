@@ -58,7 +58,7 @@ impl IronButterflyPricer {
         iv_surface: Option<&IVSurface>,
     ) -> Result<IronButterflyPricing, PricingError> {
         // Create pricing provider
-        let pricing_provider = self.inner.pricing_model().to_provider_with_rate(0.0);
+        let pricing_provider = self.inner.pricing_model().to_provider_with_rate(self.inner.risk_free_rate());
 
         // Price all 4 legs
         let short_call = self.inner.price_leg(
