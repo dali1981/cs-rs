@@ -7,7 +7,7 @@ pub mod value_objects;
 pub mod entities;
 pub mod strategies;
 pub mod repositories;
-pub mod services;
+pub mod timing;
 pub mod infrastructure;
 
 // Re-exports for convenience
@@ -23,4 +23,4 @@ pub use strategies::{
 #[allow(deprecated)]
 pub use strategies::TradingStrategy;
 pub use repositories::*;
-pub use services::*;
+pub use timing::*;

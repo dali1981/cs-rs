@@ -18,6 +18,7 @@ pub mod svi_fitter;
 pub mod arbitrage;
 pub mod atm_iv_computer;
 pub mod straddle;
+pub mod pnl_attribution;
 
 pub use black_scholes::{bs_price, bs_implied_volatility, bs_greeks, bs_delta, BSConfig, BSError};
 pub use greeks::Greeks;
@@ -47,3 +48,7 @@ pub use atm_iv_computer::{
     ExpirationIv, ConstantMaturityResult, ConstantMaturityInterpolator,
 };
 pub use straddle::{StraddlePriceComputer, StraddlePrice};
+pub use pnl_attribution::{
+    PnLAttribution, LegPnL,
+    calculate_pnl_attribution, calculate_spread_pnl_attribution, calculate_option_leg_pnl,
+};
