@@ -503,6 +503,27 @@ where
                 .await
                 .map_err(|e| BacktestError::Repository(e.to_string()))?;
 
+            // DEBUG: Log loaded earnings and entry dates
+            if !events.is_empty() {
+                debug!(
+                    session_date = %session_date,
+                    events_count = events.len(),
+                    "Loaded earnings for session"
+                );
+                for event in &events {
+                    let entry_date = timing.entry_date(event);
+                    let passes_mc = self.passes_market_cap_filter(event);
+                    debug!(
+                        symbol = %event.symbol,
+                        earnings_date = %event.earnings_date,
+                        entry_date = %entry_date,
+                        matches_session = entry_date == session_date,
+                        passes_market_cap = passes_mc,
+                        "Event timing check"
+                    );
+                }
+            }
+
             // Filter: Entry date == session_date
             let to_enter: Vec<_> = events
                 .iter()
