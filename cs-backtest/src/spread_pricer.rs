@@ -2,6 +2,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use polars::prelude::*;
 use rust_decimal::Decimal;
 use finq_core::OptionType;
+use tracing::warn;
 
 use cs_analytics::{
     bs_price, bs_greeks, bs_implied_volatility, BSConfig, Greeks, IVSurface, IVPoint,
@@ -192,12 +193,59 @@ impl SpreadPricer {
             // Fall back to IV surface interpolation
             let estimated_iv = iv_surface
                 .and_then(|surface| {
-                    pricing_provider.get_iv(
+                    let result = pricing_provider.get_iv(
                         surface,
                         strike.value(),
                         expiration,
                         option_type == OptionType::Call,
-                    )
+                    );
+
+                    if result.is_none() {
+                        // Log surface diagnostics for debugging
+                        let opt_type_str = if option_type == OptionType::Call { "call" } else { "put" };
+                        let matching_type: Vec<_> = surface.points()
+                            .iter()
+                            .filter(|p| p.is_call == (option_type == OptionType::Call))
+                            .collect();
+
+                        // Log all points in surface for diagnosis
+                        let all_points: Vec<String> = surface.points()
+                            .iter()
+                            .map(|p| format!(
+                                "{} K={} exp={} iv={:.2}",
+                                if p.is_call { "C" } else { "P" },
+                                p.strike,
+                                p.expiration,
+                                p.iv
+                            ))
+                            .collect();
+
+                        warn!(
+                            surface_points = surface.points().len(),
+                            matching_type_points = matching_type.len(),
+                            option_type = opt_type_str,
+                            target_strike = strike_f64,
+                            target_expiration = %expiration,
+                            all_points = ?all_points,
+                            "IV surface interpolation failed"
+                        );
+
+                        if !matching_type.is_empty() {
+                            let strikes: Vec<f64> = matching_type.iter()
+                                .map(|p| p.strike.try_into().unwrap_or(0.0))
+                                .collect();
+                            let exps: Vec<String> = matching_type.iter()
+                                .map(|p| p.expiration.to_string())
+                                .collect();
+                            warn!(
+                                available_strikes = ?strikes,
+                                available_expirations = ?exps,
+                                "Available surface data for option type"
+                            );
+                        }
+                    }
+
+                    result
                 })
                 .ok_or_else(|| PricingError::InvalidIV(format!(
                     "Cannot determine IV for {} strike {}, expiration {} - no market data, put-call parity failed, and interpolation failed",
