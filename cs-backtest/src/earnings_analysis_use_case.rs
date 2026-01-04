@@ -11,8 +11,8 @@ use cs_analytics::{AtmMethod, StraddlePriceComputer};
 use cs_domain::{
     entities::EarningsEvent,
     repositories::{EarningsRepository, EquityDataRepository, OptionsDataRepository, RepositoryError},
-    services::EarningsTradeTiming,
-    value_objects::{AtmIvConfig, EarningsOutcome, EarningsSummaryStats, EarningsTime, TimingConfig},
+    timing::EarningsTradeTiming,
+    value_objects::{AtmIvConfig, EarningsOutcome, EarningsSummaryStats, TimingConfig},
 };
 
 /// Result of earnings analysis
