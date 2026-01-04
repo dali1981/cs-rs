@@ -181,3 +181,89 @@ pub trait SelectionStrategy: Send + Sync {
 // Backwards compatibility: TradingStrategy is an alias for SelectionStrategy
 #[deprecated(since = "0.2.0", note = "Use SelectionStrategy instead")]
 pub trait TradingStrategy: SelectionStrategy {}
+
+// ============================================================================
+// Shared utility functions
+// ============================================================================
+
+/// Select short and long expirations for calendar/diagonal spreads
+///
+/// # Arguments
+/// * `expirations` - Available expiration dates
+/// * `reference_date` - Date to calculate DTE from (typically earnings date)
+/// * `min_short_dte` / `max_short_dte` - DTE range for short leg
+/// * `min_long_dte` / `max_long_dte` - DTE range for long leg
+///
+/// # Returns
+/// Tuple of (short_expiration, long_expiration)
+///
+/// # Errors
+/// * `InsufficientExpirations` if fewer than 2 expirations available
+/// * `NoExpirations` if no expiration meets the short leg criteria
+pub fn select_expirations(
+    expirations: &[NaiveDate],
+    reference_date: NaiveDate,
+    min_short_dte: i32,
+    max_short_dte: i32,
+    min_long_dte: i32,
+    max_long_dte: i32,
+) -> Result<(NaiveDate, NaiveDate), StrategyError> {
+    if expirations.len() < 2 {
+        return Err(StrategyError::InsufficientExpirations {
+            needed: 2,
+            available: expirations.len(),
+        });
+    }
+
+    let mut sorted: Vec<_> = expirations.iter().collect();
+    sorted.sort();
+
+    // Find short expiry (first one meeting min/max DTE)
+    let short_exp = sorted
+        .iter()
+        .find(|&&exp| {
+            let dte = (*exp - reference_date).num_days();
+            dte >= min_short_dte as i64 && dte <= max_short_dte as i64
+        })
+        .ok_or(StrategyError::NoExpirations)?;
+
+    // Find long expiry (first one after short meeting min/max DTE)
+    let long_exp = sorted
+        .iter()
+        .find(|&&exp| {
+            if exp <= short_exp {
+                return false;
+            }
+            let dte = (*exp - reference_date).num_days();
+            dte >= min_long_dte as i64 && dte <= max_long_dte as i64
+        })
+        .ok_or(StrategyError::InsufficientExpirations {
+            needed: 2,
+            available: 1,
+        })?;
+
+    Ok((**short_exp, **long_exp))
+}
+
+/// Find the strike closest to the given spot price
+///
+/// # Arguments
+/// * `strikes` - Available strikes
+/// * `target` - Target price (typically spot price or theoretical strike)
+///
+/// # Returns
+/// The strike closest to target
+///
+/// # Errors
+/// * `NoStrikes` if strikes slice is empty
+pub fn find_closest_strike(strikes: &[Strike], target: f64) -> Result<Strike, StrategyError> {
+    strikes
+        .iter()
+        .min_by(|a, b| {
+            let a_diff = (f64::from(**a) - target).abs();
+            let b_diff = (f64::from(**b) - target).abs();
+            a_diff.partial_cmp(&b_diff).unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .copied()
+        .ok_or(StrategyError::NoStrikes)
+}

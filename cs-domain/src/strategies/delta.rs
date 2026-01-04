@@ -124,7 +124,7 @@ impl SelectionStrategy for DeltaStrategy {
         let delta_surface = DeltaVolSurface::from_iv_surface(iv_surface, self.risk_free_rate);
 
         // Select expirations based on criteria
-        let (short_exp, long_exp) = select_expirations(
+        let (short_exp, long_exp) = super::select_expirations(
             &chain_data.expirations,
             event.earnings_date,
             self.criteria.min_short_dte,
@@ -160,7 +160,7 @@ impl SelectionStrategy for DeltaStrategy {
             .ok_or(StrategyError::NoDeltaData)?;
 
         // Find closest tradable strike for short leg
-        let short_strike = find_closest_strike(&chain_data.strikes, theoretical_short_strike)?;
+        let short_strike = super::find_closest_strike(&chain_data.strikes, theoretical_short_strike)?;
 
         // Determine long leg strike based on matching mode
         let long_strike = match self.strike_match_mode {
@@ -170,7 +170,7 @@ impl SelectionStrategy for DeltaStrategy {
                 let theoretical_long_strike = delta_surface
                     .delta_to_strike(target_delta, long_exp, is_call)
                     .ok_or(StrategyError::NoDeltaData)?;
-                find_closest_strike(&chain_data.strikes, theoretical_long_strike)?
+                super::find_closest_strike(&chain_data.strikes, theoretical_long_strike)?
             }
         };
 
@@ -192,68 +192,10 @@ impl SelectionStrategy for DeltaStrategy {
     }
 }
 
-/// Select expirations for calendar spread
-fn select_expirations(
-    expirations: &[NaiveDate],
-    reference_date: NaiveDate,
-    min_short_dte: i32,
-    max_short_dte: i32,
-    min_long_dte: i32,
-    max_long_dte: i32,
-) -> Result<(NaiveDate, NaiveDate), StrategyError> {
-    if expirations.len() < 2 {
-        return Err(StrategyError::InsufficientExpirations {
-            needed: 2,
-            available: expirations.len(),
-        });
-    }
-
-    let mut sorted: Vec<_> = expirations.iter().collect();
-    sorted.sort();
-
-    // Find short expiry
-    let short_exp = sorted
-        .iter()
-        .find(|&&exp| {
-            let dte = (*exp - reference_date).num_days();
-            dte >= min_short_dte as i64 && dte <= max_short_dte as i64
-        })
-        .ok_or(StrategyError::NoExpirations)?;
-
-    // Find long expiry
-    let long_exp = sorted
-        .iter()
-        .find(|&&exp| {
-            if exp <= short_exp {
-                return false;
-            }
-            let dte = (*exp - reference_date).num_days();
-            dte >= min_long_dte as i64 && dte <= max_long_dte as i64
-        })
-        .ok_or(StrategyError::InsufficientExpirations {
-            needed: 2,
-            available: 1,
-        })?;
-
-    Ok((**short_exp, **long_exp))
-}
-
-/// Find the closest tradable strike to the theoretical strike
-fn find_closest_strike(strikes: &[Strike], target: f64) -> Result<Strike, StrategyError> {
-    strikes
-        .iter()
-        .min_by(|a, b| {
-            let a_diff = (f64::from(**a) - target).abs();
-            let b_diff = (f64::from(**b) - target).abs();
-            a_diff.partial_cmp(&b_diff).unwrap()
-        })
-        .copied()
-        .ok_or(StrategyError::NoStrikes)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::strategies::{find_closest_strike, select_expirations};
     use chrono::{DateTime, Utc};
     use cs_analytics::{IVPoint, IVSurface};
     use rust_decimal::Decimal;

@@ -46,7 +46,8 @@ impl SelectionStrategy for IronButterflyStrategy {
         let expiration = self.select_expiration(event, &chain_data.expirations)?;
 
         // 2. Find ATM strike for center
-        let center = self.find_atm_strike(spot, &chain_data.strikes)?;
+        let spot_f64: f64 = spot.value.try_into().unwrap_or(0.0);
+        let center = super::find_closest_strike(&chain_data.strikes, spot_f64)?;
 
         // 3. Calculate wing strikes
         let upper_target = Strike::new(center.value() + self.wing_width)
@@ -107,22 +108,6 @@ impl IronButterflyStrategy {
             .ok_or(StrategyError::NoExpirations)
     }
 
-    fn find_atm_strike(
-        &self,
-        spot: &SpotPrice,
-        strikes: &[Strike],
-    ) -> Result<Strike, StrategyError> {
-        strikes
-            .iter()
-            .min_by(|a, b| {
-                let a_diff = (a.value() - spot.value).abs();
-                let b_diff = (b.value() - spot.value).abs();
-                a_diff.partial_cmp(&b_diff).unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .copied()
-            .ok_or(StrategyError::NoStrikes)
-    }
-
     fn snap_to_strike(
         &self,
         target: Strike,
@@ -146,6 +131,7 @@ impl IronButterflyStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::strategies::find_closest_strike;
     use chrono::Utc;
 
     #[test]
@@ -165,7 +151,8 @@ mod tests {
             Strike::new(Decimal::new(190, 0)).unwrap(),
         ];
 
-        let atm = strategy.find_atm_strike(&spot, &strikes).unwrap();
+        let spot_f64: f64 = spot.value.try_into().unwrap();
+        let atm = find_closest_strike(&strikes, spot_f64).unwrap();
         assert_eq!(atm.value(), Decimal::new(180, 0));
     }
 

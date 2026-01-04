@@ -58,17 +58,10 @@ impl SelectionStrategy for ATMStrategy {
 
         // Find ATM strike for short leg
         let spot_f64: f64 = spot.value.try_into().unwrap_or(0.0);
-        let short_atm_strike = chain_data.strikes
-            .iter()
-            .min_by(|a, b| {
-                let a_diff = (f64::from(**a) - spot_f64).abs();
-                let b_diff = (f64::from(**b) - spot_f64).abs();
-                a_diff.partial_cmp(&b_diff).unwrap()
-            })
-            .ok_or(StrategyError::NoStrikes)?;
+        let short_atm_strike = super::find_closest_strike(&chain_data.strikes, spot_f64)?;
 
         // Select expirations
-        let (short_exp, long_exp) = select_expirations(
+        let (short_exp, long_exp) = super::select_expirations(
             &chain_data.expirations,
             event.earnings_date,
             self.criteria.min_short_dte,
@@ -79,7 +72,7 @@ impl SelectionStrategy for ATMStrategy {
 
         // Determine long leg strike based on matching mode
         let long_strike = match self.strike_match_mode {
-            StrikeMatchMode::SameStrike => *short_atm_strike,
+            StrikeMatchMode::SameStrike => short_atm_strike,
             StrikeMatchMode::SameDelta => {
                 // Need IV surface to calculate delta
                 let iv_surface = chain_data
@@ -92,7 +85,7 @@ impl SelectionStrategy for ATMStrategy {
 
                 // Calculate delta of ATM strike at short expiration
                 let is_call = option_type == OptionType::Call;
-                let short_strike_f64: f64 = (*short_atm_strike).into();
+                let short_strike_f64: f64 = short_atm_strike.into();
 
                 // Get the IV at the short ATM strike
                 let short_slice = delta_surface.slice(short_exp)
@@ -134,7 +127,7 @@ impl SelectionStrategy for ATMStrategy {
 
         let short_leg = OptionLeg::new(
             event.symbol.clone(),
-            *short_atm_strike,
+            short_atm_strike,
             short_exp,
             option_type,
         );
@@ -160,17 +153,10 @@ impl SelectionStrategy for ATMStrategy {
 
         // Find ATM strike (same for all 4 legs)
         let spot_f64: f64 = spot.value.try_into().unwrap_or(0.0);
-        let atm_strike = chain_data.strikes
-            .iter()
-            .min_by(|a, b| {
-                let a_diff = (f64::from(**a) - spot_f64).abs();
-                let b_diff = (f64::from(**b) - spot_f64).abs();
-                a_diff.partial_cmp(&b_diff).unwrap()
-            })
-            .ok_or(StrategyError::NoStrikes)?;
+        let atm_strike = super::find_closest_strike(&chain_data.strikes, spot_f64)?;
 
         // Select expirations (short near-term, long far-term)
-        let (short_exp, long_exp) = select_expirations(
+        let (short_exp, long_exp) = super::select_expirations(
             &chain_data.expirations,
             event.earnings_date,
             self.criteria.min_short_dte,
@@ -182,76 +168,31 @@ impl SelectionStrategy for ATMStrategy {
         // Build all 4 legs at the same ATM strike
         let short_call = OptionLeg::new(
             event.symbol.clone(),
-            *atm_strike,
+            atm_strike,
             short_exp,
             OptionType::Call,
         );
         let short_put = OptionLeg::new(
             event.symbol.clone(),
-            *atm_strike,
+            atm_strike,
             short_exp,
             OptionType::Put,
         );
         let long_call = OptionLeg::new(
             event.symbol.clone(),
-            *atm_strike,
+            atm_strike,
             long_exp,
             OptionType::Call,
         );
         let long_put = OptionLeg::new(
             event.symbol.clone(),
-            *atm_strike,
+            atm_strike,
             long_exp,
             OptionType::Put,
         );
 
         CalendarStraddle::new(short_call, short_put, long_call, long_put).map_err(Into::into)
     }
-}
-
-fn select_expirations(
-    expirations: &[NaiveDate],
-    reference_date: NaiveDate,
-    min_short_dte: i32,
-    max_short_dte: i32,
-    min_long_dte: i32,
-    max_long_dte: i32,
-) -> Result<(NaiveDate, NaiveDate), StrategyError> {
-    if expirations.len() < 2 {
-        return Err(StrategyError::InsufficientExpirations {
-            needed: 2,
-            available: expirations.len(),
-        });
-    }
-
-    let mut sorted: Vec<_> = expirations.iter().collect();
-    sorted.sort();
-
-    // Find short expiry (first one meeting min/max DTE)
-    let short_exp = sorted
-        .iter()
-        .find(|&&exp| {
-            let dte = (*exp - reference_date).num_days();
-            dte >= min_short_dte as i64 && dte <= max_short_dte as i64
-        })
-        .ok_or(StrategyError::NoExpirations)?;
-
-    // Find long expiry (first one after short meeting min/max DTE)
-    let long_exp = sorted
-        .iter()
-        .find(|&&exp| {
-            if exp <= short_exp {
-                return false;
-            }
-            let dte = (*exp - reference_date).num_days();
-            dte >= min_long_dte as i64 && dte <= max_long_dte as i64
-        })
-        .ok_or(StrategyError::InsufficientExpirations {
-            needed: 2,
-            available: 1,
-        })?;
-
-    Ok((**short_exp, **long_exp))
 }
 
 #[cfg(test)]

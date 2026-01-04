@@ -83,25 +83,18 @@ impl SelectionStrategy for StraddleStrategy {
 
         // Select ATM strike (closest to spot)
         let spot_value = spot.to_f64();
-        let atm_strike = chain_data.strikes
-            .iter()
-            .min_by(|a, b| {
-                let diff_a = (f64::from(**a) - spot_value).abs();
-                let diff_b = (f64::from(**b) - spot_value).abs();
-                diff_a.partial_cmp(&diff_b).unwrap()
-            })
-            .ok_or(StrategyError::NoStrikes)?;
+        let atm_strike = super::find_closest_strike(&chain_data.strikes, spot_value)?;
 
         // Create legs
         let call_leg = OptionLeg::new(
             event.symbol.clone(),
-            *atm_strike,
+            atm_strike,
             expiration,
             OptionType::Call,
         );
         let put_leg = OptionLeg::new(
             event.symbol.clone(),
-            *atm_strike,
+            atm_strike,
             expiration,
             OptionType::Put,
         );
