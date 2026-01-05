@@ -58,15 +58,6 @@ pub trait RollableTrade: Sized + Send + Sync {
     fn symbol(&self) -> &str;
 }
 
-/// Type identifier for dispatching trade execution
-///
-/// This allows the RollingExecutor to dispatch to the correct
-/// execution method without requiring the execute method on the trait
-/// (which would create circular dependencies).
-pub trait TradeTypeId {
-    fn type_id(&self) -> &'static str;
-}
-
 /// Common interface for trade execution results
 ///
 /// All trade result types (StraddleResult, CalendarSpreadResult, etc.)

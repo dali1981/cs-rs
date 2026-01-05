@@ -5,7 +5,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
 use crate::entities::*;
-use crate::trade::{RollableTrade, TradeResult, TradeConstructionError, TradeTypeId};
+use crate::trade::{RollableTrade, TradeResult, TradeConstructionError};
 use crate::ports::TradeFactory;
 
 // ============================================================================
@@ -38,12 +38,6 @@ impl RollableTrade for Straddle {
 
     fn symbol(&self) -> &str {
         self.symbol()
-    }
-}
-
-impl TradeTypeId for Straddle {
-    fn type_id(&self) -> &'static str {
-        "straddle"
     }
 }
 
@@ -116,12 +110,6 @@ impl RollableTrade for CalendarSpread {
 
     fn symbol(&self) -> &str {
         &self.short_leg.symbol
-    }
-}
-
-impl TradeTypeId for CalendarSpread {
-    fn type_id(&self) -> &'static str {
-        "calendar_spread"
     }
 }
 

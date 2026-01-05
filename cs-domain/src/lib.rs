@@ -42,4 +42,4 @@ pub use expiration::{ExpirationCycle, ExpirationPolicy};
 pub use trading_period::{TradingPeriod, TradingPeriodSpec, TimingError};
 pub use roll::{RollPolicy, RollEvent};
 pub use strategy::{TradeStrategy, TradeStructureConfig, TradeFilters};
-pub use trade::{RollableTrade, TradeResult, TradeConstructionError, TradeTypeId};
+pub use trade::{RollableTrade, TradeResult, TradeConstructionError};

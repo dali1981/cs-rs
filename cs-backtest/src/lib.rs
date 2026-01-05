@@ -3,6 +3,7 @@
 // BacktestUseCase, TradeExecutor, parallel processing.
 
 pub mod config;
+pub mod execution;  // Generic execution framework
 pub mod iv_surface_builder;
 pub mod spread_pricer;
 pub mod trade_executor;
@@ -10,7 +11,8 @@ pub mod iron_butterfly_pricer;
 pub mod iron_butterfly_executor;
 pub mod straddle_pricer;
 pub mod straddle_executor;
-pub mod rolling_straddle_executor;  // Rolling straddle strategy
+pub mod rolling_straddle_executor;  // Rolling straddle strategy (specific)
+pub mod rolling_executor;  // Generic rolling executor for any trade type
 pub mod trade_factory_impl;  // Trade factory implementation
 pub mod hedging_executor;  // Delta hedging wrapper
 pub mod hedging_analytics; // Hedging performance analytics
@@ -29,11 +31,13 @@ pub use unified_executor::{TradeResult, TradeStructure, UnifiedExecutor};
 pub use timing_strategy::TimingStrategy;
 pub use trade_executor::{TradeExecutor, ExecutionError};
 pub use spread_pricer::{SpreadPricer, SpreadPricing, LegPricing, PricingError};
+pub use execution::{ExecutableTrade, TradePricer, ExecutionConfig, ExecutionContext, execute_trade};
 pub use iron_butterfly_pricer::{IronButterflyPricer, IronButterflyPricing};
 pub use iron_butterfly_executor::IronButterflyExecutor;
 pub use straddle_pricer::{StraddlePricer, StraddlePricing};
 pub use straddle_executor::StraddleExecutor;
 pub use rolling_straddle_executor::RollingStraddleExecutor;
+pub use rolling_executor::RollingExecutor;  // Generic rolling executor
 pub use trade_factory_impl::DefaultTradeFactory;
 pub use hedging_executor::HedgingExecutor;
 pub use hedging_analytics::{HedgingComparison, HedgingStats};

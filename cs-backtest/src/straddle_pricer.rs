@@ -4,6 +4,7 @@ use rust_decimal::Decimal;
 use cs_analytics::{IVSurface, PricingModel};
 use cs_domain::{Straddle, PricingSource};
 use crate::spread_pricer::{SpreadPricer, LegPricing, PricingError};
+use crate::execution::TradePricer;
 
 /// Pricer for straddle positions
 ///
@@ -96,6 +97,22 @@ impl StraddlePricer {
             total_price,
             source: PricingSource::Market,
         })
+    }
+}
+
+impl TradePricer for StraddlePricer {
+    type Trade = Straddle;
+    type Pricing = StraddlePricing;
+
+    fn price_with_surface(
+        &self,
+        trade: &Straddle,
+        chain_df: &DataFrame,
+        spot: f64,
+        timestamp: DateTime<Utc>,
+        iv_surface: Option<&IVSurface>,
+    ) -> Result<StraddlePricing, PricingError> {
+        self.price_with_surface(trade, chain_df, spot, timestamp, iv_surface)
     }
 }
 

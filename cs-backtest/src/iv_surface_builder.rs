@@ -118,7 +118,7 @@ pub fn build_iv_surface(
 ///
 /// The DataFrame must include a `timestamp` column (nanoseconds since epoch) in addition
 /// to: strike, expiration, close, option_type
-pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository>(
+pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository + ?Sized>(
     chain_df: &DataFrame,
     equity_repo: &R,
     symbol: &str,

@@ -9,6 +9,7 @@ use cs_analytics::{
     PricingModel, PricingIVProvider,
 };
 use cs_domain::{CalendarSpread, Strike, TradingDate, TradingTimestamp, MarketTime};
+use crate::execution::TradePricer;
 
 /// Error type for pricing operations
 #[derive(Debug, thiserror::Error)]
@@ -566,6 +567,22 @@ impl SpreadPricer {
 impl Default for SpreadPricer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl TradePricer for SpreadPricer {
+    type Trade = CalendarSpread;
+    type Pricing = SpreadPricing;
+
+    fn price_with_surface(
+        &self,
+        trade: &CalendarSpread,
+        chain_df: &DataFrame,
+        spot: f64,
+        timestamp: DateTime<Utc>,
+        iv_surface: Option<&IVSurface>,
+    ) -> Result<SpreadPricing, PricingError> {
+        self.price_spread_with_surface(trade, chain_df, spot, timestamp, iv_surface)
     }
 }
 
