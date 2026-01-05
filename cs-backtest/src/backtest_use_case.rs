@@ -8,9 +8,15 @@ use cs_domain::timing::{EarningsTradeTiming, StraddleTradeTiming, PostEarningsSt
 use cs_domain::strike_selection::{StrikeSelector, ATMStrategy, DeltaStrategy, ExpirationCriteria, IronButterflyStrategy, StraddleStrategy};
 use crate::config::{BacktestConfig, SpreadType, SelectionType};
 use crate::trade_orchestrator::{TradeOrchestrator, TradeStructure, TradeResult};
+// Legacy imports - only used in dead code (process_straddle_event, process_post_earnings_straddle_event)
+// TODO: Remove these methods and imports
+#[allow(unused_imports)]
 use crate::trade_executor::TradeExecutor;
+#[allow(unused_imports)]
 use crate::iron_butterfly_executor::IronButterflyExecutor;
+#[allow(unused_imports)]
 use crate::straddle_executor::StraddleExecutor;
+#[allow(unused_imports)]
 use crate::calendar_straddle_executor::CalendarStraddleExecutor;
 use crate::iv_surface_builder::build_iv_surface_minute_aligned;
 

@@ -6,16 +6,19 @@ pub mod config;
 pub mod execution;  // Generic execution framework
 pub mod iv_surface_builder;
 pub mod spread_pricer;
+pub mod straddle_pricer;
+pub mod rolling_executor;  // Generic rolling executor for any trade type
+pub mod trade_factory_impl;  // Trade factory implementation
+pub mod hedging_executor;  // Delta hedging wrapper (TODO: migrate to generic execution)
+pub mod hedging_analytics; // Hedging performance analytics
+pub mod calendar_straddle_pricer;
+
+// Legacy executors - kept temporarily for HedgingExecutor
+// TODO: Refactor HedgingExecutor to use generic execution, then delete these
 pub mod trade_executor;
 pub mod iron_butterfly_pricer;
 pub mod iron_butterfly_executor;
-pub mod straddle_pricer;
-pub mod straddle_executor;  // TODO: Remove once TradeOrchestrator uses execute_trade()
-pub mod rolling_executor;  // Generic rolling executor for any trade type
-pub mod trade_factory_impl;  // Trade factory implementation
-pub mod hedging_executor;  // Delta hedging wrapper
-pub mod hedging_analytics; // Hedging performance analytics
-pub mod calendar_straddle_pricer;
+pub mod straddle_executor;
 pub mod calendar_straddle_executor;
 pub mod trade_orchestrator;  // Orchestrates strike selection, execution, and hedging
 pub mod timing_strategy;   // Timing strategy enum for different trade types
