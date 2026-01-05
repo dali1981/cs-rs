@@ -23,6 +23,12 @@ pub enum PricingError {
     NoPriceFound(String),
     #[error("Invalid IV: {0}")]
     InvalidIV(String),
+    #[error("Option expired: expiration {expiration} is before pricing time {pricing_time}. TTM = {ttm:.6} years")]
+    OptionExpired {
+        expiration: NaiveDate,
+        pricing_time: DateTime<Utc>,
+        ttm: f64,
+    },
 }
 
 /// Pricing result for a single option leg
@@ -159,6 +165,9 @@ impl SpreadPricer {
         iv_surface: Option<&IVSurface>,
         pricing_provider: &dyn PricingIVProvider,
     ) -> Result<LegPricing, PricingError> {
+        // CRITICAL: Validate option has not expired BEFORE any pricing
+        let ttm = self.validate_not_expired(expiration, pricing_time)?;
+
         // Filter to matching strike, expiration, and option type
         let expiration_polars = TradingDate::from_naive_date(expiration).to_polars_date();
         let strike_f64: f64 = (*strike).into();
@@ -182,8 +191,6 @@ impl SpreadPricer {
         if filtered.is_empty() {
             // No market data for this option type
             // First try put-call parity if the opposite type has market data
-            let ttm = self.calculate_ttm(pricing_time, expiration);
-
             if let Some(parity_result) = self.try_put_call_parity(
                 strike_f64,
                 expiration,
@@ -293,8 +300,7 @@ impl SpreadPricer {
         let market_price = close_col.get(0)
             .ok_or_else(|| PricingError::NoPriceFound(format!("{} {} {}", strike_f64, expiration, opt_type_str)))?;
 
-        // Calculate IV from market price
-        let ttm = self.calculate_ttm(pricing_time, expiration);
+        // Calculate IV from market price (using ttm from validation)
         let iv = bs_implied_volatility(
             market_price,
             spot_price,
@@ -421,6 +427,35 @@ impl SpreadPricer {
             iv,
             greeks,
         })
+    }
+
+    /// Validate that an option has not expired
+    ///
+    /// # Errors
+    /// Returns `PricingError::OptionExpired` if the option has expired
+    /// (time to expiry is negative or zero)
+    fn validate_not_expired(
+        &self,
+        expiration: NaiveDate,
+        pricing_time: DateTime<Utc>,
+    ) -> Result<f64, PricingError> {
+        let ttm = self.calculate_ttm(pricing_time, expiration);
+
+        if ttm <= 0.0 {
+            tracing::error!(
+                expiration = %expiration,
+                pricing_time = %pricing_time,
+                ttm = ttm,
+                "FATAL: Attempted to price expired option. This indicates a bug in expiration selection."
+            );
+            return Err(PricingError::OptionExpired {
+                expiration,
+                pricing_time,
+                ttm,
+            });
+        }
+
+        Ok(ttm)
     }
 
     fn calculate_ttm(&self, from: DateTime<Utc>, to_date: NaiveDate) -> f64 {
@@ -589,6 +624,80 @@ mod tests {
 
         let ttm = pricer.calculate_ttm(from, date);
 
-        assert!(ttm.abs() < 1e-6); // Should be very close to 0
+        // At market close (16:00), there's still a small positive TTM
+        // This represents the time until end of trading day
+        assert!(ttm > 0.0, "TTM should be positive at market close");
+        assert!(ttm < 0.001, "TTM should be very small at market close (< 0.001 years ≈ 8.76 hours)");
+    }
+
+    #[test]
+    fn test_validate_not_expired_errors_on_expired_option() {
+        let pricer = SpreadPricer::new();
+        let expiration = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
+        let pricing_time = NaiveDate::from_ymd_opt(2025, 1, 20).unwrap()
+            .and_hms_opt(14, 30, 0).unwrap()
+            .and_utc();
+
+        // Expiration is 5 days BEFORE pricing time
+        let result = pricer.validate_not_expired(expiration, pricing_time);
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            PricingError::OptionExpired { ttm, .. } => {
+                assert!(ttm < 0.0, "TTM should be negative for expired option");
+            }
+            _ => panic!("Expected OptionExpired error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_not_expired_passes_for_valid_option() {
+        let pricer = SpreadPricer::new();
+        let expiration = NaiveDate::from_ymd_opt(2025, 1, 20).unwrap();
+        let pricing_time = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap()
+            .and_hms_opt(14, 30, 0).unwrap()
+            .and_utc();
+
+        // Expiration is 5 days AFTER pricing time
+        let result = pricer.validate_not_expired(expiration, pricing_time);
+
+        assert!(result.is_ok(), "Expected validation to pass for valid option");
+        let ttm = result.unwrap();
+        assert!(ttm > 0.0, "TTM should be positive for valid option");
+    }
+
+    #[test]
+    fn test_validate_not_expired_errors_after_expiration() {
+        let pricer = SpreadPricer::new();
+        let expiration = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
+        // Price the day after expiration
+        let pricing_time = NaiveDate::from_ymd_opt(2025, 1, 16).unwrap()
+            .and_hms_opt(9, 30, 0).unwrap()
+            .and_utc();
+
+        // Pricing after expiration should error
+        let result = pricer.validate_not_expired(expiration, pricing_time);
+
+        assert!(result.is_err(), "Expected validation to fail after expiration");
+        match result.unwrap_err() {
+            PricingError::OptionExpired { ttm, .. } => {
+                assert!(ttm < 0.0, "TTM should be negative for expired option");
+            }
+            _ => panic!("Expected OptionExpired error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_not_expired_passes_at_market_close() {
+        let pricer = SpreadPricer::new();
+        let date = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
+        let pricing_time = date.and_hms_opt(16, 0, 0).unwrap().and_utc();
+
+        // Pricing at market close should still be valid (TTM is still slightly positive)
+        let result = pricer.validate_not_expired(date, pricing_time);
+
+        assert!(result.is_ok(), "Expected validation to pass at market close");
+        let ttm = result.unwrap();
+        assert!(ttm > 0.0, "TTM should be positive at market close");
     }
 }
