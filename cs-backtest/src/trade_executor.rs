@@ -310,6 +310,8 @@ where
         result: <T as ExecutableTrade>::Result,
         roll_reason: RollReason,
     ) -> RollPeriod {
+        let iv_change = result.iv_change();
+
         RollPeriod {
             entry_date: result.entry_time().date_naive(),
             exit_date: result.exit_time().date_naive(),
@@ -331,10 +333,10 @@ where
             net_theta: None,  // Could be added to TradeResult trait if needed
             net_vega: None,
 
-            // IV from result
-            iv_entry: result.iv_entry(),
-            iv_exit: result.iv_exit(),
-            iv_change: result.iv_change(),
+            // IV now derived automatically from CompositeIV!
+            iv_entry: result.entry_iv().map(|iv| iv.primary),
+            iv_exit: result.exit_iv().map(|iv| iv.primary),
+            iv_change: iv_change.map(|c| c.primary_change),
 
             // P&L attribution
             delta_pnl: None,

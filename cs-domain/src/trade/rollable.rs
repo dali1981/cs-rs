@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
-use crate::trade::TradeFactory;
+use crate::trade::{TradeFactory, CompositeIV, CompositeIVChange};
 use crate::hedging::HedgePosition;
 use crate::PositionAttribution;
 
@@ -100,21 +100,29 @@ pub trait TradeResult: Send + Sync {
     /// Net gamma of the position at entry
     fn net_gamma(&self) -> Option<f64>;
 
-    // --- IV support (for volatility tracking) ---
+    // --- IV support (derived from composite structure) ---
 
-    /// Implied volatility at entry
-    fn iv_entry(&self) -> Option<f64> {
+    /// IV at entry (automatically derived from leg structure)
+    ///
+    /// Returns None by default. Composite trades automatically compute this
+    /// from leg IVs, adapting to calendar vs non-calendar structure.
+    fn entry_iv(&self) -> Option<CompositeIV> {
         None
     }
 
-    /// Implied volatility at exit
-    fn iv_exit(&self) -> Option<f64> {
+    /// IV at exit (automatically derived from leg structure)
+    fn exit_iv(&self) -> Option<CompositeIV> {
         None
     }
 
-    /// IV change (exit - entry)
-    fn iv_change(&self) -> Option<f64> {
-        None
+    /// IV change between entry and exit (computed from entry/exit)
+    ///
+    /// Default implementation uses CompositeIV::change() method.
+    fn iv_change(&self) -> Option<CompositeIVChange> {
+        match (self.entry_iv(), self.exit_iv()) {
+            (Some(entry), Some(exit)) => Some(entry.change(&exit)),
+            _ => None,
+        }
     }
 
     /// Hedge P&L if hedging was applied

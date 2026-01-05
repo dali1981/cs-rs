@@ -70,6 +70,81 @@ impl CompositePricing {
     pub fn leg(&self, index: usize) -> Option<&LegPricing> {
         self.legs.get(index).map(|(p, _)| p)
     }
+
+    /// Average IV across all legs (recomputed from legs for consistency)
+    pub fn avg_iv_from_legs(&self) -> Option<f64> {
+        let ivs: Vec<f64> = self.legs.iter()
+            .filter_map(|(p, _)| p.iv)
+            .collect();
+
+        if ivs.is_empty() {
+            None
+        } else {
+            Some(ivs.iter().sum::<f64>() / ivs.len() as f64)
+        }
+    }
+
+    /// IV grouped by expiration (for calendars)
+    pub fn iv_by_expiration(&self) -> std::collections::BTreeMap<chrono::NaiveDate, f64> {
+        use std::collections::BTreeMap;
+
+        let mut by_expiry: BTreeMap<chrono::NaiveDate, Vec<f64>> = BTreeMap::new();
+
+        for (pricing, _) in &self.legs {
+            if let Some(iv) = pricing.iv {
+                by_expiry.entry(pricing.expiration)
+                    .or_default()
+                    .push(iv);
+            }
+        }
+
+        by_expiry.into_iter()
+            .map(|(exp, ivs)| (exp, ivs.iter().sum::<f64>() / ivs.len() as f64))
+            .collect()
+    }
+
+    /// Detect if this is a calendar structure (multiple expirations)
+    pub fn is_calendar(&self) -> bool {
+        use std::collections::HashSet;
+        let expirations: HashSet<chrono::NaiveDate> = self.legs.iter()
+            .map(|(p, _)| p.expiration)
+            .collect();
+        expirations.len() > 1
+    }
+
+    /// For calendars: short IV / long IV ratio
+    pub fn iv_ratio(&self) -> Option<f64> {
+        if !self.is_calendar() {
+            return None;
+        }
+
+        let by_exp = self.iv_by_expiration();
+        let expirations: Vec<_> = by_exp.keys().collect();
+
+        if expirations.len() != 2 {
+            return None;  // Not a simple calendar
+        }
+
+        let short_exp = expirations[0];  // Earlier = short
+        let long_exp = expirations[1];   // Later = long
+
+        let short_iv = by_exp.get(short_exp)?;
+        let long_iv = by_exp.get(long_exp)?;
+
+        Some(short_iv / long_iv)
+    }
+
+    /// Primary IV metric (for display)
+    /// - Non-calendar: average IV
+    /// - Calendar: short leg IV (earnings-affected)
+    pub fn primary_iv(&self) -> Option<f64> {
+        if self.is_calendar() {
+            let by_exp = self.iv_by_expiration();
+            by_exp.values().next().copied()  // Earliest expiration
+        } else {
+            self.avg_iv_from_legs()
+        }
+    }
 }
 
 /// Generic pricer for any composite trade
@@ -137,6 +212,9 @@ mod tests {
     #[test]
     fn test_composite_pricing_from_legs() {
         use cs_analytics::Greeks;
+        use chrono::NaiveDate;
+
+        let exp_date = NaiveDate::from_ymd_opt(2025, 3, 21).unwrap();
 
         // Create mock leg pricings
         let leg1 = LegPricing {
@@ -149,6 +227,7 @@ mod tests {
                 vega: 0.2,
                 rho: 0.1,
             }),
+            expiration: exp_date,
         };
 
         let leg2 = LegPricing {
@@ -161,6 +240,7 @@ mod tests {
                 vega: 0.15,
                 rho: 0.05,
             }),
+            expiration: exp_date,
         };
 
         // Long leg1, Short leg2

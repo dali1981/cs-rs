@@ -38,6 +38,7 @@ pub struct LegPricing {
     pub price: Decimal,
     pub iv: Option<f64>,
     pub greeks: Option<Greeks>,
+    pub expiration: NaiveDate,  // Needed for calendar detection in composite pricing
 }
 
 /// Pricing result for a calendar spread
@@ -289,6 +290,7 @@ impl SpreadPricer {
                 price: Decimal::try_from(price).unwrap_or_default(),
                 iv: Some(estimated_iv),
                 greeks: Some(greeks),
+                expiration,
             });
         }
 
@@ -328,6 +330,7 @@ impl SpreadPricer {
             price: Decimal::try_from(market_price).unwrap_or_default(),
             iv,
             greeks,
+            expiration,
         })
     }
 
@@ -427,6 +430,7 @@ impl SpreadPricer {
             price: Decimal::try_from(derived_price).unwrap_or_default(),
             iv,
             greeks,
+            expiration,
         })
     }
 

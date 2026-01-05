@@ -5,7 +5,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
 use crate::entities::*;
-use crate::trade::{RollableTrade, TradeResult, TradeConstructionError};
+use crate::trade::{RollableTrade, TradeResult, TradeConstructionError, CompositeIV};
 use crate::ports::TradeFactory;
 
 // ============================================================================
@@ -86,17 +86,15 @@ impl TradeResult for StraddleResult {
         self.net_gamma
     }
 
-    fn iv_entry(&self) -> Option<f64> {
-        self.iv_entry
+    fn entry_iv(&self) -> Option<CompositeIV> {
+        self.iv_entry.map(CompositeIV::single)
     }
 
-    fn iv_exit(&self) -> Option<f64> {
-        self.iv_exit
+    fn exit_iv(&self) -> Option<CompositeIV> {
+        self.iv_exit.map(CompositeIV::single)
     }
 
-    fn iv_change(&self) -> Option<f64> {
-        self.iv_change
-    }
+    // iv_change() uses default trait implementation (computed from entry/exit)
 
     fn hedge_pnl(&self) -> Option<Decimal> {
         self.hedge_pnl
@@ -321,17 +319,16 @@ impl TradeResult for IronButterflyResult {
         self.net_gamma
     }
 
-    fn iv_entry(&self) -> Option<f64> {
-        self.iv_entry
+    fn entry_iv(&self) -> Option<CompositeIV> {
+        self.iv_entry.map(CompositeIV::single)
     }
 
-    fn iv_exit(&self) -> Option<f64> {
-        self.iv_exit
+    fn exit_iv(&self) -> Option<CompositeIV> {
+        self.iv_exit.map(CompositeIV::single)
     }
 
-    fn iv_change(&self) -> Option<f64> {
-        self.iv_crush  // Iron butterfly uses iv_crush instead of iv_change
-    }
+    // iv_change() uses default trait implementation (computed from entry/exit)
+    // Note: This replaces the previous iv_crush field usage
 
     fn hedge_pnl(&self) -> Option<Decimal> {
         self.hedge_pnl
