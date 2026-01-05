@@ -9,6 +9,9 @@ use crate::value_objects::*;
 pub mod rolling_result;
 pub use rolling_result::{RollingResult, RollPeriod, RollReason};
 
+// RollableTrade trait implementations
+pub mod rollable_impls;
+
 /// Earnings event for a symbol
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EarningsEvent {

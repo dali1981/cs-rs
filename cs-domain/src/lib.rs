@@ -19,6 +19,7 @@ pub mod expiration;
 pub mod trading_period;
 pub mod roll;
 pub mod strategy;
+pub mod trade;
 
 // Re-exports for convenience
 pub use datetime::{TradingDate, TradingTimestamp, MarketTime};
@@ -41,3 +42,4 @@ pub use expiration::{ExpirationCycle, ExpirationPolicy};
 pub use trading_period::{TradingPeriod, TradingPeriodSpec, TimingError};
 pub use roll::{RollPolicy, RollEvent};
 pub use strategy::{TradeStrategy, TradeStructureConfig, TradeFilters};
+pub use trade::{RollableTrade, TradeResult, TradeConstructionError, TradeTypeId};
