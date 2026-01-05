@@ -525,7 +525,7 @@ async fn run_rolling_straddle(
 }
 
 /// Display rolling straddle results
-fn display_rolling_results(result: &cs_domain::RollingStraddleResult) {
+fn display_rolling_results(result: &cs_domain::RollingResult) {
     println!("  Symbol:               {}", result.symbol);
     println!("  Period:               {} to {}", result.start_date, result.end_date);
     println!("  Number of rolls:      {}", result.num_rolls);

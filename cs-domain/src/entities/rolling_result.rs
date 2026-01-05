@@ -2,13 +2,14 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-/// Result of a rolling straddle strategy
+/// Result of a rolling strategy (any trade type)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RollingStraddleResult {
+pub struct RollingResult {
     pub symbol: String,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
     pub roll_policy: String,
+    pub trade_type: String,  // "straddle", "calendar_spread", etc.
 
     // Individual roll periods
     pub rolls: Vec<RollPeriod>,
@@ -26,13 +27,14 @@ pub struct RollingStraddleResult {
     pub max_drawdown: Decimal,
 }
 
-impl RollingStraddleResult {
+impl RollingResult {
     /// Create a new result from a list of roll periods
     pub fn from_rolls(
         symbol: String,
         start_date: NaiveDate,
         end_date: NaiveDate,
         roll_policy: String,
+        trade_type: String,
         rolls: Vec<RollPeriod>,
     ) -> Self {
         let num_rolls = rolls.len();
@@ -85,6 +87,7 @@ impl RollingStraddleResult {
             start_date,
             end_date,
             roll_policy,
+            trade_type,
             rolls,
             total_option_pnl,
             total_hedge_pnl,

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use cs_domain::{
     EquityDataRepository, OptionsDataRepository, MarketTime,
-    RollPolicy, RollPeriod, RollReason, RollingStraddleResult,
+    RollPolicy, RollPeriod, RollReason, RollingResult,
     Straddle, StraddleResult, TradingCalendar,
 };
 
@@ -54,7 +54,7 @@ where
         end_date: NaiveDate,
         entry_time: MarketTime,
         exit_time: MarketTime,
-    ) -> RollingStraddleResult {
+    ) -> RollingResult {
         let mut rolls = Vec::new();
         let mut current_date = start_date;
 
@@ -101,11 +101,12 @@ where
         }
 
         // Aggregate results
-        RollingStraddleResult::from_rolls(
+        RollingResult::from_rolls(
             symbol.to_string(),
             start_date,
             end_date,
             self.roll_policy.description(),
+            "straddle".to_string(),
             rolls,
         )
     }

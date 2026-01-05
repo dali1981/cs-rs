@@ -7,7 +7,7 @@ use crate::value_objects::*;
 
 // Submodule for rolling results
 pub mod rolling_result;
-pub use rolling_result::{RollingStraddleResult, RollPeriod, RollReason};
+pub use rolling_result::{RollingResult, RollPeriod, RollReason};
 
 /// Earnings event for a symbol
 #[derive(Debug, Clone, Serialize, Deserialize)]
