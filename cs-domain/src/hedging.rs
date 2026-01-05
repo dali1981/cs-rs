@@ -1,6 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use crate::CONTRACT_MULTIPLIER;
 
 /// A single hedge transaction
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,7 +108,7 @@ impl Default for HedgeConfig {
             max_rehedges: None,
             min_hedge_size: 1,
             transaction_cost_per_share: Decimal::ZERO,
-            contract_multiplier: 100,
+            contract_multiplier: CONTRACT_MULTIPLIER,
         }
     }
 }
@@ -143,5 +144,136 @@ impl HedgeConfig {
         } else {
             raw_shares
         }
+    }
+}
+
+/// Stateful delta hedge manager
+///
+/// Tracks both option greeks and stock position to compute net exposure.
+/// Call `update()` with each new spot observation; it returns a HedgeAction
+/// if rebalancing is needed.
+///
+/// # Key Features
+/// - Incremental delta updates using gamma approximation
+/// - Tracks net position delta (options + stock)
+/// - Only hedges incremental changes, not full position
+/// - Same interface works for real-time and historical backtesting
+#[derive(Debug, Clone)]
+pub struct HedgeState {
+    // Configuration (immutable after creation)
+    config: HedgeConfig,
+
+    // Option position greeks (per-share, updated incrementally)
+    option_delta: f64,
+    option_gamma: f64,
+
+    // Stock hedge position
+    stock_shares: i32,
+
+    // Reference point for incremental delta updates
+    last_spot: f64,
+
+    // Transaction history
+    position: HedgePosition,
+}
+
+impl HedgeState {
+    /// Create new hedge state from initial option position
+    pub fn new(
+        config: HedgeConfig,
+        initial_delta: f64,    // Option delta at entry (per-share)
+        initial_gamma: f64,    // Option gamma at entry (per-share)
+        initial_spot: f64,     // Spot price at entry
+    ) -> Self {
+        Self {
+            config,
+            option_delta: initial_delta,
+            option_gamma: initial_gamma,
+            stock_shares: 0,
+            last_spot: initial_spot,
+            position: HedgePosition::new(),
+        }
+    }
+
+    /// Net position delta (options + stock)
+    pub fn net_delta(&self) -> f64 {
+        let stock_delta = self.stock_shares as f64 / self.config.contract_multiplier as f64;
+        self.option_delta + stock_delta
+    }
+
+    /// Current stock position
+    pub fn stock_shares(&self) -> i32 {
+        self.stock_shares
+    }
+
+    /// Number of rehedges executed
+    pub fn rehedge_count(&self) -> usize {
+        self.position.rehedge_count()
+    }
+
+    /// Check if max rehedges reached
+    pub fn at_max_rehedges(&self) -> bool {
+        if let Some(max) = self.config.max_rehedges {
+            self.rehedge_count() >= max
+        } else {
+            false
+        }
+    }
+
+    /// Process a new spot price observation
+    ///
+    /// Returns Some(HedgeAction) if a rebalance was executed, None otherwise.
+    ///
+    /// # State Transitions
+    /// 1. Update option_delta using gamma approximation
+    /// 2. Check if net_delta exceeds threshold
+    /// 3. If yes, compute shares to trade and execute
+    /// 4. Update stock_shares and record transaction
+    pub fn update(
+        &mut self,
+        timestamp: DateTime<Utc>,
+        new_spot: f64,
+    ) -> Option<HedgeAction> {
+        // 1. Update option delta using gamma approximation
+        let spot_change = new_spot - self.last_spot;
+        self.option_delta += self.option_gamma * spot_change;
+        self.last_spot = new_spot;
+
+        // 2. Check if rehedge needed based on NET delta
+        let net_delta = self.net_delta();
+        if !self.config.should_rehedge(net_delta, new_spot, self.option_gamma) {
+            return None;
+        }
+
+        // 3. Calculate INCREMENTAL shares needed (to neutralize net_delta)
+        let shares = self.config.shares_to_hedge(net_delta);
+        if shares == 0 {
+            return None;
+        }
+
+        // 4. Execute hedge and update state
+        let delta_before = net_delta;
+        self.stock_shares += shares;
+        let delta_after = self.net_delta();
+
+        let action = HedgeAction {
+            timestamp,
+            shares,
+            spot_price: new_spot,
+            delta_before,
+            delta_after,
+            cost: self.config.transaction_cost_per_share * Decimal::from(shares.abs()),
+        };
+
+        self.position.add_hedge(action.clone());
+
+        Some(action)
+    }
+
+    /// Finalize position and compute P&L at exit
+    pub fn finalize(mut self, exit_spot: f64) -> HedgePosition {
+        // Calculate unrealized P&L
+        self.position.unrealized_pnl = self.position.calculate_pnl(exit_spot);
+        self.position
     }
 }

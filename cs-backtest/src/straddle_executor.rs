@@ -7,6 +7,7 @@ use cs_analytics::PricingModel;
 use cs_domain::{
     Straddle, StraddleResult, EarningsEvent, FailureReason, PricingSource,
     EquityDataRepository, OptionsDataRepository,
+    CONTRACT_MULTIPLIER,
 };
 use crate::iv_surface_builder::build_iv_surface_minute_aligned;
 use crate::straddle_pricer::{StraddlePricer, StraddlePricing};
@@ -151,14 +152,16 @@ where
         )?;
 
         // P&L = Exit value - Entry cost (profit when straddle appreciated)
-        let pnl = exit_pricing.total_price - entry_pricing.total_price;
+        // Calculate per-share first, then multiply by contract multiplier
+        let pnl_per_share = exit_pricing.total_price - entry_pricing.total_price;
+        let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
         let pnl_pct = if entry_pricing.total_price != Decimal::ZERO {
-            (pnl / entry_pricing.total_price) * Decimal::from(100)
+            (pnl_per_share / entry_pricing.total_price) * Decimal::from(100)
         } else {
             Decimal::ZERO
         };
 
-        // Net Greeks (long call + long put)
+        // Net Greeks (long call + long put) - keep per-share for hedging
         let (net_delta, net_gamma, net_theta, net_vega) = compute_net_greeks(&entry_pricing);
 
         // IV change (positive = good for long straddle)
@@ -179,7 +182,7 @@ where
             0.0
         };
 
-        // P&L attribution
+        // P&L attribution (pass total pnl, get results in dollars)
         let (delta_pnl, gamma_pnl, theta_pnl, vega_pnl, unexplained_pnl) =
             calculate_pnl_attribution(
                 &entry_pricing,
@@ -198,13 +201,13 @@ where
             strike: straddle.strike(),
             expiration: straddle.expiration(),
             entry_time,
-            call_entry_price: entry_pricing.call.price,
-            put_entry_price: entry_pricing.put.price,
-            entry_debit: entry_pricing.total_price,
+            call_entry_price: entry_pricing.call.price * Decimal::from(CONTRACT_MULTIPLIER),
+            put_entry_price: entry_pricing.put.price * Decimal::from(CONTRACT_MULTIPLIER),
+            entry_debit: entry_pricing.total_price * Decimal::from(CONTRACT_MULTIPLIER),
             exit_time,
-            call_exit_price: exit_pricing.call.price,
-            put_exit_price: exit_pricing.put.price,
-            exit_credit: exit_pricing.total_price,
+            call_exit_price: exit_pricing.call.price * Decimal::from(CONTRACT_MULTIPLIER),
+            put_exit_price: exit_pricing.put.price * Decimal::from(CONTRACT_MULTIPLIER),
+            exit_credit: exit_pricing.total_price * Decimal::from(CONTRACT_MULTIPLIER),
             entry_surface_time,
             exit_surface_time: Some(exit_surface_time),
             exit_pricing_method: exit_pricing.source,
@@ -385,11 +388,12 @@ fn calculate_pnl_attribution(
         1.0, // Long put
     );
 
-    // Sum the legs
-    let delta_pnl = call_pnl.delta + put_pnl.delta;
-    let gamma_pnl = call_pnl.gamma + put_pnl.gamma;
-    let theta_pnl = call_pnl.theta + put_pnl.theta;
-    let vega_pnl = call_pnl.vega + put_pnl.vega;
+    // Sum the legs and scale to position level
+    let multiplier = CONTRACT_MULTIPLIER as f64;
+    let delta_pnl = (call_pnl.delta + put_pnl.delta) * multiplier;
+    let gamma_pnl = (call_pnl.gamma + put_pnl.gamma) * multiplier;
+    let theta_pnl = (call_pnl.theta + put_pnl.theta) * multiplier;
+    let vega_pnl = (call_pnl.vega + put_pnl.vega) * multiplier;
 
     let explained = delta_pnl + gamma_pnl + theta_pnl + vega_pnl;
     let unexplained = total_pnl.to_f64().unwrap_or(0.0) - explained;

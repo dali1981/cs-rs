@@ -2,6 +2,9 @@
 //
 // Calendar spreads, trading strategies, repositories, domain services.
 
+/// Standard options contract multiplier (100 shares per contract)
+pub const CONTRACT_MULTIPLIER: i32 = 100;
+
 pub mod datetime;
 pub mod value_objects;
 pub mod entities;

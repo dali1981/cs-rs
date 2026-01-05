@@ -7,6 +7,7 @@ use cs_analytics::PricingModel;
 use cs_domain::{
     CalendarStraddle, CalendarStraddleResult, EarningsEvent, FailureReason,
     EquityDataRepository, OptionsDataRepository,
+    CONTRACT_MULTIPLIER,
 };
 use crate::iv_surface_builder::build_iv_surface_minute_aligned;
 use crate::calendar_straddle_pricer::{CalendarStraddlePricer, CalendarStraddlePricing};
@@ -156,15 +157,16 @@ where
 
         // P&L = Exit value - Entry cost
         // For calendar straddle: we pay debit at entry (positive cost), receive at exit
-        // If exit_value > entry_cost, profit
-        let pnl = exit_pricing.net_cost - entry_pricing.net_cost;
+        // If exit_value > entry_cost, profit (per-share first, then multiply by contract multiplier)
+        let pnl_per_share = exit_pricing.net_cost - entry_pricing.net_cost;
+        let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
         let pnl_pct = if entry_pricing.net_cost != Decimal::ZERO {
-            (pnl / entry_pricing.net_cost.abs()) * Decimal::from(100)
+            (pnl_per_share / entry_pricing.net_cost.abs()) * Decimal::from(100)
         } else {
             Decimal::ZERO
         };
 
-        // Net Greeks at entry (short=-1, long=+1)
+        // Net Greeks at entry (short=-1, long=+1) - keep per-share
         let (net_delta, net_gamma, net_theta, net_vega) = compute_net_greeks(&entry_pricing);
 
         // IV tracking
@@ -178,7 +180,7 @@ where
             _ => None,
         };
 
-        // P&L attribution
+        // P&L attribution (pass total pnl)
         let (delta_pnl, gamma_pnl, theta_pnl, vega_pnl, unexplained_pnl) =
             calculate_pnl_attribution(
                 &entry_pricing,
@@ -199,17 +201,17 @@ where
             short_expiry: straddle.short_expiry(),
             long_expiry: straddle.long_expiry(),
             entry_time,
-            short_call_entry: entry_pricing.short_call.price,
-            short_put_entry: entry_pricing.short_put.price,
-            long_call_entry: entry_pricing.long_call.price,
-            long_put_entry: entry_pricing.long_put.price,
-            entry_cost: entry_pricing.net_cost,
+            short_call_entry: entry_pricing.short_call.price * Decimal::from(CONTRACT_MULTIPLIER),
+            short_put_entry: entry_pricing.short_put.price * Decimal::from(CONTRACT_MULTIPLIER),
+            long_call_entry: entry_pricing.long_call.price * Decimal::from(CONTRACT_MULTIPLIER),
+            long_put_entry: entry_pricing.long_put.price * Decimal::from(CONTRACT_MULTIPLIER),
+            entry_cost: entry_pricing.net_cost * Decimal::from(CONTRACT_MULTIPLIER),
             exit_time,
-            short_call_exit: exit_pricing.short_call.price,
-            short_put_exit: exit_pricing.short_put.price,
-            long_call_exit: exit_pricing.long_call.price,
-            long_put_exit: exit_pricing.long_put.price,
-            exit_value: exit_pricing.net_cost,
+            short_call_exit: exit_pricing.short_call.price * Decimal::from(CONTRACT_MULTIPLIER),
+            short_put_exit: exit_pricing.short_put.price * Decimal::from(CONTRACT_MULTIPLIER),
+            long_call_exit: exit_pricing.long_call.price * Decimal::from(CONTRACT_MULTIPLIER),
+            long_put_exit: exit_pricing.long_put.price * Decimal::from(CONTRACT_MULTIPLIER),
+            exit_value: exit_pricing.net_cost * Decimal::from(CONTRACT_MULTIPLIER),
             entry_surface_time,
             exit_surface_time: Some(exit_surface_time),
             pnl,
@@ -408,11 +410,12 @@ fn calculate_pnl_attribution(
         1.0,
     );
 
-    // Sum all legs
-    let delta_pnl = short_call_pnl.delta + short_put_pnl.delta + long_call_pnl.delta + long_put_pnl.delta;
-    let gamma_pnl = short_call_pnl.gamma + short_put_pnl.gamma + long_call_pnl.gamma + long_put_pnl.gamma;
-    let theta_pnl = short_call_pnl.theta + short_put_pnl.theta + long_call_pnl.theta + long_put_pnl.theta;
-    let vega_pnl = short_call_pnl.vega + short_put_pnl.vega + long_call_pnl.vega + long_put_pnl.vega;
+    // Sum all legs and scale to position level
+    let multiplier = CONTRACT_MULTIPLIER as f64;
+    let delta_pnl = (short_call_pnl.delta + short_put_pnl.delta + long_call_pnl.delta + long_put_pnl.delta) * multiplier;
+    let gamma_pnl = (short_call_pnl.gamma + short_put_pnl.gamma + long_call_pnl.gamma + long_put_pnl.gamma) * multiplier;
+    let theta_pnl = (short_call_pnl.theta + short_put_pnl.theta + long_call_pnl.theta + long_put_pnl.theta) * multiplier;
+    let vega_pnl = (short_call_pnl.vega + short_put_pnl.vega + long_call_pnl.vega + long_put_pnl.vega) * multiplier;
 
     let explained = delta_pnl + gamma_pnl + theta_pnl + vega_pnl;
     let unexplained = total_pnl.to_f64().unwrap_or(0.0) - explained;

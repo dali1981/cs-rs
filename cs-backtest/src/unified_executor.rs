@@ -206,59 +206,32 @@ where
         exit_time: DateTime<Utc>,
         rehedge_times: Vec<DateTime<Utc>>,
     ) {
-        use cs_domain::{HedgePosition, HedgeAction};
-        use rust_decimal::Decimal;
+        use cs_domain::HedgeState;
 
-        let mut hedge_position = HedgePosition::new();
-        let entry_delta = result.net_delta.unwrap_or(0.0);
-        let gamma = result.net_gamma.unwrap_or(0.0);
+        // Initialize hedge state from option position at entry
+        let mut hedge_state = HedgeState::new(
+            self.hedge_config.clone(),
+            result.net_delta.unwrap_or(0.0),
+            result.net_gamma.unwrap_or(0.0),
+            result.spot_at_entry,
+        );
 
-        // Process each rehedge time
+        // Process each rehedge time - state machine handles all logic
         for rehedge_time in rehedge_times {
             // Check max rehedges limit
-            if let Some(max) = self.hedge_config.max_rehedges {
-                if hedge_position.rehedge_count() >= max {
-                    break;
-                }
+            if hedge_state.at_max_rehedges() {
+                break;
             }
 
             // Get spot price at rehedge time
-            let spot = match self.equity_repo.get_spot_price(straddle.symbol(), rehedge_time).await {
-                Ok(s) => s.to_f64(),
-                Err(_) => continue,
-            };
-
-            // Recompute delta using gamma approximation
-            let spot_change = spot - result.spot_at_entry;
-            let new_delta = entry_delta + gamma * spot_change;
-
-            // Check if rehedge needed
-            if !self.hedge_config.should_rehedge(new_delta, spot, gamma) {
-                continue;
+            if let Ok(spot) = self.equity_repo.get_spot_price(straddle.symbol(), rehedge_time).await {
+                // Update state - will hedge if needed
+                hedge_state.update(rehedge_time, spot.to_f64());
             }
-
-            // Calculate shares to hedge
-            let shares = self.hedge_config.shares_to_hedge(new_delta);
-            if shares == 0 {
-                continue;
-            }
-
-            // Calculate cost
-            let cost = self.hedge_config.transaction_cost_per_share * Decimal::from(shares.abs());
-
-            // Record hedge action
-            let delta_after = new_delta + (shares as f64 / self.hedge_config.contract_multiplier as f64);
-            let action = HedgeAction {
-                timestamp: rehedge_time,
-                shares,
-                spot_price: spot,
-                delta_before: new_delta,
-                delta_after,
-                cost,
-            };
-
-            hedge_position.add_hedge(action);
         }
+
+        // Finalize hedge state and calculate P&L
+        let hedge_position = hedge_state.finalize(result.spot_at_exit);
 
         // Calculate hedge P&L if any hedges were performed
         if hedge_position.rehedge_count() > 0 {

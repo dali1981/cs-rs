@@ -7,6 +7,7 @@ use cs_analytics::PricingModel;
 use cs_domain::{
     CalendarSpread, CalendarSpreadResult, EarningsEvent, FailureReason,
     EquityDataRepository, OptionsDataRepository, RepositoryError, MarketTime,
+    CONTRACT_MULTIPLIER,
 };
 use crate::iv_surface_builder::build_iv_surface_minute_aligned;
 use crate::spread_pricer::{SpreadPricer, PricingError};
@@ -197,10 +198,11 @@ where
             exit_surface.as_ref(),
         )?;
 
-        // Calculate P&L
-        let pnl = exit_pricing.net_cost - entry_pricing.net_cost;
+        // Calculate P&L (per-share first, then multiply by contract multiplier)
+        let pnl_per_share = exit_pricing.net_cost - entry_pricing.net_cost;
+        let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
         let pnl_pct = if entry_pricing.net_cost != Decimal::ZERO {
-            (pnl / entry_pricing.net_cost) * Decimal::from(100)
+            (pnl_per_share / entry_pricing.net_cost) * Decimal::from(100)
         } else {
             Decimal::ZERO
         };
@@ -230,11 +232,12 @@ where
                 1.0, // Long position
             );
 
-            // Sum the legs
-            let delta = short_pnl.delta + long_pnl.delta;
-            let gamma = short_pnl.gamma + long_pnl.gamma;
-            let theta = short_pnl.theta + long_pnl.theta;
-            let vega = short_pnl.vega + long_pnl.vega;
+            // Sum the legs and scale to position level
+            let multiplier = Decimal::from(CONTRACT_MULTIPLIER).to_f64().unwrap();
+            let delta = (short_pnl.delta + long_pnl.delta) * multiplier;
+            let gamma = (short_pnl.gamma + long_pnl.gamma) * multiplier;
+            let theta = (short_pnl.theta + long_pnl.theta) * multiplier;
+            let vega = (short_pnl.vega + long_pnl.vega) * multiplier;
 
             let explained = delta + gamma + theta + vega;
             let unexplained = pnl.to_f64().unwrap_or(0.0) - explained;
@@ -262,13 +265,13 @@ where
             short_expiry: spread.short_expiry(),
             long_expiry: spread.long_expiry(),
             entry_time,
-            short_entry_price: entry_pricing.short_leg.price,
-            long_entry_price: entry_pricing.long_leg.price,
-            entry_cost: entry_pricing.net_cost,
+            short_entry_price: entry_pricing.short_leg.price * Decimal::from(CONTRACT_MULTIPLIER),
+            long_entry_price: entry_pricing.long_leg.price * Decimal::from(CONTRACT_MULTIPLIER),
+            entry_cost: entry_pricing.net_cost * Decimal::from(CONTRACT_MULTIPLIER),
             exit_time,
-            short_exit_price: exit_pricing.short_leg.price,
-            long_exit_price: exit_pricing.long_leg.price,
-            exit_value: exit_pricing.net_cost,
+            short_exit_price: exit_pricing.short_leg.price * Decimal::from(CONTRACT_MULTIPLIER),
+            long_exit_price: exit_pricing.long_leg.price * Decimal::from(CONTRACT_MULTIPLIER),
+            exit_value: exit_pricing.net_cost * Decimal::from(CONTRACT_MULTIPLIER),
             entry_surface_time,
             exit_surface_time: Some(exit_surface_time),
             pnl,

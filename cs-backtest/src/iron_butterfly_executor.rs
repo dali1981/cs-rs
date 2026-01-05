@@ -7,6 +7,7 @@ use cs_analytics::PricingModel;
 use cs_domain::{
     IronButterfly, IronButterflyResult, EarningsEvent, FailureReason,
     EquityDataRepository, OptionsDataRepository, MarketTime,
+    CONTRACT_MULTIPLIER,
 };
 use crate::iv_surface_builder::build_iv_surface_minute_aligned;
 use crate::iron_butterfly_pricer::{IronButterflyPricer, IronButterflyPricing};
@@ -155,26 +156,28 @@ where
         )?;
 
         // P&L = entry_credit - exit_cost (profit when options expire worthless)
-        let pnl = entry_pricing.net_credit - exit_pricing.net_credit;
+        // Per-share first, then multiply by contract multiplier
+        let pnl_per_share = entry_pricing.net_credit - exit_pricing.net_credit;
+        let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
         let pnl_pct = if entry_pricing.net_credit != Decimal::ZERO {
-            (pnl / entry_pricing.net_credit) * Decimal::from(100)
+            (pnl_per_share / entry_pricing.net_credit) * Decimal::from(100)
         } else {
             Decimal::ZERO
         };
 
-        // Calculate max loss
-        let max_loss = butterfly.wing_width() - entry_pricing.net_credit;
+        // Calculate max loss (per-contract)
+        let max_loss = (butterfly.wing_width() - entry_pricing.net_credit) * Decimal::from(CONTRACT_MULTIPLIER);
 
-        // Calculate breakeven levels
+        // Calculate breakeven levels (per-share for comparison with spot price)
         let center_f64: f64 = butterfly.center_strike().into();
-        let credit_f64: f64 = entry_pricing.net_credit.try_into().unwrap_or(0.0);
-        let breakeven_up = center_f64 + credit_f64;
-        let breakeven_down = center_f64 - credit_f64;
+        let credit_per_share_f64: f64 = entry_pricing.net_credit.try_into().unwrap_or(0.0);
+        let breakeven_up = center_f64 + credit_per_share_f64;
+        let breakeven_down = center_f64 - credit_per_share_f64;
 
         let exit_spot_f64 = exit_spot.to_f64();
         let within_breakeven = exit_spot_f64 >= breakeven_down && exit_spot_f64 <= breakeven_up;
 
-        // Net greeks
+        // Net greeks - keep per-share
         let (net_delta, net_gamma, net_theta, net_vega) = compute_net_greeks(&entry_pricing);
 
         // IV crush (use short call as reference)
@@ -186,7 +189,7 @@ where
             _ => (None, None, None),
         };
 
-        // P&L attribution
+        // P&L attribution (pass total pnl)
         let (delta_pnl, gamma_pnl, theta_pnl, vega_pnl, unexplained_pnl) =
             calculate_pnl_attribution(
                 &entry_pricing,
@@ -216,17 +219,17 @@ where
             expiration: butterfly.expiration(),
             wing_width: butterfly.wing_width(),
             entry_time,
-            short_call_entry: entry_pricing.short_call.price,
-            short_put_entry: entry_pricing.short_put.price,
-            long_call_entry: entry_pricing.long_call.price,
-            long_put_entry: entry_pricing.long_put.price,
-            entry_credit: entry_pricing.net_credit,
+            short_call_entry: entry_pricing.short_call.price * Decimal::from(CONTRACT_MULTIPLIER),
+            short_put_entry: entry_pricing.short_put.price * Decimal::from(CONTRACT_MULTIPLIER),
+            long_call_entry: entry_pricing.long_call.price * Decimal::from(CONTRACT_MULTIPLIER),
+            long_put_entry: entry_pricing.long_put.price * Decimal::from(CONTRACT_MULTIPLIER),
+            entry_credit: entry_pricing.net_credit * Decimal::from(CONTRACT_MULTIPLIER),
             exit_time,
-            short_call_exit: exit_pricing.short_call.price,
-            short_put_exit: exit_pricing.short_put.price,
-            long_call_exit: exit_pricing.long_call.price,
-            long_put_exit: exit_pricing.long_put.price,
-            exit_cost: exit_pricing.net_credit,
+            short_call_exit: exit_pricing.short_call.price * Decimal::from(CONTRACT_MULTIPLIER),
+            short_put_exit: exit_pricing.short_put.price * Decimal::from(CONTRACT_MULTIPLIER),
+            long_call_exit: exit_pricing.long_call.price * Decimal::from(CONTRACT_MULTIPLIER),
+            long_put_exit: exit_pricing.long_put.price * Decimal::from(CONTRACT_MULTIPLIER),
+            exit_cost: exit_pricing.net_credit * Decimal::from(CONTRACT_MULTIPLIER),
             entry_surface_time,
             exit_surface_time: Some(exit_surface_time),
             pnl,
@@ -394,11 +397,12 @@ fn calculate_pnl_attribution(
         1.0, // Long position
     );
 
-    // Sum across all legs
-    let delta_pnl = sc.delta + sp.delta + lc.delta + lp.delta;
-    let gamma_pnl = sc.gamma + sp.gamma + lc.gamma + lp.gamma;
-    let theta_pnl = sc.theta + sp.theta + lc.theta + lp.theta;
-    let vega_pnl = sc.vega + sp.vega + lc.vega + lp.vega;
+    // Sum across all legs and scale to position level
+    let multiplier = CONTRACT_MULTIPLIER as f64;
+    let delta_pnl = (sc.delta + sp.delta + lc.delta + lp.delta) * multiplier;
+    let gamma_pnl = (sc.gamma + sp.gamma + lc.gamma + lp.gamma) * multiplier;
+    let theta_pnl = (sc.theta + sp.theta + lc.theta + lp.theta) * multiplier;
+    let vega_pnl = (sc.vega + sp.vega + lc.vega + lp.vega) * multiplier;
 
     let explained = delta_pnl + gamma_pnl + theta_pnl + vega_pnl;
     let unexplained = total_pnl.to_f64().unwrap_or(0.0) - explained;

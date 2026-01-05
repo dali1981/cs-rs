@@ -5,6 +5,7 @@ use crate::expiration::ExpirationPolicy;
 use crate::trading_period::TradingPeriodSpec;
 use crate::roll::RollPolicy;
 use crate::hedging::{HedgeConfig, HedgeStrategy};
+use crate::CONTRACT_MULTIPLIER;
 use chrono::{NaiveDate, NaiveTime};
 use finq_core::OptionType;
 
@@ -39,7 +40,7 @@ pub fn pre_earnings_straddle_hedged() -> TradeStrategy {
         max_rehedges: Some(10),
         min_hedge_size: 10,
         transaction_cost_per_share: rust_decimal::Decimal::new(1, 2), // $0.01
-        contract_multiplier: 100,
+        contract_multiplier: CONTRACT_MULTIPLIER,
     };
     strategy
 }
