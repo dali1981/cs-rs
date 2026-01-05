@@ -21,6 +21,8 @@ pub struct CliOverrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pricing: Option<CliPricing>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedging: Option<CliHedging>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub strike_match_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub symbols: Option<Vec<String>>,
@@ -109,4 +111,21 @@ pub struct CliPricing {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vol_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(default)]
+pub struct CliHedging {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interval_hours: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta_threshold: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_rehedges: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_per_share: Option<f64>,
 }

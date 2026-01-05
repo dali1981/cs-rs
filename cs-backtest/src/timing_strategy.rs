@@ -1,5 +1,5 @@
-use chrono::{DateTime, NaiveDate, Utc};
-use cs_domain::{EarningsEvent, EarningsTradeTiming, StraddleTradeTiming, PostEarningsStraddleTiming};
+use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
+use cs_domain::{EarningsEvent, EarningsTradeTiming, StraddleTradeTiming, PostEarningsStraddleTiming, HedgeStrategy};
 
 /// Timing strategy enum that wraps all timing implementations
 ///
@@ -82,6 +82,58 @@ impl TimingStrategy {
                 -3
             }
         }
+    }
+
+    /// Compute rehedge timestamps between entry and exit
+    ///
+    /// Returns a vector of timestamps when delta hedge should be checked/executed.
+    /// The actual decision to rehedge is made by HedgeConfig::should_rehedge().
+    pub fn rehedge_times(
+        &self,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+        strategy: &HedgeStrategy,
+    ) -> Vec<DateTime<Utc>> {
+        match strategy {
+            HedgeStrategy::None => vec![],
+            HedgeStrategy::TimeBased { interval } => {
+                let mut times = Vec::new();
+                let mut current = entry_time + *interval;
+                while current < exit_time {
+                    times.push(current);
+                    current = current + *interval;
+                }
+                times
+            }
+            HedgeStrategy::DeltaThreshold { .. } | HedgeStrategy::GammaDollar { .. } => {
+                // For threshold-based strategies, check at regular intervals
+                // but only actually hedge if threshold exceeded
+                self.generate_check_times(entry_time, exit_time)
+            }
+        }
+    }
+
+    /// Generate times to check delta (for threshold strategies)
+    ///
+    /// Checks every hour during market hours (14:30 - 21:00 UTC = 9:30 - 16:00 ET)
+    fn generate_check_times(
+        &self,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+    ) -> Vec<DateTime<Utc>> {
+        let check_interval = Duration::hours(1);
+        let mut times = Vec::new();
+        let mut current = entry_time + check_interval;
+
+        while current < exit_time {
+            // Only include times during market hours (14:30 - 21:00 UTC = 9:30 - 16:00 ET)
+            let hour = current.hour();
+            if hour >= 14 && hour < 21 {
+                times.push(current);
+            }
+            current = current + check_interval;
+        }
+        times
     }
 
 }

@@ -9,6 +9,7 @@ pub mod strike_selection;
 pub mod repositories;
 pub mod timing;
 pub mod infrastructure;
+pub mod hedging;
 
 // Re-exports for convenience
 pub use datetime::{TradingDate, TradingTimestamp, MarketTime};
@@ -24,3 +25,4 @@ pub use strike_selection::{
 pub use strike_selection::TradingStrategy;
 pub use repositories::*;
 pub use timing::*;
+pub use hedging::*;

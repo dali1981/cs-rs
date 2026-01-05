@@ -149,6 +149,24 @@ enum Commands {
         /// Minimum daily option notional: sum(all option volumes) × 100 × stock_price (e.g., 100000 for $100k)
         #[arg(long)]
         min_notional: Option<f64>,
+        /// Enable delta hedging
+        #[arg(long)]
+        hedge: bool,
+        /// Hedging strategy: time, delta, gamma (default: delta)
+        #[arg(long, default_value = "delta")]
+        hedge_strategy: String,
+        /// For time-based: rehedge interval in hours (default: 24)
+        #[arg(long, default_value = "24")]
+        hedge_interval_hours: u64,
+        /// For delta-based: threshold to trigger rehedge (default: 0.10)
+        #[arg(long, default_value = "0.10")]
+        delta_threshold: f64,
+        /// Maximum number of rehedges per trade
+        #[arg(long)]
+        max_rehedges: Option<usize>,
+        /// Transaction cost per share (default: 0.01)
+        #[arg(long, default_value = "0.01")]
+        hedge_cost_per_share: f64,
     },
 
     /// Analyze results from a run
@@ -292,6 +310,12 @@ async fn main() -> Result<()> {
             max_entry_price,
             post_earnings_holding_days,
             min_notional,
+            hedge,
+            hedge_strategy,
+            hedge_interval_hours,
+            delta_threshold,
+            max_rehedges,
+            hedge_cost_per_share,
         } => {
             run_backtest(
                 conf,
@@ -329,6 +353,12 @@ async fn main() -> Result<()> {
                 max_entry_price,
                 post_earnings_holding_days,
                 min_notional,
+                hedge,
+                hedge_strategy,
+                hedge_interval_hours,
+                delta_threshold,
+                max_rehedges,
+                hedge_cost_per_share,
             )
             .await?;
         }
@@ -435,6 +465,12 @@ fn build_cli_overrides(
     max_entry_price: Option<f64>,
     post_earnings_holding_days: Option<usize>,
     min_notional: Option<f64>,
+    hedge: bool,
+    hedge_strategy: Option<String>,
+    hedge_interval_hours: Option<u64>,
+    delta_threshold: Option<f64>,
+    max_rehedges: Option<usize>,
+    hedge_cost_per_share: Option<f64>,
 ) -> Result<CliOverrides> {
     // Parse delta range if provided
     let delta_range = if let Some(ref range_str) = delta_range_str {
@@ -505,6 +541,18 @@ fn build_cli_overrides(
         } else {
             None
         },
+        hedging: if hedge || hedge_strategy.is_some() || hedge_interval_hours.is_some() || delta_threshold.is_some() || max_rehedges.is_some() || hedge_cost_per_share.is_some() {
+            Some(CliHedging {
+                enabled: Some(hedge),
+                strategy: hedge_strategy,
+                interval_hours: hedge_interval_hours,
+                delta_threshold,
+                max_rehedges,
+                cost_per_share: hedge_cost_per_share,
+            })
+        } else {
+            None
+        },
         strike_match_mode: strike_match_mode_str,
         symbols,
         min_market_cap,
@@ -550,6 +598,12 @@ async fn run_backtest(
     max_entry_price: Option<f64>,
     post_earnings_holding_days: usize,
     min_notional: Option<f64>,
+    hedge: bool,
+    hedge_strategy: String,
+    hedge_interval_hours: u64,
+    delta_threshold: f64,
+    max_rehedges: Option<usize>,
+    hedge_cost_per_share: f64,
 ) -> Result<()> {
     // Parse dates
     let start_date = NaiveDate::parse_from_str(start_str, "%Y-%m-%d")
@@ -747,6 +801,12 @@ async fn run_backtest(
         max_entry_price,
         Some(post_earnings_holding_days),
         min_notional,
+        hedge,
+        Some(hedge_strategy),
+        Some(hedge_interval_hours),
+        Some(delta_threshold),
+        max_rehedges,
+        Some(hedge_cost_per_share),
     )?;
 
     // Load configuration with layering
@@ -917,22 +977,48 @@ async fn run_backtest(
     let avg_loser = result.avg_loser();
     let avg_loser_pct = result.avg_loser_pct() * 100.0;
 
-    let rows = vec![
+    let has_hedging = result.has_hedging();
+    let mut rows = vec![
         ResultRow { metric: "Sessions Processed".into(), value: result.sessions_processed.to_string() },
         ResultRow { metric: "Total Opportunities".into(), value: result.total_opportunities.to_string() },
         ResultRow { metric: "Trades Entered".into(), value: result.total_entries.to_string() },
         ResultRow { metric: "Trades Dropped".into(), value: result.dropped_events.len().to_string() },
         ResultRow { metric: "".into(), value: "".into() },
         ResultRow { metric: "Win Rate".into(), value: format!("{:.2}%", win_rate) },
-        ResultRow { metric: "Total P&L".into(), value: format!("${:.2}", total_pnl) },
-        ResultRow {
-            metric: "Avg P&L per Trade".into(),
-            value: if result.successful_trades() > 0 {
-                format!("${:.2}", total_pnl / rust_decimal::Decimal::from(result.successful_trades()))
-            } else {
-                "$0.00".into()
-            }
-        },
+    ];
+
+    // Add P&L rows - show both option-only and hedged if hedging is enabled
+    if has_hedging {
+        let hedge_pnl = result.total_hedge_pnl();
+        let total_with_hedge = result.total_pnl_with_hedge();
+        rows.extend(vec![
+            ResultRow { metric: "Option P&L".into(), value: format!("${:.2}", total_pnl) },
+            ResultRow { metric: "Hedge P&L".into(), value: format!("${:.2}", hedge_pnl) },
+            ResultRow { metric: "Total P&L (with hedge)".into(), value: format!("${:.2}", total_with_hedge) },
+            ResultRow {
+                metric: "Avg P&L per Trade".into(),
+                value: if result.successful_trades() > 0 {
+                    format!("${:.2}", total_with_hedge / rust_decimal::Decimal::from(result.successful_trades()))
+                } else {
+                    "$0.00".into()
+                }
+            },
+        ]);
+    } else {
+        rows.extend(vec![
+            ResultRow { metric: "Total P&L".into(), value: format!("${:.2}", total_pnl) },
+            ResultRow {
+                metric: "Avg P&L per Trade".into(),
+                value: if result.successful_trades() > 0 {
+                    format!("${:.2}", total_pnl / rust_decimal::Decimal::from(result.successful_trades()))
+                } else {
+                    "$0.00".into()
+                }
+            },
+        ]);
+    }
+
+    rows.extend(vec![
         ResultRow { metric: "".into(), value: "".into() },
         ResultRow { metric: "Mean Return".into(), value: format!("{:.2}%", mean_return) },
         ResultRow { metric: "Std Dev".into(), value: format!("{:.2}%", std_return) },
@@ -940,7 +1026,7 @@ async fn run_backtest(
         ResultRow { metric: "".into(), value: "".into() },
         ResultRow { metric: "Avg Winner".into(), value: format!("${:.2} ({:.2}%)", avg_winner, avg_winner_pct) },
         ResultRow { metric: "Avg Loser".into(), value: format!("${:.2} ({:.2}%)", avg_loser, avg_loser_pct) },
-    ];
+    ]);
 
     let table = Table::new(rows);
     println!("{}", table);

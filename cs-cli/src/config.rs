@@ -25,6 +25,7 @@ pub struct AppConfig {
     pub selection: SelectionConfig,
     pub strategy: StrategyConfig,
     pub pricing: PricingConfig,
+    pub hedging: HedgingConfig,
     #[serde(default)]
     pub strike_match_mode: StrikeMatchMode,
     pub symbols: Option<Vec<String>>,
@@ -88,6 +89,17 @@ pub struct PricingConfig {
     pub vol_model: InterpolationMode,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HedgingConfig {
+    pub enabled: bool,
+    pub strategy: String,  // "time", "delta", "gamma"
+    pub interval_hours: u64,
+    pub delta_threshold: f64,
+    pub max_rehedges: Option<usize>,
+    pub cost_per_share: f64,
+}
+
 // Default implementations
 impl Default for AppConfig {
     fn default() -> Self {
@@ -97,6 +109,7 @@ impl Default for AppConfig {
             selection: SelectionConfig::default(),
             strategy: StrategyConfig::default(),
             pricing: PricingConfig::default(),
+            hedging: HedgingConfig::default(),
             strike_match_mode: StrikeMatchMode::default(),
             symbols: None,
             min_market_cap: None,
@@ -165,6 +178,19 @@ impl Default for PricingConfig {
         Self {
             model: PricingModel::default(),
             vol_model: InterpolationMode::default(),
+        }
+    }
+}
+
+impl Default for HedgingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            strategy: "delta".to_string(),
+            interval_hours: 24,
+            delta_threshold: 0.10,
+            max_rehedges: None,
+            cost_per_share: 0.01,
         }
     }
 }
@@ -258,6 +284,39 @@ impl AppConfig {
             min_entry_price: self.strategy.min_entry_price,
             max_entry_price: self.strategy.max_entry_price,
             post_earnings_holding_days: self.strategy.post_earnings_holding_days,
+            hedge_config: self.hedging_to_domain_config(),
+        }
+    }
+
+    /// Convert hedging config to domain HedgeConfig
+    fn hedging_to_domain_config(&self) -> cs_domain::HedgeConfig {
+        use cs_domain::{HedgeConfig, HedgeStrategy};
+        use chrono::Duration;
+        use rust_decimal::Decimal;
+
+        if !self.hedging.enabled {
+            return HedgeConfig::default();
+        }
+
+        let strategy = match self.hedging.strategy.to_lowercase().as_str() {
+            "time" => HedgeStrategy::TimeBased {
+                interval: Duration::hours(self.hedging.interval_hours as i64),
+            },
+            "delta" => HedgeStrategy::DeltaThreshold {
+                threshold: self.hedging.delta_threshold,
+            },
+            "gamma" => HedgeStrategy::GammaDollar {
+                threshold: self.hedging.delta_threshold * 100.0,
+            },
+            _ => HedgeStrategy::None,
+        };
+
+        HedgeConfig {
+            strategy,
+            max_rehedges: self.hedging.max_rehedges,
+            min_hedge_size: 1,
+            transaction_cost_per_share: Decimal::try_from(self.hedging.cost_per_share).unwrap_or(Decimal::ZERO),
+            contract_multiplier: 100,
         }
     }
 }

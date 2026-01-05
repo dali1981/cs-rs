@@ -702,6 +702,14 @@ pub struct StraddleResult {
     // Status
     pub success: bool,
     pub failure_reason: Option<FailureReason>,
+
+    // Hedging fields (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_position: Option<crate::hedging::HedgePosition>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_pnl: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_pnl_with_hedge: Option<Decimal>,
 }
 
 impl StraddleResult {

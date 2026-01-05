@@ -16,6 +16,8 @@ use crate::trade_executor::TradeExecutor;
 use crate::straddle_executor::StraddleExecutor;
 use crate::calendar_straddle_executor::CalendarStraddleExecutor;
 use crate::iron_butterfly_executor::IronButterflyExecutor;
+use crate::hedging_executor::HedgingExecutor;
+use crate::timing_strategy::TimingStrategy;
 
 /// Trade structure type - defines WHAT to trade
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
@@ -114,6 +116,30 @@ impl TradeResult {
             TradeResult::Failed(_) => None,  // No strike for failed trades!
         }
     }
+
+    /// Get hedge P&L if hedging was applied
+    pub fn hedge_pnl(&self) -> Option<Decimal> {
+        match self {
+            TradeResult::Straddle(r) => r.hedge_pnl,
+            _ => None,
+        }
+    }
+
+    /// Get total P&L including hedge if hedging was applied
+    pub fn total_pnl_with_hedge(&self) -> Option<Decimal> {
+        match self {
+            TradeResult::Straddle(r) => r.total_pnl_with_hedge,
+            _ => None,
+        }
+    }
+
+    /// Check if this trade has hedging data
+    pub fn has_hedge_data(&self) -> bool {
+        match self {
+            TradeResult::Straddle(r) => r.hedge_position.is_some(),
+            _ => false,
+        }
+    }
 }
 
 /// Error type for unified executor
@@ -139,6 +165,9 @@ where
     straddle_executor: StraddleExecutor<O, E>,
     calendar_straddle_executor: CalendarStraddleExecutor<O, E>,
     butterfly_executor: IronButterflyExecutor<O, E>,
+    equity_repo: Arc<E>,
+    hedge_config: cs_domain::HedgeConfig,
+    timing_strategy: Option<TimingStrategy>,
 }
 
 impl<O, E> UnifiedExecutor<O, E>
@@ -151,7 +180,94 @@ where
             calendar_executor: TradeExecutor::new(options_repo.clone(), equity_repo.clone()),
             straddle_executor: StraddleExecutor::new(options_repo.clone(), equity_repo.clone()),
             calendar_straddle_executor: CalendarStraddleExecutor::new(options_repo.clone(), equity_repo.clone()),
-            butterfly_executor: IronButterflyExecutor::new(options_repo, equity_repo),
+            butterfly_executor: IronButterflyExecutor::new(options_repo, equity_repo.clone()),
+            equity_repo,
+            hedge_config: cs_domain::HedgeConfig::default(),
+            timing_strategy: None,
+        }
+    }
+
+    pub fn with_hedge_config(mut self, hedge_config: cs_domain::HedgeConfig) -> Self {
+        self.hedge_config = hedge_config;
+        self
+    }
+
+    pub fn with_timing_strategy(mut self, timing_strategy: TimingStrategy) -> Self {
+        self.timing_strategy = Some(timing_strategy);
+        self
+    }
+
+    /// Apply delta hedging to a straddle result
+    async fn apply_hedging(
+        &self,
+        result: &mut StraddleResult,
+        straddle: &cs_domain::Straddle,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+        rehedge_times: Vec<DateTime<Utc>>,
+    ) {
+        use cs_domain::{HedgePosition, HedgeAction};
+        use rust_decimal::Decimal;
+
+        let mut hedge_position = HedgePosition::new();
+        let entry_delta = result.net_delta.unwrap_or(0.0);
+        let gamma = result.net_gamma.unwrap_or(0.0);
+
+        // Process each rehedge time
+        for rehedge_time in rehedge_times {
+            // Check max rehedges limit
+            if let Some(max) = self.hedge_config.max_rehedges {
+                if hedge_position.rehedge_count() >= max {
+                    break;
+                }
+            }
+
+            // Get spot price at rehedge time
+            let spot = match self.equity_repo.get_spot_price(straddle.symbol(), rehedge_time).await {
+                Ok(s) => s.to_f64(),
+                Err(_) => continue,
+            };
+
+            // Recompute delta using gamma approximation
+            let spot_change = spot - result.spot_at_entry;
+            let new_delta = entry_delta + gamma * spot_change;
+
+            // Check if rehedge needed
+            if !self.hedge_config.should_rehedge(new_delta, spot, gamma) {
+                continue;
+            }
+
+            // Calculate shares to hedge
+            let shares = self.hedge_config.shares_to_hedge(new_delta);
+            if shares == 0 {
+                continue;
+            }
+
+            // Calculate cost
+            let cost = self.hedge_config.transaction_cost_per_share * Decimal::from(shares.abs());
+
+            // Record hedge action
+            let delta_after = new_delta + (shares as f64 / self.hedge_config.contract_multiplier as f64);
+            let action = HedgeAction {
+                timestamp: rehedge_time,
+                shares,
+                spot_price: spot,
+                delta_before: new_delta,
+                delta_after,
+                cost,
+            };
+
+            hedge_position.add_hedge(action);
+        }
+
+        // Calculate hedge P&L if any hedges were performed
+        if hedge_position.rehedge_count() > 0 {
+            let hedge_pnl = hedge_position.calculate_pnl(result.spot_at_exit);
+            let total_pnl = result.pnl + hedge_pnl - hedge_position.total_cost;
+
+            result.hedge_position = Some(hedge_position);
+            result.hedge_pnl = Some(hedge_pnl);
+            result.total_pnl_with_hedge = Some(total_pnl);
         }
     }
 
@@ -231,9 +347,29 @@ where
             TradeStructure::Straddle => {
                 match selector.select_straddle(&spot, entry_surface, criteria.min_short_dte) {
                     Ok(straddle) => {
-                        let result = self.straddle_executor
-                            .execute_trade(&straddle, event, entry_time, exit_time)
-                            .await;
+                        // Execute trade (with hedging if enabled)
+                        let result = if self.hedge_config.is_enabled() && self.timing_strategy.is_some() {
+                            // Generate rehedge times
+                            let rehedge_times = self.timing_strategy.as_ref().unwrap()
+                                .rehedge_times(entry_time, exit_time, &self.hedge_config.strategy);
+
+                            // Execute base trade first
+                            let mut base_result = self.straddle_executor
+                                .execute_trade(&straddle, event, entry_time, exit_time)
+                                .await;
+
+                            // If successful, apply hedging
+                            if base_result.success {
+                                self.apply_hedging(&mut base_result, &straddle, entry_time, exit_time, rehedge_times).await;
+                            }
+
+                            base_result
+                        } else {
+                            // Execute without hedging
+                            self.straddle_executor
+                                .execute_trade(&straddle, event, entry_time, exit_time)
+                                .await
+                        };
 
                         if result.success {
                             TradeResult::Straddle(result)

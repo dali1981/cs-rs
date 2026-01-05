@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 use cs_analytics::{PricingModel, InterpolationMode};
-use cs_domain::{TimingConfig, TradeSelectionCriteria, StrikeMatchMode};
+use cs_domain::{TimingConfig, TradeSelectionCriteria, StrikeMatchMode, HedgeConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestConfig {
@@ -62,6 +62,9 @@ pub struct BacktestConfig {
     /// Post-earnings straddle: holding period in trading days (default: 5)
     #[serde(default = "default_post_earnings_holding_days")]
     pub post_earnings_holding_days: usize,
+    /// Delta hedging configuration
+    #[serde(default)]
+    pub hedge_config: HedgeConfig,
 }
 
 fn default_wing_width() -> f64 {
@@ -174,6 +177,7 @@ impl Default for BacktestConfig {
             min_entry_price: None, // No filtering by default
             max_entry_price: None, // No filtering by default
             post_earnings_holding_days: default_post_earnings_holding_days(),
+            hedge_config: HedgeConfig::default(), // No hedging by default
         }
     }
 }

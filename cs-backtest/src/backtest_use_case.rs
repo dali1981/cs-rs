@@ -43,6 +43,27 @@ impl BacktestResult {
             .sum()
     }
 
+    /// Check if any trades have hedging data
+    pub fn has_hedging(&self) -> bool {
+        self.results.iter().any(|r| r.has_hedge_data())
+    }
+
+    /// Total hedge P&L from all trades
+    pub fn total_hedge_pnl(&self) -> rust_decimal::Decimal {
+        self.results.iter()
+            .filter(|r| r.success())
+            .filter_map(|r| r.hedge_pnl())
+            .sum()
+    }
+
+    /// Total P&L including hedges
+    pub fn total_pnl_with_hedge(&self) -> rust_decimal::Decimal {
+        self.results.iter()
+            .filter(|r| r.success())
+            .map(|r| r.total_pnl_with_hedge().unwrap_or_else(|| r.pnl()))
+            .sum()
+    }
+
     pub fn successful_trades(&self) -> usize {
         self.results.iter().filter(|r| r.success()).count()
     }
@@ -1365,7 +1386,9 @@ where
         // Create unified executor
         let executor = UnifiedExecutor::new(self.options_repo.clone(), self.equity_repo.clone())
             .with_pricing_model(self.config.pricing_model)
-            .with_max_entry_iv(self.config.max_entry_iv);
+            .with_max_entry_iv(self.config.max_entry_iv)
+            .with_hedge_config(self.config.hedge_config.clone())
+            .with_timing_strategy(timing.clone());
 
         // Execute with pre-built entry surface (KEY OPTIMIZATION!)
         executor.execute_with_selection(

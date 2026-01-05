@@ -229,6 +229,9 @@ where
             expected_move_pct,
             success: true,
             failure_reason: None,
+            hedge_position: None,
+            hedge_pnl: None,
+            total_pnl_with_hedge: None,
         })
     }
 
@@ -298,6 +301,9 @@ where
             expected_move_pct: None,
             success: false,
             failure_reason: Some(failure_reason),
+            hedge_position: None,
+            hedge_pnl: None,
+            total_pnl_with_hedge: None,
         }
     }
 }
