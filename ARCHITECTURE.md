@@ -1,7 +1,7 @@
 # CS-RS Architecture Documentation
 
 **Last Updated:** 2026-01-04
-**Status:** Production-ready after Phase 1-5 refactoring
+**Status:** Production-ready after Phase 1-6 refactoring
 
 ---
 
@@ -599,6 +599,118 @@ spread: self.strategy.spread_type,     // Direct assignment, no parsing
 
 ---
 
+## TradeResult Simplification (Phase 6)
+
+### Problem: Over-Engineered 3-Level Structure
+
+**Before**: Nested enums created verbose pattern matching
+```rust
+pub enum TradeResult {
+    Success(SuccessfulTrade),    // Wrapper layer
+    Failure(FailedTrade),
+}
+
+pub enum SuccessfulTrade {       // Redundant middle layer
+    CalendarSpread(CalendarSpreadResult),
+    Straddle(StraddleResult),
+    CalendarStraddle(CalendarStraddleResult),
+    IronButterfly(IronButterflyResult),
+}
+```
+
+**Usage**: Extremely verbose, hard to read
+```rust
+// 3 levels deep - ugly!
+match result {
+    TradeResult::Success(SuccessfulTrade::CalendarSpread(r)) => { ... }
+    TradeResult::Success(SuccessfulTrade::Straddle(r)) => { ... }
+    TradeResult::Failure(f) => { ... }
+}
+```
+
+### Solution: Flattened 2-Level Structure
+
+**After**: Direct enum variants, no wrapper
+```rust
+pub enum TradeResult {
+    CalendarSpread(CalendarSpreadResult),
+    Straddle(StraddleResult),
+    CalendarStraddle(CalendarStraddleResult),
+    IronButterfly(IronButterflyResult),
+    Failed(FailedTrade),         // No dummy values needed
+}
+```
+
+**Usage**: Clean and readable
+```rust
+// 2 levels - much better!
+match result {
+    TradeResult::CalendarSpread(r) => { ... }
+    TradeResult::Straddle(r) => { ... }
+    TradeResult::Failed(f) => { ... }
+}
+```
+
+### Key Improvement: No Dummy Values
+
+**Failed Trade Structure**:
+```rust
+pub struct FailedTrade {
+    pub symbol: String,
+    pub earnings_date: NaiveDate,
+    pub earnings_time: EarningsTime,
+    pub trade_structure: TradeStructure,
+    pub reason: FailureReason,
+    pub phase: String,              // "selection", "entry_pricing", etc.
+    pub details: Option<String>,
+}
+// Note: No Strike, no prices - only metadata!
+```
+
+**Before Phase 6**: Failed trades required dummy values
+```rust
+// ❌ Had to use fake data
+let dummy_strike = Strike::new(Decimal::ONE).unwrap();  // Not a real strike!
+let dummy_price = Decimal::ZERO;                         // Not a real price!
+```
+
+**After Phase 6**: Type system prevents accessing non-existent data
+```rust
+// ✅ Failed trades don't have strikes
+pub fn strike(&self) -> Option<Strike> {
+    match self {
+        TradeResult::CalendarSpread(r) => Some(r.strike),
+        TradeResult::Straddle(r) => Some(r.strike),
+        TradeResult::CalendarStraddle(r) => Some(r.short_strike),
+        TradeResult::IronButterfly(r) => Some(r.center_strike),
+        TradeResult::Failed(_) => None,  // No dummy value!
+    }
+}
+```
+
+### Benefits
+
+**Code Quality**:
+- ✅ **50% shorter** pattern matches (from ~100 chars to ~50 chars per line)
+- ✅ **No redundant layer** - `SuccessfulTrade` provided zero value
+- ✅ **Cleaner imports** - no need to import intermediate enum
+- ✅ **Easier to read** - pattern matching is straightforward
+
+**Type Safety**:
+- ✅ **No dummy values** - Failed trades don't have strikes/prices
+- ✅ **Compile-time checking** - Can't access strike on failed trade without Option
+- ✅ **Self-documenting** - `Option<Strike>` clearly shows strike may not exist
+
+**Files Modified**:
+- `cs-backtest/src/unified_executor.rs` - Removed `SuccessfulTrade` enum
+- `cs-backtest/src/backtest_use_case.rs` - Updated all pattern matches
+- `cs-backtest/tests/test_unified_executor.rs` - Simplified test assertions
+- `cs-cli/src/main.rs` - Cleaned up 11 pattern match locations
+
+**Code Reduction**: ~470 lines removed (redundant enum + verbose pattern matches)
+
+---
+
 ## Key Files Summary
 
 | File | Purpose | Key Trait/Struct |
@@ -623,6 +735,7 @@ spread: self.strategy.spread_type,     // Direct assignment, no parsing
 3. **Phase 3**: Refactored `StrikeSelector` trait, added `IVSurface` helper methods
 4. **Phase 4**: Created `UnifiedExecutor`, implemented IV surface optimization (33% reduction)
 5. **Phase 5**: Converted all config strings to proper Rust enums
+6. **Phase 6**: Simplified `TradeResult` from 3-level to 2-level structure, eliminated dummy values
 
 ### Breaking Changes (All Committed)
 
@@ -631,6 +744,10 @@ spread: self.strategy.spread_type,     // Direct assignment, no parsing
 - `StrikeSelector` trait signature changed (uses `IVSurface` directly)
 - Configuration file format changed (strings → enums in TOML)
 - Old `from_string()` methods still exist for backwards compatibility but are deprecated
+- **Phase 6**: `TradeResult` enum flattened (removed `SuccessfulTrade` wrapper)
+  - Pattern matches changed from `TradeResult::Success(SuccessfulTrade::X(r))` to `TradeResult::X(r)`
+  - `TradeResult::Failure` renamed to `TradeResult::Failed`
+  - `strike()` method now returns `Option<Strike>` instead of `Strike`
 
 ---
 

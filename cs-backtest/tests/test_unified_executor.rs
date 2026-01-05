@@ -76,9 +76,11 @@ async fn test_unified_executor_calendar_spread() {
             println!("  Short expiry: {}", r.short_expiry);
             println!("  Long expiry: {}", r.long_expiry);
             println!("  Entry cost: {}", r.entry_cost);
-            if let Some(ref reason) = r.failure_reason {
-                println!("  Failure reason: {:?}", reason);
-            }
+        }
+        TradeResult::Failed(failed) => {
+            println!("\n⚠ Trade failed");
+            println!("  Reason: {:?}", failed.reason);
+            println!("  Phase: {}", failed.phase);
         }
         _ => panic!("Expected CalendarSpread result"),
     }
@@ -135,6 +137,11 @@ async fn test_unified_executor_straddle() {
             println!("✓ StraddleResult received");
             println!("  Strike: {}", r.strike.value());
             println!("  Expiration: {}", r.expiration);
+        }
+        TradeResult::Failed(failed) => {
+            println!("⚠ Trade failed");
+            println!("  Reason: {:?}", failed.reason);
+            println!("  Phase: {}", failed.phase);
         }
         _ => panic!("Expected Straddle result"),
     }

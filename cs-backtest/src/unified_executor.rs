@@ -18,7 +18,8 @@ use crate::calendar_straddle_executor::CalendarStraddleExecutor;
 use crate::iron_butterfly_executor::IronButterflyExecutor;
 
 /// Trade structure type - defines WHAT to trade
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum TradeStructure {
     CalendarSpread(OptionType),
     Straddle,
@@ -27,12 +28,29 @@ pub enum TradeStructure {
 }
 
 /// Unified result type for any trade
+///
+/// Each variant contains full trade data. The Failed variant contains only metadata
+/// (no Strike, no prices), eliminating the need for dummy values.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "trade_type", rename_all = "snake_case")]
 pub enum TradeResult {
     CalendarSpread(CalendarSpreadResult),
     Straddle(StraddleResult),
     CalendarStraddle(CalendarStraddleResult),
     IronButterfly(IronButterflyResult),
+    Failed(FailedTrade),
+}
+
+/// A trade that failed before completion
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FailedTrade {
+    pub symbol: String,
+    pub earnings_date: chrono::NaiveDate,
+    pub earnings_time: cs_domain::EarningsTime,
+    pub trade_structure: TradeStructure,
+    pub reason: cs_domain::FailureReason,
+    pub phase: String,  // "selection", "entry_pricing", "exit_pricing", etc.
+    pub details: Option<String>,
 }
 
 impl TradeResult {
@@ -42,16 +60,12 @@ impl TradeResult {
             TradeResult::IronButterfly(r) => r.is_winner(),
             TradeResult::Straddle(r) => r.is_winner(),
             TradeResult::CalendarStraddle(r) => r.is_winner(),
+            TradeResult::Failed(_) => false,
         }
     }
 
     pub fn success(&self) -> bool {
-        match self {
-            TradeResult::CalendarSpread(r) => r.success,
-            TradeResult::IronButterfly(r) => r.success,
-            TradeResult::Straddle(r) => r.success,
-            TradeResult::CalendarStraddle(r) => r.success,
-        }
+        !matches!(self, TradeResult::Failed(_))
     }
 
     pub fn pnl(&self) -> Decimal {
@@ -60,6 +74,7 @@ impl TradeResult {
             TradeResult::IronButterfly(r) => r.pnl,
             TradeResult::Straddle(r) => r.pnl,
             TradeResult::CalendarStraddle(r) => r.pnl,
+            TradeResult::Failed(_) => Decimal::ZERO,
         }
     }
 
@@ -69,6 +84,7 @@ impl TradeResult {
             TradeResult::IronButterfly(r) => r.pnl_pct,
             TradeResult::Straddle(r) => r.pnl_pct,
             TradeResult::CalendarStraddle(r) => r.pnl_pct,
+            TradeResult::Failed(_) => Decimal::ZERO,
         }
     }
 
@@ -78,24 +94,24 @@ impl TradeResult {
             TradeResult::IronButterfly(r) => &r.symbol,
             TradeResult::Straddle(r) => &r.symbol,
             TradeResult::CalendarStraddle(r) => &r.symbol,
+            TradeResult::Failed(f) => &f.symbol,
         }
     }
 
     pub fn option_type(&self) -> Option<OptionType> {
         match self {
             TradeResult::CalendarSpread(r) => Some(r.option_type),
-            TradeResult::IronButterfly(_) => None,
-            TradeResult::Straddle(_) => None,
-            TradeResult::CalendarStraddle(_) => None,
+            _ => None,
         }
     }
 
-    pub fn strike(&self) -> Strike {
+    pub fn strike(&self) -> Option<Strike> {
         match self {
-            TradeResult::CalendarSpread(r) => r.strike,
-            TradeResult::IronButterfly(r) => r.center_strike,
-            TradeResult::Straddle(r) => r.strike,
-            TradeResult::CalendarStraddle(r) => r.short_strike,
+            TradeResult::CalendarSpread(r) => Some(r.strike),
+            TradeResult::IronButterfly(r) => Some(r.center_strike),
+            TradeResult::Straddle(r) => Some(r.strike),
+            TradeResult::CalendarStraddle(r) => Some(r.short_strike),
+            TradeResult::Failed(_) => None,  // No strike for failed trades!
         }
     }
 }
@@ -183,11 +199,32 @@ where
                         let result = self.calendar_executor
                             .execute_trade(&spread, event, entry_time, exit_time)
                             .await;
-                        TradeResult::CalendarSpread(result)
+
+                        // Check if execution succeeded
+                        if result.success {
+                            TradeResult::CalendarSpread(result)
+                        } else {
+                            TradeResult::Failed(FailedTrade {
+                                symbol: result.symbol,
+                                earnings_date: result.earnings_date,
+                                earnings_time: result.earnings_time,
+                                trade_structure: structure,
+                                reason: result.failure_reason.unwrap_or(cs_domain::FailureReason::PricingError("Unknown".to_string())),
+                                phase: "execution".to_string(),
+                                details: None,
+                            })
+                        }
                     }
                     Err(e) => {
-                        // Create failed result
-                        TradeResult::CalendarSpread(self.create_failed_calendar(event, entry_time, exit_time, e))
+                        TradeResult::Failed(FailedTrade {
+                            symbol: event.symbol.clone(),
+                            earnings_date: event.earnings_date,
+                            earnings_time: event.earnings_time,
+                            trade_structure: structure,
+                            reason: cs_domain::FailureReason::PricingError(e.to_string()),
+                            phase: "selection".to_string(),
+                            details: Some(e.to_string()),
+                        })
                     }
                 }
             }
@@ -197,10 +234,31 @@ where
                         let result = self.straddle_executor
                             .execute_trade(&straddle, event, entry_time, exit_time)
                             .await;
-                        TradeResult::Straddle(result)
+
+                        if result.success {
+                            TradeResult::Straddle(result)
+                        } else {
+                            TradeResult::Failed(FailedTrade {
+                                symbol: result.symbol,
+                                earnings_date: result.earnings_date,
+                                earnings_time: result.earnings_time,
+                                trade_structure: structure,
+                                reason: result.failure_reason.unwrap_or(cs_domain::FailureReason::PricingError("Unknown".to_string())),
+                                phase: "execution".to_string(),
+                                details: None,
+                            })
+                        }
                     }
                     Err(e) => {
-                        TradeResult::Straddle(self.create_failed_straddle(event, entry_time, exit_time, e))
+                        TradeResult::Failed(FailedTrade {
+                            symbol: event.symbol.clone(),
+                            earnings_date: event.earnings_date,
+                            earnings_time: event.earnings_time,
+                            trade_structure: structure,
+                            reason: cs_domain::FailureReason::PricingError(e.to_string()),
+                            phase: "selection".to_string(),
+                            details: Some(e.to_string()),
+                        })
                     }
                 }
             }
@@ -210,10 +268,31 @@ where
                         let result = self.calendar_straddle_executor
                             .execute_trade(&cal_straddle, event, entry_time, exit_time)
                             .await;
-                        TradeResult::CalendarStraddle(result)
+
+                        if result.success {
+                            TradeResult::CalendarStraddle(result)
+                        } else {
+                            TradeResult::Failed(FailedTrade {
+                                symbol: result.symbol,
+                                earnings_date: result.earnings_date,
+                                earnings_time: result.earnings_time,
+                                trade_structure: structure,
+                                reason: result.failure_reason.unwrap_or(cs_domain::FailureReason::PricingError("Unknown".to_string())),
+                                phase: "execution".to_string(),
+                                details: None,
+                            })
+                        }
                     }
                     Err(e) => {
-                        TradeResult::CalendarStraddle(self.create_failed_calendar_straddle(event, entry_time, exit_time, e))
+                        TradeResult::Failed(FailedTrade {
+                            symbol: event.symbol.clone(),
+                            earnings_date: event.earnings_date,
+                            earnings_time: event.earnings_time,
+                            trade_structure: structure,
+                            reason: cs_domain::FailureReason::PricingError(e.to_string()),
+                            phase: "selection".to_string(),
+                            details: Some(e.to_string()),
+                        })
                     }
                 }
             }
@@ -229,245 +308,34 @@ where
                         let result = self.butterfly_executor
                             .execute_trade(&butterfly, event, entry_time, exit_time)
                             .await;
-                        TradeResult::IronButterfly(result)
+
+                        if result.success {
+                            TradeResult::IronButterfly(result)
+                        } else {
+                            TradeResult::Failed(FailedTrade {
+                                symbol: result.symbol,
+                                earnings_date: result.earnings_date,
+                                earnings_time: result.earnings_time,
+                                trade_structure: structure,
+                                reason: result.failure_reason.unwrap_or(cs_domain::FailureReason::PricingError("Unknown".to_string())),
+                                phase: "execution".to_string(),
+                                details: None,
+                            })
+                        }
                     }
                     Err(e) => {
-                        TradeResult::IronButterfly(self.create_failed_butterfly(event, entry_time, exit_time, e))
+                        TradeResult::Failed(FailedTrade {
+                            symbol: event.symbol.clone(),
+                            earnings_date: event.earnings_date,
+                            earnings_time: event.earnings_time,
+                            trade_structure: structure,
+                            reason: cs_domain::FailureReason::PricingError(e.to_string()),
+                            phase: "selection".to_string(),
+                            details: Some(e.to_string()),
+                        })
                     }
                 }
             }
-        }
-    }
-
-    fn create_failed_calendar(
-        &self,
-        event: &EarningsEvent,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-        error: SelectionError,
-    ) -> CalendarSpreadResult {
-        use cs_domain::Strike;
-        use finq_core::OptionType;
-
-        let reason = cs_domain::FailureReason::PricingError(format!("Selection failed: {}", error));
-        let dummy_strike = Strike::new(Decimal::ZERO).unwrap();
-
-        CalendarSpreadResult {
-            symbol: event.symbol.clone(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
-            strike: dummy_strike,
-            long_strike: None,
-            option_type: OptionType::Call,
-            short_expiry: event.earnings_date,
-            long_expiry: event.earnings_date,
-            entry_time,
-            short_entry_price: Decimal::ZERO,
-            long_entry_price: Decimal::ZERO,
-            entry_cost: Decimal::ZERO,
-            exit_time,
-            short_exit_price: Decimal::ZERO,
-            long_exit_price: Decimal::ZERO,
-            exit_value: Decimal::ZERO,
-            entry_surface_time: None,
-            exit_surface_time: None,
-            pnl: Decimal::ZERO,
-            pnl_per_contract: Decimal::ZERO,
-            pnl_pct: Decimal::ZERO,
-            short_delta: None,
-            short_gamma: None,
-            short_theta: None,
-            short_vega: None,
-            long_delta: None,
-            long_gamma: None,
-            long_theta: None,
-            long_vega: None,
-            iv_short_entry: None,
-            iv_long_entry: None,
-            iv_short_exit: None,
-            iv_long_exit: None,
-            iv_ratio_entry: None,
-            delta_pnl: None,
-            gamma_pnl: None,
-            theta_pnl: None,
-            vega_pnl: None,
-            unexplained_pnl: None,
-            spot_at_entry: 0.0,
-            spot_at_exit: 0.0,
-            success: false,
-            failure_reason: Some(reason),
-        }
-    }
-
-    fn create_failed_straddle(
-        &self,
-        event: &EarningsEvent,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-        error: SelectionError,
-    ) -> StraddleResult {
-        use cs_domain::Strike;
-
-        let reason = cs_domain::FailureReason::PricingError(format!("Selection failed: {}", error));
-        let dummy_strike = Strike::new(Decimal::ZERO).unwrap();
-
-        StraddleResult {
-            symbol: event.symbol.clone(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
-            strike: dummy_strike,
-            expiration: event.earnings_date,
-            entry_time,
-            call_entry_price: Decimal::ZERO,
-            put_entry_price: Decimal::ZERO,
-            entry_debit: Decimal::ZERO,
-            exit_time,
-            call_exit_price: Decimal::ZERO,
-            put_exit_price: Decimal::ZERO,
-            exit_credit: Decimal::ZERO,
-            entry_surface_time: None,
-            exit_surface_time: None,
-            exit_pricing_method: cs_domain::PricingSource::Model,
-            pnl: Decimal::ZERO,
-            pnl_pct: Decimal::ZERO,
-            net_delta: None,
-            net_gamma: None,
-            net_theta: None,
-            net_vega: None,
-            iv_entry: None,
-            iv_exit: None,
-            iv_change: None,
-            delta_pnl: None,
-            gamma_pnl: None,
-            theta_pnl: None,
-            vega_pnl: None,
-            unexplained_pnl: None,
-            spot_at_entry: 0.0,
-            spot_at_exit: 0.0,
-            spot_move: 0.0,
-            spot_move_pct: 0.0,
-            expected_move_pct: None,
-            success: false,
-            failure_reason: Some(reason),
-        }
-    }
-
-    fn create_failed_calendar_straddle(
-        &self,
-        event: &EarningsEvent,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-        error: SelectionError,
-    ) -> CalendarStraddleResult {
-        use cs_domain::Strike;
-
-        let reason = cs_domain::FailureReason::PricingError(format!("Selection failed: {}", error));
-        let dummy_strike = Strike::new(Decimal::ZERO).unwrap();
-
-        CalendarStraddleResult {
-            symbol: event.symbol.clone(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
-            short_strike: dummy_strike,
-            long_strike: dummy_strike,
-            short_expiry: event.earnings_date,
-            long_expiry: event.earnings_date,
-            entry_time,
-            short_call_entry: Decimal::ZERO,
-            short_put_entry: Decimal::ZERO,
-            long_call_entry: Decimal::ZERO,
-            long_put_entry: Decimal::ZERO,
-            entry_cost: Decimal::ZERO,
-            exit_time,
-            short_call_exit: Decimal::ZERO,
-            short_put_exit: Decimal::ZERO,
-            long_call_exit: Decimal::ZERO,
-            long_put_exit: Decimal::ZERO,
-            exit_value: Decimal::ZERO,
-            entry_surface_time: None,
-            exit_surface_time: None,
-            pnl: Decimal::ZERO,
-            pnl_pct: Decimal::ZERO,
-            net_delta: None,
-            net_gamma: None,
-            net_theta: None,
-            net_vega: None,
-            short_iv_entry: None,
-            long_iv_entry: None,
-            short_iv_exit: None,
-            long_iv_exit: None,
-            iv_ratio_entry: None,
-            delta_pnl: None,
-            gamma_pnl: None,
-            theta_pnl: None,
-            vega_pnl: None,
-            unexplained_pnl: None,
-            spot_at_entry: 0.0,
-            spot_at_exit: 0.0,
-            success: false,
-            failure_reason: Some(reason),
-        }
-    }
-
-    fn create_failed_butterfly(
-        &self,
-        event: &EarningsEvent,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-        error: SelectionError,
-    ) -> IronButterflyResult {
-        use cs_domain::Strike;
-
-        let reason = cs_domain::FailureReason::PricingError(format!("Selection failed: {}", error));
-        let dummy_strike = Strike::new(Decimal::ZERO).unwrap();
-
-        IronButterflyResult {
-            symbol: event.symbol.clone(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
-            center_strike: dummy_strike,
-            upper_strike: dummy_strike,
-            lower_strike: dummy_strike,
-            expiration: event.earnings_date,
-            wing_width: Decimal::ZERO,
-            entry_time,
-            short_call_entry: Decimal::ZERO,
-            short_put_entry: Decimal::ZERO,
-            long_call_entry: Decimal::ZERO,
-            long_put_entry: Decimal::ZERO,
-            entry_credit: Decimal::ZERO,
-            exit_time,
-            short_call_exit: Decimal::ZERO,
-            short_put_exit: Decimal::ZERO,
-            long_call_exit: Decimal::ZERO,
-            long_put_exit: Decimal::ZERO,
-            exit_cost: Decimal::ZERO,
-            entry_surface_time: None,
-            exit_surface_time: None,
-            pnl: Decimal::ZERO,
-            pnl_pct: Decimal::ZERO,
-            max_loss: Decimal::ZERO,
-            net_delta: None,
-            net_gamma: None,
-            net_theta: None,
-            net_vega: None,
-            iv_entry: None,
-            iv_exit: None,
-            iv_crush: None,
-            delta_pnl: None,
-            gamma_pnl: None,
-            theta_pnl: None,
-            vega_pnl: None,
-            unexplained_pnl: None,
-            spot_at_entry: 0.0,
-            spot_at_exit: 0.0,
-            spot_move: 0.0,
-            spot_move_pct: 0.0,
-            breakeven_up: 0.0,
-            breakeven_down: 0.0,
-            within_breakeven: false,
-            success: false,
-            failure_reason: Some(reason),
         }
     }
 }
