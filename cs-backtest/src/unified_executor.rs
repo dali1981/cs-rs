@@ -6,7 +6,7 @@ use cs_analytics::{IVSurface, PricingModel};
 use cs_domain::{
     CalendarSpreadResult, StraddleResult,
     CalendarStraddleResult, IronButterflyResult,
-    EarningsEvent, SpotPrice, Strike,
+    EarningsEvent, SpotPrice, Strike, Straddle,
     EquityDataRepository, OptionsDataRepository,
 };
 use cs_domain::strike_selection::{StrikeSelector, ExpirationCriteria, SelectionError};
@@ -449,5 +449,43 @@ where
                 }
             }
         }
+    }
+
+    /// Execute a pre-built straddle directly (for rolling strategies)
+    ///
+    /// This method bypasses the selection process and executes a pre-constructed
+    /// straddle trade. If hedging is configured, it will be applied automatically.
+    pub async fn execute_straddle(
+        &self,
+        straddle: &Straddle,
+        event: &EarningsEvent,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+    ) -> StraddleResult {
+        // Execute trade (with hedging if enabled)
+        let result = if self.hedge_config.is_enabled() && self.timing_strategy.is_some() {
+            // Generate rehedge times
+            let rehedge_times = self.timing_strategy.as_ref().unwrap()
+                .rehedge_times(entry_time, exit_time, &self.hedge_config.strategy);
+
+            // Execute base trade first
+            let mut base_result = self.straddle_executor
+                .execute_trade(straddle, event, entry_time, exit_time)
+                .await;
+
+            // If successful, apply hedging
+            if base_result.success {
+                self.apply_hedging(&mut base_result, straddle, entry_time, exit_time, rehedge_times).await;
+            }
+
+            base_result
+        } else {
+            // Execute without hedging
+            self.straddle_executor
+                .execute_trade(straddle, event, entry_time, exit_time)
+                .await
+        };
+
+        result
     }
 }

@@ -8,20 +8,21 @@ use cs_domain::{
     Straddle, StraddleResult, TradingCalendar,
 };
 
-use crate::straddle_executor::StraddleExecutor;
+use crate::unified_executor::UnifiedExecutor;
 
-/// Executor for rolling straddle strategies
+/// Executor for rolling straddle strategies with optional hedging
 ///
 /// Unlike single-trade executor, this:
 /// - Enters new ATM position each roll period
 /// - Tracks cumulative P&L across rolls
 /// - Maintains rolling campaign from start to end date
+/// - Supports delta hedging if configured in UnifiedExecutor
 pub struct RollingStraddleExecutor<O, E>
 where
     O: OptionsDataRepository,
     E: EquityDataRepository,
 {
-    straddle_executor: StraddleExecutor<O, E>,
+    unified_executor: UnifiedExecutor<O, E>,
     equity_repo: Arc<E>,
     roll_policy: RollPolicy,
 }
@@ -32,12 +33,12 @@ where
     E: EquityDataRepository,
 {
     pub fn new(
-        straddle_executor: StraddleExecutor<O, E>,
+        unified_executor: UnifiedExecutor<O, E>,
         equity_repo: Arc<E>,
         roll_policy: RollPolicy,
     ) -> Self {
         Self {
-            straddle_executor,
+            unified_executor,
             equity_repo,
             roll_policy,
         }
@@ -88,8 +89,8 @@ where
                 cs_domain::EarningsTime::AfterMarketClose,
             );
 
-            let result = self.straddle_executor
-                .execute_trade(&straddle, &earnings_event, entry_dt, exit_dt)
+            let result = self.unified_executor
+                .execute_straddle(&straddle, &earnings_event, entry_dt, exit_dt)
                 .await;
 
             // Convert to RollPeriod

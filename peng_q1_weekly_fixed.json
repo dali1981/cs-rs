@@ -3,6 +3,7 @@
   "start_date": "2025-01-01",
   "end_date": "2025-03-31",
   "roll_policy": "Weekly on Fri",
+  "trade_type": "straddle",
   "rolls": [
     {
       "entry_date": "2025-01-02",

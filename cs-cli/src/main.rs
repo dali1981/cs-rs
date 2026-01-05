@@ -452,7 +452,7 @@ async fn run_rolling_straddle(
     equity_repo: FinqEquityRepository,
     output: Option<PathBuf>,
 ) -> Result<()> {
-    use cs_backtest::{StraddleExecutor, RollingStraddleExecutor};
+    use cs_backtest::{UnifiedExecutor, RollingStraddleExecutor};
     use cs_domain::MarketTime;
     use std::sync::Arc;
 
@@ -471,15 +471,15 @@ async fn run_rolling_straddle(
     let options_repo = Arc::new(options_repo);
     let equity_repo = Arc::new(equity_repo);
 
-    // Create executor with pricing model
-    let executor = StraddleExecutor::new(
+    // Create unified executor with pricing model (hedging TODO: add in next step)
+    let unified_executor = UnifiedExecutor::new(
         Arc::clone(&options_repo),
         Arc::clone(&equity_repo),
     ).with_pricing_model(backtest_config.pricing_model.clone());
 
     // Create rolling executor
     let rolling_executor = RollingStraddleExecutor::new(
-        executor,
+        unified_executor,
         Arc::clone(&equity_repo),
         roll_policy,
     );

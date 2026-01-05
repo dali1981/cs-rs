@@ -24,7 +24,8 @@ pub mod earnings_analysis_use_case;
 
 pub use config::{BacktestConfig, SpreadType, SelectionType};
 pub use backtest_use_case::{BacktestUseCase, BacktestResult, SessionProgress, TradeGenerationError};
-pub use unified_executor::{TradeResult, TradeStructure};
+pub use unified_executor::{TradeResult, TradeStructure, UnifiedExecutor};
+pub use timing_strategy::TimingStrategy;
 pub use trade_executor::{TradeExecutor, ExecutionError};
 pub use spread_pricer::{SpreadPricer, SpreadPricing, LegPricing, PricingError};
 pub use iron_butterfly_pricer::{IronButterflyPricer, IronButterflyPricing};
