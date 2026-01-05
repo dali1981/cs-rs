@@ -2,7 +2,22 @@
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use cs_domain::EarningsEvent;
+use thiserror::Error;
+use cs_domain::{EarningsEvent, RepositoryError};
+use crate::spread_pricer::PricingError;
+
+/// Errors that can occur during trade execution
+#[derive(Debug, Error)]
+pub enum ExecutionError {
+    #[error("Repository error: {0}")]
+    Repository(#[from] RepositoryError),
+    #[error("Pricing error: {0}")]
+    Pricing(#[from] PricingError),
+    #[error("No spot price available")]
+    NoSpotPrice,
+    #[error("Invalid spread: {0}")]
+    InvalidSpread(String),
+}
 
 /// Configuration for trade validation
 #[derive(Debug, Clone)]

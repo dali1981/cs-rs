@@ -39,5 +39,5 @@ mod straddle_impl;
 mod calendar_spread_impl;
 
 pub use traits::{TradePricer, ExecutableTrade};
-pub use types::{ExecutionConfig, ExecutionContext};
+pub use types::{ExecutionConfig, ExecutionContext, ExecutionError};
 pub use generic_executor::execute_trade;

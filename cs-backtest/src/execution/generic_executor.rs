@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use cs_domain::{EquityDataRepository, OptionsDataRepository, EarningsEvent};
 use crate::iv_surface_builder::build_iv_surface_minute_aligned;
-use crate::trade_executor::ExecutionError;
+use super::types::ExecutionError;
 use super::traits::{ExecutableTrade, TradePricer};
 use super::types::{ExecutionConfig, ExecutionContext};
 

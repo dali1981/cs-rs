@@ -6,7 +6,7 @@ use cs_domain::{
     CalendarSpread, CalendarSpreadResult, FailureReason, CONTRACT_MULTIPLIER,
 };
 use crate::spread_pricer::{SpreadPricer, SpreadPricing};
-use crate::trade_executor::ExecutionError;
+use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
 use super::types::{ExecutionConfig, ExecutionContext};
 

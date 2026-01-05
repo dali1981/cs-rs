@@ -5,7 +5,7 @@ use polars::prelude::DataFrame;
 use cs_analytics::IVSurface;
 use cs_domain::TradeResult;
 use crate::spread_pricer::PricingError;
-use crate::trade_executor::ExecutionError;
+use super::types::ExecutionError;
 use super::types::{ExecutionConfig, ExecutionContext};
 
 /// Generic pricing interface for trade pricers

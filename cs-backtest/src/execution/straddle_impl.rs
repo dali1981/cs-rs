@@ -6,7 +6,7 @@ use cs_domain::{
     Straddle, StraddleResult, FailureReason, PricingSource, CONTRACT_MULTIPLIER,
 };
 use crate::straddle_pricer::{StraddlePricer, StraddlePricing};
-use crate::trade_executor::ExecutionError;
+use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
 use super::types::{ExecutionConfig, ExecutionContext};
 
