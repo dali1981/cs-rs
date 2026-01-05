@@ -345,7 +345,10 @@ where
                 }
             }
             TradeStructure::Straddle => {
-                match selector.select_straddle(&spot, entry_surface, criteria.min_short_dte) {
+                // Use exit date as minimum expiration - options must expire AFTER we exit
+                let min_expiration = exit_time.date_naive();
+
+                match selector.select_straddle(&spot, entry_surface, min_expiration) {
                     Ok(straddle) => {
                         // Execute trade (with hedging if enabled)
                         let result = if self.hedge_config.is_enabled() && self.timing_strategy.is_some() {

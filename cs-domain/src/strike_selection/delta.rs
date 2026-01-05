@@ -1,5 +1,6 @@
 // Delta-space trading strategy for calendar spreads
 
+use chrono::NaiveDate;
 use finq_core::OptionType;
 use serde::{Deserialize, Serialize};
 
@@ -295,11 +296,11 @@ impl StrikeSelector for DeltaStrategy {
         &self,
         spot: &SpotPrice,
         surface: &IVSurface,
-        min_dte: i32,
+        min_expiration: NaiveDate,
     ) -> Result<Straddle, SelectionError> {
         // Create an ATM strategy with our criteria and delegate
         let atm_strategy = ATMStrategy::new(self.criteria.clone());
-        StrikeSelector::select_straddle(&atm_strategy, spot, surface, min_dte)
+        StrikeSelector::select_straddle(&atm_strategy, spot, surface, min_expiration)
     }
 
     /// Calendar straddles are ALWAYS ATM - delegate to ATMStrategy

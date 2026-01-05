@@ -172,11 +172,16 @@ pub trait StrikeSelector: Send + Sync {
     ) -> Result<CalendarSpread, SelectionError>;
 
     /// Select a straddle (always ATM)
+    ///
+    /// # Arguments
+    /// * `spot` - Current spot price
+    /// * `surface` - IV surface with available expirations
+    /// * `min_expiration` - Minimum required expiration date (options must expire AFTER this date)
     fn select_straddle(
         &self,
         _spot: &SpotPrice,
         _surface: &IVSurface,
-        _min_dte: i32,
+        _min_expiration: NaiveDate,
     ) -> Result<Straddle, SelectionError> {
         Err(SelectionError::UnsupportedStrategy(
             "Straddle not supported by this selector".to_string()

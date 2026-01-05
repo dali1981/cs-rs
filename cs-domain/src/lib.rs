@@ -10,6 +10,10 @@ pub mod repositories;
 pub mod timing;
 pub mod infrastructure;
 pub mod hedging;
+pub mod expiration;
+pub mod trading_period;
+pub mod roll;
+pub mod strategy;
 
 // Re-exports for convenience
 pub use datetime::{TradingDate, TradingTimestamp, MarketTime};
@@ -26,3 +30,7 @@ pub use strike_selection::TradingStrategy;
 pub use repositories::*;
 pub use timing::*;
 pub use hedging::*;
+pub use expiration::{ExpirationCycle, ExpirationPolicy};
+pub use trading_period::{TradingPeriod, TradingPeriodSpec, TimingError};
+pub use roll::{RollPolicy, RollEvent};
+pub use strategy::{TradeStrategy, TradeStructureConfig, TradeFilters};

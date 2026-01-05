@@ -346,9 +346,9 @@ impl StrikeSelector for ATMStrategy {
         &self,
         spot: &SpotPrice,
         surface: &IVSurface,
-        min_dte: i32,
+        min_expiration: NaiveDate,
     ) -> Result<Straddle, SelectionError> {
-        // Get strikes and expirations from IV surface
+        // Get strikes from IV surface
         let strikes: Vec<Strike> = surface.strikes()
             .iter()
             .filter_map(|&s| Strike::new(s).ok())
@@ -358,11 +358,18 @@ impl StrikeSelector for ATMStrategy {
             return Err(SelectionError::NoStrikes);
         }
 
-        let expirations = surface.expirations();
+        // Filter expirations to those AFTER min_expiration
+        let expirations: Vec<NaiveDate> = surface.expirations()
+            .into_iter()
+            .filter(|&exp| exp > min_expiration)
+            .collect();
 
-        // Select first expiration with sufficient DTE
-        let reference_date = surface.as_of_time().date_naive();
-        let expiration = Self::select_single_expiration(&expirations, reference_date, min_dte)?;
+        if expirations.is_empty() {
+            return Err(SelectionError::NoExpirations);
+        }
+
+        // Select first valid expiration (soonest after min_expiration)
+        let expiration = *expirations.iter().min().unwrap();
 
         // Select ATM strike (closest to spot)
         let spot_f64: f64 = spot.value.try_into().unwrap_or(0.0);
