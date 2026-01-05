@@ -5,7 +5,7 @@ use std::sync::Arc;
 use cs_domain::{
     EquityDataRepository, OptionsDataRepository, MarketTime,
     RollPolicy, RollPeriod, RollReason, RollingStraddleResult,
-    Straddle, StraddleResult,
+    Straddle, StraddleResult, TradingCalendar,
 };
 
 use crate::straddle_executor::StraddleExecutor;
@@ -96,8 +96,8 @@ where
             let roll_period = self.to_roll_period(result, roll_reason);
             rolls.push(roll_period);
 
-            // Move to next period
-            current_date = exit_date + chrono::Duration::days(1);
+            // Move to next trading day after exit
+            current_date = TradingCalendar::next_trading_day(exit_date);
         }
 
         // Aggregate results
