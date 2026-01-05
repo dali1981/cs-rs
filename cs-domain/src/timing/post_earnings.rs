@@ -91,12 +91,7 @@ mod tests {
     use super::*;
 
     fn default_timing() -> PostEarningsStraddleTiming {
-        PostEarningsStraddleTiming::new(TimingConfig {
-            entry_hour: 9,
-            entry_minute: 35,
-            exit_hour: 10,
-            exit_minute: 0,
-        })
+        PostEarningsStraddleTiming::new(TimingConfig::default())
     }
 
     #[test]

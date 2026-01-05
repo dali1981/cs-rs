@@ -5,8 +5,9 @@ use crate::expiration::ExpirationPolicy;
 use crate::trading_period::TradingPeriodSpec;
 use crate::roll::RollPolicy;
 use crate::hedging::{HedgeConfig, HedgeStrategy};
+use crate::datetime::MarketTime;
 use crate::CONTRACT_MULTIPLIER;
-use chrono::{NaiveDate, NaiveTime};
+use chrono::NaiveDate;
 use finq_core::OptionType;
 
 /// Pre-earnings straddle: capture IV expansion before earnings
@@ -20,8 +21,8 @@ pub fn pre_earnings_straddle() -> TradeStrategy {
         timing: TradingPeriodSpec::PreEarnings {
             entry_days_before: 20,
             exit_days_before: 1,
-            entry_time: NaiveTime::from_hms_opt(9, 35, 0).unwrap(),
-            exit_time: NaiveTime::from_hms_opt(15, 55, 0).unwrap(),
+            entry_time: MarketTime::DEFAULT_ENTRY.to_naive_time(),
+            exit_time: MarketTime::DEFAULT_HEDGE_CHECK.to_naive_time(),
         },
         expiration_policy: ExpirationPolicy::FirstAfter {
             min_date: NaiveDate::MIN, // Will be set dynamically to exit_date
@@ -56,8 +57,8 @@ pub fn weekly_roll_straddle() -> TradeStrategy {
         timing: TradingPeriodSpec::PreEarnings {
             entry_days_before: 28, // ~4 weeks
             exit_days_before: 1,
-            entry_time: NaiveTime::from_hms_opt(9, 35, 0).unwrap(),
-            exit_time: NaiveTime::from_hms_opt(15, 55, 0).unwrap(),
+            entry_time: MarketTime::DEFAULT_ENTRY.to_naive_time(),
+            exit_time: MarketTime::DEFAULT_HEDGE_CHECK.to_naive_time(),
         },
         expiration_policy: ExpirationPolicy::PreferWeekly {
             min_date: NaiveDate::MIN,
@@ -84,8 +85,8 @@ pub fn post_earnings_straddle() -> TradeStrategy {
         timing: TradingPeriodSpec::PostEarnings {
             entry_offset: 0,
             holding_days: 5,
-            entry_time: NaiveTime::from_hms_opt(9, 35, 0).unwrap(),
-            exit_time: NaiveTime::from_hms_opt(15, 55, 0).unwrap(),
+            entry_time: MarketTime::DEFAULT_ENTRY.to_naive_time(),
+            exit_time: MarketTime::DEFAULT_HEDGE_CHECK.to_naive_time(),
         },
         expiration_policy: ExpirationPolicy::FirstAfter {
             min_date: NaiveDate::MIN,
@@ -111,8 +112,8 @@ pub fn earnings_calendar_spread(option_type: OptionType) -> TradeStrategy {
         timing: TradingPeriodSpec::CrossEarnings {
             entry_days_before: 1,
             exit_days_after: 1,
-            entry_time: NaiveTime::from_hms_opt(9, 35, 0).unwrap(),
-            exit_time: NaiveTime::from_hms_opt(9, 35, 0).unwrap(),
+            entry_time: MarketTime::DEFAULT_ENTRY.to_naive_time(),
+            exit_time: MarketTime::DEFAULT_ENTRY.to_naive_time(),
         },
         expiration_policy: ExpirationPolicy::Calendar {
             short: Box::new(ExpirationPolicy::PreferMonthly {

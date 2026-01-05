@@ -102,12 +102,7 @@ mod tests {
     use chrono::Timelike;
 
     fn default_timing() -> StraddleTradeTiming {
-        StraddleTradeTiming::new(TimingConfig {
-            entry_hour: 9,
-            entry_minute: 35,
-            exit_hour: 10,
-            exit_minute: 0,
-        })
+        StraddleTradeTiming::new(TimingConfig::default())
     }
 
     #[test]

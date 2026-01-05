@@ -218,4 +218,22 @@ mod tests {
         let result = TradingCalendar::n_trading_days_after(friday, 3);
         assert_eq!(result, NaiveDate::from_ymd_opt(2025, 6, 11).unwrap());
     }
+
+    #[test]
+    fn test_n_trading_days_before_with_weekend() {
+        // Monday 2025-03-31 - 5 trading days = Monday 2025-03-24 (skip weekend)
+        let monday = NaiveDate::from_ymd_opt(2025, 3, 31).unwrap();
+        let result = TradingCalendar::n_trading_days_before(monday, 5);
+
+        // Expected: Mon 3/24 (5 days before Mon 3/31, skipping Sat/Sun 3/29-30)
+        let expected = NaiveDate::from_ymd_opt(2025, 3, 24).unwrap();
+        assert_eq!(result, expected);
+
+        // Verify it's not Saturday
+        assert_ne!(result.weekday(), Weekday::Sat);
+        assert_ne!(result.weekday(), Weekday::Sun);
+
+        // Verify result is a Monday
+        assert_eq!(result.weekday(), Weekday::Mon);
+    }
 }
