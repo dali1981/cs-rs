@@ -41,5 +41,5 @@ pub use position::{PositionGreeks, PositionSnapshot, DailyAttribution, PositionA
 pub use expiration::{ExpirationCycle, ExpirationPolicy};
 pub use trading_period::{TradingPeriod, TradingPeriodSpec, TimingError};
 pub use roll::{RollPolicy, RollEvent};
-pub use strategy::{TradeStrategy, TradeStructureConfig, TradeFilters};
+pub use strategy::{TradeStrategy, TradeStructureConfig, TradeFilters, TradeStructure, FailedTrade};
 pub use trade::{RollableTrade, TradeResult, TradeConstructionError};

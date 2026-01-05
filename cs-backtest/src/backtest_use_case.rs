@@ -7,23 +7,123 @@ use cs_domain::*;
 use cs_domain::timing::{EarningsTradeTiming, StraddleTradeTiming, PostEarningsStraddleTiming};
 use cs_domain::strike_selection::{StrikeSelector, ATMStrategy, DeltaStrategy, ExpirationCriteria, IronButterflyStrategy, StraddleStrategy};
 use crate::config::{BacktestConfig, SpreadType, SelectionType};
-use crate::trade_orchestrator::{TradeOrchestrator, TradeStructure, TradeResult};
-use crate::iv_surface_builder::build_iv_surface_minute_aligned;
+use crate::execution::ExecutionConfig;
+use crate::backtest_use_case_helpers;
 
 /// Backtest execution result
 #[derive(Debug)]
-pub struct BacktestResult {
-    pub results: Vec<TradeResult>,
+pub struct BacktestResult<R> {
+    pub results: Vec<R>,
     pub sessions_processed: usize,
     pub total_entries: usize,
     pub total_opportunities: usize,
     pub dropped_events: Vec<TradeGenerationError>,
 }
 
-impl BacktestResult {
+// Trait to unify result types for BacktestResult
+pub trait TradeResultMethods {
+    fn is_winner(&self) -> bool;
+    fn pnl(&self) -> Decimal;
+    fn pnl_pct(&self) -> Decimal;
+    fn has_hedge_data(&self) -> bool {
+        false
+    }
+    fn hedge_pnl(&self) -> Option<Decimal> {
+        None
+    }
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> {
+        None
+    }
+}
+
+impl TradeResultMethods for CalendarSpreadResult {
+    fn is_winner(&self) -> bool {
+        self.is_winner()
+    }
+    fn pnl(&self) -> Decimal {
+        self.pnl
+    }
+    fn pnl_pct(&self) -> Decimal {
+        self.pnl_pct
+    }
+    fn has_hedge_data(&self) -> bool {
+        self.hedge_pnl.is_some()
+    }
+    fn hedge_pnl(&self) -> Option<Decimal> {
+        self.hedge_pnl
+    }
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> {
+        self.total_pnl_with_hedge
+    }
+}
+
+impl TradeResultMethods for StraddleResult {
+    fn is_winner(&self) -> bool {
+        self.is_winner()
+    }
+    fn pnl(&self) -> Decimal {
+        self.pnl
+    }
+    fn pnl_pct(&self) -> Decimal {
+        self.pnl_pct
+    }
+    fn has_hedge_data(&self) -> bool {
+        self.hedge_pnl.is_some()
+    }
+    fn hedge_pnl(&self) -> Option<Decimal> {
+        self.hedge_pnl
+    }
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> {
+        self.total_pnl_with_hedge
+    }
+}
+
+impl TradeResultMethods for IronButterflyResult {
+    fn is_winner(&self) -> bool {
+        self.is_winner()
+    }
+    fn pnl(&self) -> Decimal {
+        self.pnl
+    }
+    fn pnl_pct(&self) -> Decimal {
+        self.pnl_pct
+    }
+    fn has_hedge_data(&self) -> bool {
+        self.hedge_pnl.is_some()
+    }
+    fn hedge_pnl(&self) -> Option<Decimal> {
+        self.hedge_pnl
+    }
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> {
+        self.total_pnl_with_hedge
+    }
+}
+
+impl TradeResultMethods for CalendarStraddleResult {
+    fn is_winner(&self) -> bool {
+        self.is_winner()
+    }
+    fn pnl(&self) -> Decimal {
+        self.pnl
+    }
+    fn pnl_pct(&self) -> Decimal {
+        self.pnl_pct
+    }
+    fn has_hedge_data(&self) -> bool {
+        self.hedge_pnl.is_some()
+    }
+    fn hedge_pnl(&self) -> Option<Decimal> {
+        self.hedge_pnl
+    }
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> {
+        self.total_pnl_with_hedge
+    }
+}
+
+impl<R: TradeResultMethods> BacktestResult<R> {
     pub fn win_rate(&self) -> f64 {
         let winners = self.results.iter().filter(|r| r.is_winner()).count();
-        let successful_trades = self.results.iter().filter(|r| r.success()).count();
+        let successful_trades = self.results.len();
         if successful_trades == 0 {
             0.0
         } else {
@@ -32,9 +132,7 @@ impl BacktestResult {
     }
 
     pub fn total_pnl(&self) -> rust_decimal::Decimal {
-        // Only sum PnL from successful trades
         self.results.iter()
-            .filter(|r| r.success())
             .map(|r| r.pnl())
             .sum()
     }
@@ -47,7 +145,6 @@ impl BacktestResult {
     /// Total hedge P&L from all trades
     pub fn total_hedge_pnl(&self) -> rust_decimal::Decimal {
         self.results.iter()
-            .filter(|r| r.success())
             .filter_map(|r| r.hedge_pnl())
             .sum()
     }
@@ -55,19 +152,17 @@ impl BacktestResult {
     /// Total P&L including hedges
     pub fn total_pnl_with_hedge(&self) -> rust_decimal::Decimal {
         self.results.iter()
-            .filter(|r| r.success())
-            .map(|r| r.total_pnl_with_hedge().unwrap_or_else(|| r.pnl()))
+            .map(|r| r.total_pnl_with_hedge().unwrap_or(r.pnl()))
             .sum()
     }
 
     pub fn successful_trades(&self) -> usize {
-        self.results.iter().filter(|r| r.success()).count()
+        self.results.len()
     }
 
     /// Get percentage returns for statistical analysis
     fn pnl_pcts(&self) -> Vec<f64> {
         self.results.iter()
-            .filter(|r| r.success())
             .map(|r| {
                 let pnl_pct: f64 = r.pnl_pct().try_into().unwrap_or(0.0);
                 pnl_pct / 100.0  // Convert from percentage to decimal (50% -> 0.5)
@@ -143,7 +238,7 @@ impl BacktestResult {
     /// Average losing trade (in dollars)
     pub fn avg_loser(&self) -> rust_decimal::Decimal {
         let losers: Vec<_> = self.results.iter()
-            .filter(|r| r.success() && r.pnl() < rust_decimal::Decimal::ZERO)
+            .filter(|r| r.pnl() < rust_decimal::Decimal::ZERO)
             .collect();
         if losers.is_empty() {
             rust_decimal::Decimal::ZERO
@@ -156,7 +251,7 @@ impl BacktestResult {
     /// Average losing trade (in percent)
     pub fn avg_loser_pct(&self) -> f64 {
         let losers: Vec<_> = self.results.iter()
-            .filter(|r| r.success() && r.pnl() < rust_decimal::Decimal::ZERO)
+            .filter(|r| r.pnl() < rust_decimal::Decimal::ZERO)
             .collect();
         if losers.is_empty() {
             0.0
@@ -222,62 +317,30 @@ where
         }
     }
 
-    pub async fn execute(
+    // NOTE: execute() dispatcher removed - CLI should call specific execute_* methods based on strategy type
+    // Each method returns its own typed BacktestResult<R>:
+    // - execute_calendar_spread() -> BacktestResult<CalendarSpreadResult>
+    // - execute_straddle() -> BacktestResult<StraddleResult>
+    // - execute_iron_butterfly() -> BacktestResult<IronButterflyResult>
+    // - execute_calendar_straddle() -> BacktestResult<CalendarStraddleResult>
+    // - execute_post_earnings_straddle() -> BacktestResult<StraddleResult>
+
+    pub async fn execute_calendar_spread(
         &self,
         start_date: NaiveDate,
         end_date: NaiveDate,
         option_type: finq_core::OptionType,
         on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult, BacktestError> {
-        let mut all_results: Vec<TradeResult> = Vec::new();
+    ) -> Result<BacktestResult<CalendarSpreadResult>, BacktestError> {
+        let mut all_results: Vec<CalendarSpreadResult> = Vec::new();
         let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
         let mut sessions_processed = 0;
         let mut total_opportunities = 0;
 
-        info!(
-            start_date = %start_date,
-            end_date = %end_date,
-            option_type = ?option_type,
-            spread = ?self.config.spread,
-            selection = ?self.config.selection_strategy,
-            "Starting backtest"
-        );
-
-        // Branch based on spread type
-        match self.config.spread {
-            SpreadType::IronButterfly => {
-                self.execute_iron_butterfly(start_date, end_date, on_progress).await
-            }
-            SpreadType::Calendar => {
-                self.execute_calendar_spread(start_date, end_date, option_type, on_progress).await
-            }
-            SpreadType::Straddle => {
-                self.execute_straddle(start_date, end_date, on_progress).await
-            }
-            SpreadType::CalendarStraddle => {
-                self.execute_calendar_straddle(start_date, end_date, on_progress).await
-            }
-            SpreadType::PostEarningsStraddle => {
-                self.execute_post_earnings_straddle(start_date, end_date, on_progress).await
-            }
-        }
-    }
-
-    async fn execute_calendar_spread(
-        &self,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-        option_type: finq_core::OptionType,
-        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult, BacktestError> {
-        let mut all_results: Vec<TradeResult> = Vec::new();
-        let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
-        let mut sessions_processed = 0;
-        let mut total_opportunities = 0;
-
-        // NEW: Use unified flow with optimized IV surface building
+        // Create selector and criteria
         let selector = self.create_selector();
-        let structure = TradeStructure::CalendarSpread(option_type);
+        let criteria = self.build_expiration_criteria();
+        let exec_config = ExecutionConfig::for_calendar_spread(self.config.max_entry_iv);
 
         // Calendar spreads use earnings timing (enter on/before earnings day)
         use crate::timing_strategy::TimingStrategy;
@@ -304,21 +367,48 @@ where
             debug!(
                 session_date = %session_date,
                 events_count = to_enter.len(),
-                "Processing session (UNIFIED EXECUTOR)"
+                "Processing calendar spread session"
             );
 
-            // Process events using OPTIMIZED unified executor
+            // Process events using helper
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_event_unified(event, &*selector, structure, &timing))
+                    .map(|event| {
+                        let entry_time = timing.entry_datetime(event);
+                        let exit_time = timing.exit_datetime(event);
+                        backtest_use_case_helpers::execute_calendar_spread(
+                            self.options_repo.as_ref(),
+                            self.equity_repo.as_ref(),
+                            &*selector,
+                            &criteria,
+                            event,
+                            entry_time,
+                            exit_time,
+                            option_type,
+                            &exec_config,
+                        )
+                    })
                     .collect();
 
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(self.process_event_unified(event, &*selector, structure, &timing).await);
+                    let entry_time = timing.entry_datetime(event);
+                    let exit_time = timing.exit_datetime(event);
+                    let result = backtest_use_case_helpers::execute_calendar_spread(
+                        self.options_repo.as_ref(),
+                        self.equity_repo.as_ref(),
+                        &*selector,
+                        &criteria,
+                        event,
+                        entry_time,
+                        exit_time,
+                        option_type,
+                        &exec_config,
+                    ).await;
+                    results.push(result);
                 }
                 results
             };
@@ -327,28 +417,19 @@ where
             let mut session_entries = 0;
             for result in session_results {
                 total_opportunities += 1;
-                match result {
-                    TradeResult::CalendarSpread(trade_result) => {
-                        if self.passes_iv_filter(&trade_result) {
-                            all_results.push(TradeResult::CalendarSpread(trade_result));
-                            session_entries += 1;
-                        } else {
-                            dropped_events.push(TradeGenerationError {
-                                symbol: trade_result.symbol.clone(),
-                                earnings_date: trade_result.earnings_date,
-                                earnings_time: trade_result.earnings_time,
-                                reason: "IV_RATIO_FILTER".into(),
-                                details: None,
-                                phase: "filter".into(),
-                            });
-                        }
-                    }
-                    TradeResult::Failed(failed_trade) => {
-                        // Failed trades are already recorded in dropped_events by the executor
-                        // Just count them as opportunities
-                    }
-                    _ => {
-                        warn!("Unexpected result type for calendar spread");
+                if let Some(trade_result) = result {
+                    if self.passes_iv_filter(&trade_result) {
+                        all_results.push(trade_result);
+                        session_entries += 1;
+                    } else {
+                        dropped_events.push(TradeGenerationError {
+                            symbol: trade_result.symbol.clone(),
+                            earnings_date: trade_result.earnings_date,
+                            earnings_time: trade_result.earnings_time,
+                            reason: "IV_RATIO_FILTER".into(),
+                            details: None,
+                            phase: "filter".into(),
+                        });
                     }
                 }
             }
@@ -381,22 +462,21 @@ where
         })
     }
 
-    async fn execute_iron_butterfly(
+    pub async fn execute_iron_butterfly(
         &self,
         start_date: NaiveDate,
         end_date: NaiveDate,
         on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult, BacktestError> {
-        let mut all_results: Vec<TradeResult> = Vec::new();
+    ) -> Result<BacktestResult<IronButterflyResult>, BacktestError> {
+        let mut all_results: Vec<IronButterflyResult> = Vec::new();
         let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
         let mut sessions_processed = 0;
         let mut total_opportunities = 0;
 
-        // NEW: Use unified flow with optimized IV surface building
+        // Create selector and criteria
         let selector = self.create_selector();
-        let structure = TradeStructure::IronButterfly {
-            wing_width: Decimal::try_from(self.config.wing_width).unwrap_or(Decimal::from(5)),
-        };
+        let criteria = self.build_expiration_criteria();
+        let exec_config = ExecutionConfig::for_iron_butterfly(self.config.max_entry_iv);
 
         // Iron butterflies use earnings timing (enter on/before earnings day)
         use crate::timing_strategy::TimingStrategy;
@@ -423,20 +503,45 @@ where
             debug!(
                 session_date = %session_date,
                 events_count = to_enter.len(),
-                "Processing iron butterfly session (UNIFIED EXECUTOR)"
+                "Processing iron butterfly session"
             );
 
-            // Process events using OPTIMIZED unified executor
+            // Process events using helper
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_event_unified(event, &*selector, structure, &timing))
+                    .map(|event| {
+                        let entry_time = timing.entry_datetime(event);
+                        let exit_time = timing.exit_datetime(event);
+                        backtest_use_case_helpers::execute_iron_butterfly(
+                            self.options_repo.as_ref(),
+                            self.equity_repo.as_ref(),
+                            &*selector,
+                            &criteria,
+                            event,
+                            entry_time,
+                            exit_time,
+                            &exec_config,
+                        )
+                    })
                     .collect();
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(self.process_event_unified(event, &*selector, structure, &timing).await);
+                    let entry_time = timing.entry_datetime(event);
+                    let exit_time = timing.exit_datetime(event);
+                    let result = backtest_use_case_helpers::execute_iron_butterfly(
+                        self.options_repo.as_ref(),
+                        self.equity_repo.as_ref(),
+                        &*selector,
+                        &criteria,
+                        event,
+                        entry_time,
+                        exit_time,
+                        &exec_config,
+                    ).await;
+                    results.push(result);
                 }
                 results
             };
@@ -445,17 +550,9 @@ where
             let mut session_entries = 0;
             for result in session_results {
                 total_opportunities += 1;
-                match result {
-                    TradeResult::IronButterfly(trade_result) => {
-                        all_results.push(TradeResult::IronButterfly(trade_result));
-                        session_entries += 1;
-                    }
-                    TradeResult::Failed(_) => {
-                        // Failed trades are already recorded
-                    }
-                    _ => {
-                        warn!("Unexpected result type for iron butterfly");
-                    }
+                if let Some(trade_result) = result {
+                    all_results.push(trade_result);
+                    session_entries += 1;
                 }
             }
 
@@ -487,20 +584,21 @@ where
         })
     }
 
-    async fn execute_straddle(
+    pub async fn execute_straddle(
         &self,
         start_date: NaiveDate,
         end_date: NaiveDate,
         on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult, BacktestError> {
-        let mut all_results: Vec<TradeResult> = Vec::new();
+    ) -> Result<BacktestResult<StraddleResult>, BacktestError> {
+        let mut all_results: Vec<StraddleResult> = Vec::new();
         let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
         let mut sessions_processed = 0;
         let mut total_opportunities = 0;
 
-        // NEW: Use unified flow with optimized IV surface building
+        // Create selector and criteria
         let selector = self.create_selector();
-        let structure = TradeStructure::Straddle;
+        let criteria = self.build_expiration_criteria();
+        let exec_config = ExecutionConfig::for_straddle(self.config.max_entry_iv);
 
         // Create straddle timing
         let timing_impl = StraddleTradeTiming::new(self.config.timing)
@@ -514,7 +612,7 @@ where
         info!(
             entry_days = self.config.straddle_entry_days,
             exit_days = self.config.straddle_exit_days,
-            "Starting straddle backtest (UNIFIED EXECUTOR)"
+            "Starting straddle backtest"
         );
 
         for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
@@ -573,20 +671,45 @@ where
             debug!(
                 session_date = %session_date,
                 events_count = to_enter.len(),
-                "Processing straddle session (UNIFIED EXECUTOR)"
+                "Processing straddle session"
             );
 
-            // Process events using OPTIMIZED unified executor
+            // Process events using helper
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_event_unified(event, &*selector, structure, &timing))
+                    .map(|event| {
+                        let entry_time = timing.entry_datetime(event);
+                        let exit_time = timing.exit_datetime(event);
+                        backtest_use_case_helpers::execute_straddle(
+                            self.options_repo.as_ref(),
+                            self.equity_repo.as_ref(),
+                            &*selector,
+                            &criteria,
+                            event,
+                            entry_time,
+                            exit_time,
+                            &exec_config,
+                        )
+                    })
                     .collect();
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(self.process_event_unified(event, &*selector, structure, &timing).await);
+                    let entry_time = timing.entry_datetime(event);
+                    let exit_time = timing.exit_datetime(event);
+                    let result = backtest_use_case_helpers::execute_straddle(
+                        self.options_repo.as_ref(),
+                        self.equity_repo.as_ref(),
+                        &*selector,
+                        &criteria,
+                        event,
+                        entry_time,
+                        exit_time,
+                        &exec_config,
+                    ).await;
+                    results.push(result);
                 }
                 results
             };
@@ -594,17 +717,9 @@ where
             let mut session_entries = 0;
             for result in session_results {
                 total_opportunities += 1;
-                match result {
-                    TradeResult::Straddle(trade_result) => {
-                        all_results.push(TradeResult::Straddle(trade_result));
-                        session_entries += 1;
-                    }
-                    TradeResult::Failed(_) => {
-                        // Failed trades are already recorded
-                    }
-                    _ => {
-                        warn!("Unexpected result type for straddle");
-                    }
+                if let Some(trade_result) = result {
+                    all_results.push(trade_result);
+                    session_entries += 1;
                 }
             }
 
@@ -641,20 +756,21 @@ where
     /// Post-earnings straddle enters AFTER earnings (when IV has crushed) and holds
     /// for ~1 week to capture continued stock movement. Unlike pre-earnings straddle,
     /// this benefits from lower entry IV.
-    async fn execute_post_earnings_straddle(
+    pub async fn execute_post_earnings_straddle(
         &self,
         start_date: NaiveDate,
         end_date: NaiveDate,
         on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult, BacktestError> {
-        let mut all_results: Vec<TradeResult> = Vec::new();
+    ) -> Result<BacktestResult<StraddleResult>, BacktestError> {
+        let mut all_results: Vec<StraddleResult> = Vec::new();
         let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
         let mut sessions_processed = 0;
         let mut total_opportunities = 0;
 
-        // NEW: Use unified flow with optimized IV surface building
+        // Create selector and criteria
         let selector = self.create_selector();
-        let structure = TradeStructure::Straddle;
+        let criteria = self.build_expiration_criteria();
+        let exec_config = ExecutionConfig::for_straddle(self.config.max_entry_iv);
 
         // Create post-earnings timing
         let timing_impl = PostEarningsStraddleTiming::new(self.config.timing)
@@ -666,7 +782,7 @@ where
 
         info!(
             holding_days = self.config.post_earnings_holding_days,
-            "Starting post-earnings straddle backtest (UNIFIED EXECUTOR)"
+            "Starting post-earnings straddle backtest"
         );
 
         for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
@@ -703,20 +819,45 @@ where
             debug!(
                 session_date = %session_date,
                 events_count = to_enter.len(),
-                "Processing post-earnings straddle session (UNIFIED EXECUTOR)"
+                "Processing post-earnings straddle session"
             );
 
-            // Process events using OPTIMIZED unified executor
+            // Process events using helper
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_event_unified(event, &*selector, structure, &timing))
+                    .map(|event| {
+                        let entry_time = timing.entry_datetime(event);
+                        let exit_time = timing.exit_datetime(event);
+                        backtest_use_case_helpers::execute_straddle(
+                            self.options_repo.as_ref(),
+                            self.equity_repo.as_ref(),
+                            &*selector,
+                            &criteria,
+                            event,
+                            entry_time,
+                            exit_time,
+                            &exec_config,
+                        )
+                    })
                     .collect();
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(self.process_event_unified(event, &*selector, structure, &timing).await);
+                    let entry_time = timing.entry_datetime(event);
+                    let exit_time = timing.exit_datetime(event);
+                    let result = backtest_use_case_helpers::execute_straddle(
+                        self.options_repo.as_ref(),
+                        self.equity_repo.as_ref(),
+                        &*selector,
+                        &criteria,
+                        event,
+                        entry_time,
+                        exit_time,
+                        &exec_config,
+                    ).await;
+                    results.push(result);
                 }
                 results
             };
@@ -724,17 +865,9 @@ where
             let mut session_entries = 0;
             for result in session_results {
                 total_opportunities += 1;
-                match result {
-                    TradeResult::Straddle(trade_result) => {
-                        all_results.push(TradeResult::Straddle(trade_result));
-                        session_entries += 1;
-                    }
-                    TradeResult::Failed(_) => {
-                        // Failed trades are already recorded
-                    }
-                    _ => {
-                        warn!("Unexpected result type for post-earnings straddle");
-                    }
+                if let Some(trade_result) = result {
+                    all_results.push(trade_result);
+                    session_entries += 1;
                 }
             }
 
@@ -771,20 +904,21 @@ where
     /// Calendar straddle uses the same timing as calendar spreads (EarningsTradeTiming):
     /// - Entry: Day of/before earnings (AMC/BMO aware)
     /// - Exit: Day after earnings (post IV crush)
-    async fn execute_calendar_straddle(
+    pub async fn execute_calendar_straddle(
         &self,
         start_date: NaiveDate,
         end_date: NaiveDate,
         on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult, BacktestError> {
-        let mut all_results: Vec<TradeResult> = Vec::new();
+    ) -> Result<BacktestResult<CalendarStraddleResult>, BacktestError> {
+        let mut all_results: Vec<CalendarStraddleResult> = Vec::new();
         let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
         let mut sessions_processed = 0;
         let mut total_opportunities = 0;
 
-        // NEW: Use unified flow with optimized IV surface building
+        // Create selector and criteria
         let selector = self.create_selector();
-        let structure = TradeStructure::CalendarStraddle;
+        let criteria = self.build_expiration_criteria();
+        let exec_config = ExecutionConfig::for_straddle(self.config.max_entry_iv); // Calendar straddle uses same config as straddle
 
         // Calendar straddles use earnings timing (enter on/before earnings day)
         use crate::timing_strategy::TimingStrategy;
@@ -811,20 +945,45 @@ where
             debug!(
                 session_date = %session_date,
                 events_count = to_enter.len(),
-                "Processing calendar straddle session (UNIFIED EXECUTOR)"
+                "Processing calendar straddle session"
             );
 
-            // Process events using OPTIMIZED unified executor
+            // Process events using helper
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_event_unified(event, &*selector, structure, &timing))
+                    .map(|event| {
+                        let entry_time = timing.entry_datetime(event);
+                        let exit_time = timing.exit_datetime(event);
+                        backtest_use_case_helpers::execute_calendar_straddle(
+                            self.options_repo.as_ref(),
+                            self.equity_repo.as_ref(),
+                            &*selector,
+                            &criteria,
+                            event,
+                            entry_time,
+                            exit_time,
+                            &exec_config,
+                        )
+                    })
                     .collect();
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(self.process_event_unified(event, &*selector, structure, &timing).await);
+                    let entry_time = timing.entry_datetime(event);
+                    let exit_time = timing.exit_datetime(event);
+                    let result = backtest_use_case_helpers::execute_calendar_straddle(
+                        self.options_repo.as_ref(),
+                        self.equity_repo.as_ref(),
+                        &*selector,
+                        &criteria,
+                        event,
+                        entry_time,
+                        exit_time,
+                        &exec_config,
+                    ).await;
+                    results.push(result);
                 }
                 results
             };
@@ -833,28 +992,20 @@ where
             let mut session_entries = 0;
             for result in session_results {
                 total_opportunities += 1;
-                match result {
-                    TradeResult::CalendarStraddle(trade_result) => {
-                        // Apply IV ratio filter if configured
-                        if self.passes_calendar_straddle_iv_filter(&trade_result) {
-                            all_results.push(TradeResult::CalendarStraddle(trade_result));
-                            session_entries += 1;
-                        } else {
-                            dropped_events.push(TradeGenerationError {
-                                symbol: trade_result.symbol.clone(),
-                                earnings_date: trade_result.earnings_date,
-                                earnings_time: trade_result.earnings_time,
-                                reason: "IV_RATIO_FILTER".into(),
-                                details: trade_result.iv_ratio().map(|r| format!("IV ratio: {:.2}", r)),
-                                phase: "filter".into(),
-                            });
-                        }
-                    }
-                    TradeResult::Failed(_) => {
-                        // Failed trades are already recorded
-                    }
-                    _ => {
-                        warn!("Unexpected result type for calendar straddle");
+                if let Some(trade_result) = result {
+                    // Apply IV ratio filter if configured
+                    if self.passes_calendar_straddle_iv_filter(&trade_result) {
+                        all_results.push(trade_result);
+                        session_entries += 1;
+                    } else {
+                        dropped_events.push(TradeGenerationError {
+                            symbol: trade_result.symbol.clone(),
+                            earnings_date: trade_result.earnings_date,
+                            earnings_time: trade_result.earnings_time,
+                            reason: "IV_RATIO_FILTER".into(),
+                            details: trade_result.iv_ratio().map(|r| format!("IV ratio: {:.2}", r)),
+                            phase: "filter".into(),
+                        });
                     }
                 }
             }
@@ -951,86 +1102,6 @@ where
             self.config.selection.min_long_dte,
             self.config.selection.max_long_dte,
         )
-    }
-
-    /// NEW: Process earnings event using TradeOrchestrator (optimized IV surface building)
-    pub async fn process_event_unified(
-        &self,
-        event: &EarningsEvent,
-        selector: &dyn StrikeSelector,
-        structure: TradeStructure,
-        timing: &crate::timing_strategy::TimingStrategy,
-    ) -> TradeResult {
-        // Determine entry/exit times from the provided timing strategy
-        let entry_time = timing.entry_datetime(event);
-        let exit_time = timing.exit_datetime(event);
-
-        // Build IV surface ONCE for entry (used for both selection AND entry pricing)
-        let entry_chain = match self.options_repo
-            .get_option_bars_at_time(&event.symbol, entry_time)
-            .await
-        {
-            Ok(chain) => chain,
-            Err(e) => {
-                warn!("Failed to get option chain for {}: {}", event.symbol, e);
-                return self.create_failed_result(event, entry_time, exit_time, format!("No option data: {}", e), structure);
-            }
-        };
-
-        let entry_surface = match build_iv_surface_minute_aligned(
-            &entry_chain,
-            self.equity_repo.as_ref(),
-            &event.symbol,
-        ).await {
-            Some(surface) => surface,
-            None => {
-                warn!("Failed to build IV surface for {}", event.symbol);
-                return self.create_failed_result(event, entry_time, exit_time, "Failed to build IV surface".to_string(), structure);
-            }
-        };
-
-        // Build expiration criteria
-        let criteria = self.build_expiration_criteria();
-
-        // Create unified executor
-        let executor = TradeOrchestrator::new(self.options_repo.clone(), self.equity_repo.clone())
-            .with_pricing_model(self.config.pricing_model)
-            .with_max_entry_iv(self.config.max_entry_iv)
-            .with_hedge_config(self.config.hedge_config.clone())
-            .with_timing_strategy(timing.clone());
-
-        // Execute with pre-built entry surface (KEY OPTIMIZATION!)
-        executor.execute_with_selection(
-            event,
-            entry_time,
-            exit_time,
-            &entry_surface,  // Passed in - already built
-            selector,
-            structure,
-            &criteria,
-        ).await
-    }
-
-    /// Create a failed trade result
-    fn create_failed_result(
-        &self,
-        event: &EarningsEvent,
-        _entry_time: chrono::DateTime<chrono::Utc>,
-        _exit_time: chrono::DateTime<chrono::Utc>,
-        reason: String,
-        structure: TradeStructure,
-    ) -> TradeResult {
-        use crate::trade_orchestrator::FailedTrade;
-
-        TradeResult::Failed(FailedTrade {
-            symbol: event.symbol.clone(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
-            trade_structure: structure,
-            reason: FailureReason::PricingError(reason.clone()),
-            phase: "iv_surface_build".to_string(),
-            details: Some(reason),
-        })
     }
 
 

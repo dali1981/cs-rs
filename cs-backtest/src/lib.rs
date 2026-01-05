@@ -10,13 +10,12 @@ pub mod composite_pricer;  // Generic pricer for CompositeTrade types
 pub mod straddle_pricer;
 pub mod iron_butterfly_pricer;
 pub mod calendar_straddle_pricer;
-pub mod rolling_executor;  // Generic rolling executor for any trade type
 pub mod trade_executor;  // Unified executor with rolling + hedging support
 pub mod trade_factory_impl;
 pub mod hedging_analytics;
-pub mod trade_orchestrator;  // Orchestrates strike selection, execution, and hedging
 pub mod timing_strategy;
 pub mod backtest_use_case;
+mod backtest_use_case_helpers;
 pub mod atm_iv_use_case;
 pub mod minute_aligned_iv_use_case;
 pub mod earnings_analysis_use_case;
@@ -32,9 +31,7 @@ pub use earnings_analysis_use_case::{EarningsAnalysisUseCase, EarningsAnalysisRe
 
 // Generic execution framework
 pub use execution::{ExecutableTrade, TradePricer, ExecutionConfig, ExecutionContext, ExecutionError, execute_trade};
-pub use trade_orchestrator::{TradeResult, TradeStructure, TradeOrchestrator};
 pub use timing_strategy::TimingStrategy;
-pub use rolling_executor::RollingExecutor;
 pub use trade_executor::TradeExecutor;
 
 // Pricers

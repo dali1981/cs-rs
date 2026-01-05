@@ -5,6 +5,8 @@
 
 mod config;
 mod presets;
+mod types;
 
 pub use config::{TradeStrategy, TradeStructureConfig, TradeFilters};
 pub use presets::*;
+pub use types::{TradeStructure, FailedTrade};
