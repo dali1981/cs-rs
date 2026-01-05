@@ -169,6 +169,7 @@ where
     equity_repo: Arc<E>,
     hedge_config: cs_domain::HedgeConfig,
     timing_strategy: Option<TimingStrategy>,
+    pricing_model: PricingModel,
 }
 
 impl<O, E> UnifiedExecutor<O, E>
@@ -186,6 +187,7 @@ where
             equity_repo,
             hedge_config: cs_domain::HedgeConfig::default(),
             timing_strategy: None,
+            pricing_model: PricingModel::default(),
         }
     }
 
@@ -284,11 +286,13 @@ where
 
     /// Collect daily snapshot pairs for P&L attribution
     ///
-    /// For each trading day:
-    /// 1. Get spot and IV at market open and close
-    /// 2. Recompute Greeks using Black-Scholes
-    /// 3. Look up hedge_shares from timeline
-    /// 4. Create PositionSnapshot pairs
+    /// Creates close-to-close pairs to capture overnight moves:
+    /// 1. Entry → Day 1 EOD (4:00 PM)
+    /// 2. Day 1 EOD → Day 2 EOD (includes overnight)
+    /// 3. Day 2 EOD → Day 3 EOD (includes overnight)
+    /// 4. Day N EOD → Exit
+    ///
+    /// Uses PricingModel for IV interpolation instead of exact IV surface lookups.
     async fn collect_daily_snapshots(
         &self,
         straddle: &cs_domain::Straddle,
@@ -309,44 +313,32 @@ where
 
         let mut snapshots = Vec::new();
 
+        // Start with entry snapshot
+        let mut prev_snapshot = match self.create_snapshot(
+            straddle,
+            entry_time,
+            hedge_shares_timeline,
+        ).await {
+            Ok(s) => s,
+            Err(e) => return Err(format!("Failed to create entry snapshot: {}", e)),
+        };
+
+        // Create EOD snapshots and pair with previous
         for day in trading_days {
-            // Market hours: 9:30 AM - 4:00 PM ET
-            let open_time = cs_domain::datetime::eastern_to_utc(
-                day,
-                chrono::NaiveTime::from_hms_opt(9, 30, 0).unwrap(),
-            );
             let close_time = cs_domain::datetime::eastern_to_utc(
                 day,
                 chrono::NaiveTime::from_hms_opt(16, 0, 0).unwrap(),
             );
 
-            // Use entry_time for first day open, exit_time for last day close
-            let actual_open = if day == entry_time.date_naive() {
-                entry_time
-            } else {
-                open_time
-            };
-
-            let actual_close = if day == exit_time.date_naive() {
+            // Use exit_time for last day if exit is before 4 PM
+            let actual_close = if day == exit_time.date_naive() && exit_time < close_time {
+                exit_time
+            } else if day == exit_time.date_naive() {
                 exit_time
             } else {
                 close_time
             };
 
-            // Collect snapshot at day open
-            let open_snapshot = match self.create_snapshot(
-                straddle,
-                actual_open,
-                hedge_shares_timeline,
-            ).await {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("Warning: Failed to create open snapshot for {}: {}", day, e);
-                    continue;
-                }
-            };
-
-            // Collect snapshot at day close
             let close_snapshot = match self.create_snapshot(
                 straddle,
                 actual_close,
@@ -354,12 +346,14 @@ where
             ).await {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("Warning: Failed to create close snapshot for {}: {}", day, e);
+                    eprintln!("Warning: Failed to create EOD snapshot for {}: {}", day, e);
                     continue;
                 }
             };
 
-            snapshots.push((open_snapshot, close_snapshot));
+            // Pair previous snapshot with this EOD snapshot
+            snapshots.push((prev_snapshot, close_snapshot.clone()));
+            prev_snapshot = close_snapshot;
         }
 
         Ok(snapshots)
@@ -455,6 +449,7 @@ where
     }
 
     pub fn with_pricing_model(mut self, model: PricingModel) -> Self {
+        self.pricing_model = model;
         self.calendar_executor = self.calendar_executor.with_pricing_model(model);
         self.straddle_executor = self.straddle_executor.with_pricing_model(model);
         self.calendar_straddle_executor = self.calendar_straddle_executor.with_pricing_model(model);
