@@ -11,6 +11,7 @@ pub mod straddle_pricer;
 pub mod iron_butterfly_pricer;
 pub mod calendar_straddle_pricer;
 pub mod trade_executor;  // Unified executor with rolling + hedging support
+pub mod trade_executor_factory;  // Factory for creating trade executors
 pub mod trade_factory_impl;
 pub mod hedging_analytics;
 pub mod timing_strategy;
@@ -24,7 +25,7 @@ pub mod earnings_analysis_use_case;
 pub use config::{BacktestConfig, SpreadType, SelectionType};
 
 // Use cases
-pub use backtest_use_case::{BacktestUseCase, BacktestResult, SessionProgress, TradeGenerationError};
+pub use backtest_use_case::{BacktestUseCase, BacktestResult, SessionProgress, TradeGenerationError, TradeResultMethods};
 pub use atm_iv_use_case::{GenerateIvTimeSeriesUseCase, IvTimeSeriesResult, IvTimeSeriesError};
 pub use minute_aligned_iv_use_case::{MinuteAlignedIvUseCase, MinuteAlignedIvResult, MinuteAlignedIvError};
 pub use earnings_analysis_use_case::{EarningsAnalysisUseCase, EarningsAnalysisResult, EarningsAnalysisError};
@@ -33,6 +34,7 @@ pub use earnings_analysis_use_case::{EarningsAnalysisUseCase, EarningsAnalysisRe
 pub use execution::{ExecutableTrade, TradePricer, ExecutionConfig, ExecutionContext, ExecutionError, execute_trade};
 pub use timing_strategy::TimingStrategy;
 pub use trade_executor::TradeExecutor;
+pub use trade_executor_factory::TradeExecutorFactory;
 
 // Pricers
 pub use spread_pricer::{SpreadPricer, SpreadPricing, LegPricing, PricingError};
