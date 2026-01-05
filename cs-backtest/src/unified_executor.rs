@@ -161,6 +161,7 @@ where
     O: OptionsDataRepository,
     E: EquityDataRepository,
 {
+    options_repo: Arc<O>,
     calendar_executor: TradeExecutor<O, E>,
     straddle_executor: StraddleExecutor<O, E>,
     calendar_straddle_executor: CalendarStraddleExecutor<O, E>,
@@ -177,6 +178,7 @@ where
 {
     pub fn new(options_repo: Arc<O>, equity_repo: Arc<E>) -> Self {
         Self {
+            options_repo: options_repo.clone(),
             calendar_executor: TradeExecutor::new(options_repo.clone(), equity_repo.clone()),
             straddle_executor: StraddleExecutor::new(options_repo.clone(), equity_repo.clone()),
             calendar_straddle_executor: CalendarStraddleExecutor::new(options_repo.clone(), equity_repo.clone()),
@@ -207,6 +209,7 @@ where
         rehedge_times: Vec<DateTime<Utc>>,
     ) {
         use cs_domain::HedgeState;
+        use rust_decimal::prelude::ToPrimitive;
 
         // Initialize hedge state from option position at entry
         let mut hedge_state = HedgeState::new(
@@ -215,6 +218,9 @@ where
             result.net_gamma.unwrap_or(0.0),
             result.spot_at_entry,
         );
+
+        // Track hedge shares over time for snapshot collection
+        let mut hedge_shares_timeline: Vec<(DateTime<Utc>, i32)> = vec![(entry_time, 0)];
 
         // Process each rehedge time - state machine handles all logic
         for rehedge_time in rehedge_times {
@@ -227,6 +233,8 @@ where
             if let Ok(spot) = self.equity_repo.get_spot_price(straddle.symbol(), rehedge_time).await {
                 // Update state - will hedge if needed
                 hedge_state.update(rehedge_time, spot.to_f64());
+                // Track hedge shares after this update
+                hedge_shares_timeline.push((rehedge_time, hedge_state.stock_shares()));
             }
         }
 
@@ -238,10 +246,206 @@ where
             let hedge_pnl = hedge_position.calculate_pnl(result.spot_at_exit);
             let total_pnl = result.pnl + hedge_pnl - hedge_position.total_cost;
 
-            result.hedge_position = Some(hedge_position);
+            result.hedge_position = Some(hedge_position.clone());
             result.hedge_pnl = Some(hedge_pnl);
             result.total_pnl_with_hedge = Some(total_pnl);
+
+            // Collect daily snapshots for integrated attribution
+            match self.collect_daily_snapshots(
+                straddle,
+                &hedge_shares_timeline,
+                entry_time,
+                exit_time,
+            ).await {
+                Ok(snapshots) if !snapshots.is_empty() => {
+                    let total_pnl_with_hedge = total_pnl;
+                    let attribution = cs_domain::PositionAttribution::from_snapshots(
+                        snapshots,
+                        total_pnl_with_hedge,
+                    );
+                    result.position_attribution = Some(attribution);
+                }
+                Ok(_) => {
+                    // No snapshots collected (very short holding period?)
+                    eprintln!("Warning: No daily snapshots collected for attribution");
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to collect snapshots for attribution: {}", e);
+                }
+            }
         }
+    }
+
+    /// Collect daily snapshot pairs for P&L attribution
+    ///
+    /// For each trading day:
+    /// 1. Get spot and IV at market open and close
+    /// 2. Recompute Greeks using Black-Scholes
+    /// 3. Look up hedge_shares from timeline
+    /// 4. Create PositionSnapshot pairs
+    async fn collect_daily_snapshots(
+        &self,
+        straddle: &cs_domain::Straddle,
+        hedge_shares_timeline: &[(DateTime<Utc>, i32)],
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+    ) -> Result<Vec<(cs_domain::PositionSnapshot, cs_domain::PositionSnapshot)>, String> {
+        use cs_domain::TradingCalendar;
+
+        let trading_days: Vec<_> = TradingCalendar::trading_days_between(
+            entry_time.date_naive(),
+            exit_time.date_naive(),
+        ).collect();
+
+        if trading_days.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut snapshots = Vec::new();
+
+        for day in trading_days {
+            // Market hours: 9:30 AM - 4:00 PM ET
+            let open_time = cs_domain::datetime::eastern_to_utc(
+                day,
+                chrono::NaiveTime::from_hms_opt(9, 30, 0).unwrap(),
+            );
+            let close_time = cs_domain::datetime::eastern_to_utc(
+                day,
+                chrono::NaiveTime::from_hms_opt(16, 0, 0).unwrap(),
+            );
+
+            // Use entry_time for first day open, exit_time for last day close
+            let actual_open = if day == entry_time.date_naive() {
+                entry_time
+            } else {
+                open_time
+            };
+
+            let actual_close = if day == exit_time.date_naive() {
+                exit_time
+            } else {
+                close_time
+            };
+
+            // Collect snapshot at day open
+            let open_snapshot = match self.create_snapshot(
+                straddle,
+                actual_open,
+                hedge_shares_timeline,
+            ).await {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Warning: Failed to create open snapshot for {}: {}", day, e);
+                    continue;
+                }
+            };
+
+            // Collect snapshot at day close
+            let close_snapshot = match self.create_snapshot(
+                straddle,
+                actual_close,
+                hedge_shares_timeline,
+            ).await {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Warning: Failed to create close snapshot for {}: {}", day, e);
+                    continue;
+                }
+            };
+
+            snapshots.push((open_snapshot, close_snapshot));
+        }
+
+        Ok(snapshots)
+    }
+
+    /// Create a single position snapshot at a given time
+    async fn create_snapshot(
+        &self,
+        straddle: &cs_domain::Straddle,
+        timestamp: DateTime<Utc>,
+        hedge_shares_timeline: &[(DateTime<Utc>, i32)],
+    ) -> Result<cs_domain::PositionSnapshot, String> {
+        use cs_analytics::bs_greeks;
+        use cs_domain::{PositionGreeks, PositionSnapshot, CONTRACT_MULTIPLIER};
+        use rust_decimal::prelude::ToPrimitive;
+
+        // Get spot price at this time
+        let spot = self.equity_repo.get_spot_price(straddle.symbol(), timestamp)
+            .await
+            .map_err(|e| format!("Failed to get spot price: {}", e))?;
+
+        // Get option chain to compute IV
+        let chain = self.options_repo.get_option_bars_at_time(
+            straddle.symbol(),
+            timestamp,
+        ).await.map_err(|e| format!("Failed to get option chain: {}", e))?;
+
+        // Build IV surface
+        let iv_surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
+            &chain,
+            self.equity_repo.as_ref(),
+            straddle.symbol(),
+        ).await;
+
+        // Get average IV for the straddle strike (average of call and put)
+        let strike_decimal = straddle.strike().value();
+        let strike_f64 = strike_decimal.to_f64().unwrap_or(0.0);
+        let iv = if let Some(ref surface) = iv_surface {
+            let call_iv = surface.get_iv(strike_decimal, straddle.expiration(), true);
+            let put_iv = surface.get_iv(strike_decimal, straddle.expiration(), false);
+            match (call_iv, put_iv) {
+                (Some(c), Some(p)) => (c + p) / 2.0,
+                (Some(c), None) => c,
+                (None, Some(p)) => p,
+                (None, None) => 0.30,  // Default to 30% if not found
+            }
+        } else {
+            0.30
+        };
+
+        // Compute time to expiration in years
+        let tte_days = (straddle.expiration() - timestamp.date_naive()).num_days() as f64;
+        let tte = tte_days / 365.0;
+
+        // Recompute Greeks using Black-Scholes
+        let risk_free_rate = 0.05;  // 5% annual risk-free rate
+        let call_greeks = bs_greeks(
+            spot.to_f64(),
+            strike_f64,
+            tte,
+            iv,
+            true,  // is_call
+            risk_free_rate,
+        );
+
+        let put_greeks = bs_greeks(
+            spot.to_f64(),
+            strike_f64,
+            tte,
+            iv,
+            false,  // is_call
+            risk_free_rate,
+        );
+
+        // Combine call + put Greeks for position level
+        let position_greeks = PositionGreeks::straddle(&call_greeks, &put_greeks, CONTRACT_MULTIPLIER);
+
+        // Find hedge shares at this time (most recent before timestamp)
+        let hedge_shares = hedge_shares_timeline
+            .iter()
+            .rev()
+            .find(|(t, _)| *t <= timestamp)
+            .map(|(_, shares)| *shares)
+            .unwrap_or(0);
+
+        Ok(PositionSnapshot::new(
+            timestamp,
+            spot.to_f64(),
+            iv,
+            position_greeks,
+            hedge_shares,
+        ))
     }
 
     pub fn with_pricing_model(mut self, model: PricingModel) -> Self {

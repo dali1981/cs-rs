@@ -235,6 +235,7 @@ where
             hedge_position: None,
             hedge_pnl: None,
             total_pnl_with_hedge: None,
+            position_attribution: None,
         })
     }
 
@@ -307,6 +308,7 @@ where
             hedge_position: None,
             hedge_pnl: None,
             total_pnl_with_hedge: None,
+            position_attribution: None,
         }
     }
 }

@@ -214,6 +214,8 @@ where
                 .unwrap_or(Decimal::ZERO),
 
             roll_reason,
+
+            position_attribution: result.position_attribution,
         }
     }
 

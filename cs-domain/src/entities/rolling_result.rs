@@ -126,7 +126,7 @@ pub struct RollPeriod {
     pub net_theta: Option<f64>,
     pub net_vega: Option<f64>,
 
-    // P&L Attribution
+    // P&L Attribution (legacy - kept for non-hedged strategies)
     pub delta_pnl: Option<Decimal>,
     pub gamma_pnl: Option<Decimal>,
     pub theta_pnl: Option<Decimal>,
@@ -138,6 +138,10 @@ pub struct RollPeriod {
     pub transaction_cost: Decimal,
 
     pub roll_reason: RollReason,
+
+    // Integrated position attribution (when hedging is enabled)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_attribution: Option<crate::position::PositionAttribution>,
 }
 
 /// Reason why a position was rolled

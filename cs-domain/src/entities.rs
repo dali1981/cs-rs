@@ -714,6 +714,10 @@ pub struct StraddleResult {
     pub hedge_pnl: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_pnl_with_hedge: Option<Decimal>,
+
+    // Integrated position attribution (when hedging is enabled)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_attribution: Option<crate::position::PositionAttribution>,
 }
 
 impl StraddleResult {

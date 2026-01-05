@@ -635,9 +635,81 @@ fn display_rolling_results(result: &cs_domain::RollingResult) {
         let table = Table::new(rows);
         println!("{}", table);
 
-        // Show P&L attribution if available
-        let has_attribution = result.rolls.iter().any(|r| r.delta_pnl.is_some());
-        if has_attribution {
+        // Show P&L attribution - prefer integrated position attribution if available
+        let has_position_attribution = result.rolls.iter().any(|r| r.position_attribution.is_some());
+        let has_legacy_attribution = result.rolls.iter().any(|r| r.delta_pnl.is_some());
+
+        if has_position_attribution {
+            // Display integrated position attribution (delta-hedged)
+            println!();
+            println!("{}", style("Integrated Position Attribution (Daily Recomputed):").bold());
+            println!();
+
+            #[derive(Tabled)]
+            struct IntegratedAttributionRow {
+                #[tabled(rename = "#")]
+                num: usize,
+                #[tabled(rename = "Days")]
+                days: String,
+                #[tabled(rename = "Gross Δ P&L")]
+                gross_delta: String,
+                #[tabled(rename = "Hedge Δ P&L")]
+                hedge_delta: String,
+                #[tabled(rename = "Net Δ P&L")]
+                net_delta: String,
+                #[tabled(rename = "Γ P&L")]
+                gamma: String,
+                #[tabled(rename = "Θ P&L")]
+                theta: String,
+                #[tabled(rename = "ν P&L")]
+                vega: String,
+                #[tabled(rename = "Unexplained")]
+                unexplained: String,
+                #[tabled(rename = "Hedge Eff.")]
+                hedge_eff: String,
+            }
+
+            let attr_rows: Vec<IntegratedAttributionRow> = result.rolls.iter().enumerate().map(|(i, roll)| {
+                if let Some(ref attr) = roll.position_attribution {
+                    IntegratedAttributionRow {
+                        num: i + 1,
+                        days: attr.num_days().to_string(),
+                        gross_delta: format!("${:.2}", attr.total_gross_delta_pnl),
+                        hedge_delta: format!("${:.2}", attr.total_hedge_delta_pnl),
+                        net_delta: format!("${:.2}", attr.total_net_delta_pnl),
+                        gamma: format!("${:.2}", attr.total_gamma_pnl),
+                        theta: format!("${:.2}", attr.total_theta_pnl),
+                        vega: format!("${:.2}", attr.total_vega_pnl),
+                        unexplained: format!("${:.2}", attr.total_unexplained),
+                        hedge_eff: format!("{:.1}%", attr.hedge_efficiency),
+                    }
+                } else {
+                    IntegratedAttributionRow {
+                        num: i + 1,
+                        days: "-".to_string(),
+                        gross_delta: "-".to_string(),
+                        hedge_delta: "-".to_string(),
+                        net_delta: "-".to_string(),
+                        gamma: "-".to_string(),
+                        theta: "-".to_string(),
+                        vega: "-".to_string(),
+                        unexplained: "-".to_string(),
+                        hedge_eff: "-".to_string(),
+                    }
+                }
+            }).collect();
+
+            let attr_table = Table::new(attr_rows);
+            println!("{}", attr_table);
+
+            println!();
+            println!("{}", style("Legend:").dim());
+            println!("  {}", style("Gross Δ P&L: Options delta P&L (unhedged)").dim());
+            println!("  {}", style("Hedge Δ P&L: Stock hedge P&L").dim());
+            println!("  {}", style("Net Δ P&L: Combined delta P&L (Gross + Hedge)").dim());
+            println!("  {}", style("Hedge Eff.: |Hedge Δ| / |Gross Δ| × 100%").dim());
+        } else if has_legacy_attribution {
+            // Display legacy attribution (non-hedged)
             println!();
             println!("{}", style("P&L Attribution (Greeks):").bold());
             println!();
