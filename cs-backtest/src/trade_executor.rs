@@ -332,9 +332,9 @@ where
             net_vega: None,
 
             // IV from result
-            iv_entry: None,  // Could be added to TradeResult trait if needed
-            iv_exit: None,
-            iv_change: None,
+            iv_entry: result.iv_entry(),
+            iv_exit: result.iv_exit(),
+            iv_change: result.iv_change(),
 
             // P&L attribution
             delta_pnl: None,

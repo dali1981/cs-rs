@@ -100,6 +100,23 @@ pub trait TradeResult: Send + Sync {
     /// Net gamma of the position at entry
     fn net_gamma(&self) -> Option<f64>;
 
+    // --- IV support (for volatility tracking) ---
+
+    /// Implied volatility at entry
+    fn iv_entry(&self) -> Option<f64> {
+        None
+    }
+
+    /// Implied volatility at exit
+    fn iv_exit(&self) -> Option<f64> {
+        None
+    }
+
+    /// IV change (exit - entry)
+    fn iv_change(&self) -> Option<f64> {
+        None
+    }
+
     /// Hedge P&L if hedging was applied
     fn hedge_pnl(&self) -> Option<Decimal>;
 

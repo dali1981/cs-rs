@@ -86,6 +86,18 @@ impl TradeResult for StraddleResult {
         self.net_gamma
     }
 
+    fn iv_entry(&self) -> Option<f64> {
+        self.iv_entry
+    }
+
+    fn iv_exit(&self) -> Option<f64> {
+        self.iv_exit
+    }
+
+    fn iv_change(&self) -> Option<f64> {
+        self.iv_change
+    }
+
     fn hedge_pnl(&self) -> Option<Decimal> {
         self.hedge_pnl
     }
@@ -199,6 +211,9 @@ impl TradeResult for CalendarSpreadResult {
         }
     }
 
+    // CalendarSpreadResult doesn't have simple IV fields - it has separate short/long IVs
+    // Use default trait implementation (returns None)
+
     fn hedge_pnl(&self) -> Option<Decimal> {
         self.hedge_pnl
     }
@@ -306,6 +321,18 @@ impl TradeResult for IronButterflyResult {
         self.net_gamma
     }
 
+    fn iv_entry(&self) -> Option<f64> {
+        self.iv_entry
+    }
+
+    fn iv_exit(&self) -> Option<f64> {
+        self.iv_exit
+    }
+
+    fn iv_change(&self) -> Option<f64> {
+        self.iv_crush  // Iron butterfly uses iv_crush instead of iv_change
+    }
+
     fn hedge_pnl(&self) -> Option<Decimal> {
         self.hedge_pnl
     }
@@ -380,6 +407,8 @@ impl TradeResult for CalendarStraddleResult {
     fn net_gamma(&self) -> Option<f64> {
         self.net_gamma
     }
+
+    // This result type doesn't have standard IV fields - use default trait implementation (returns None)
 
     fn hedge_pnl(&self) -> Option<Decimal> {
         self.hedge_pnl
