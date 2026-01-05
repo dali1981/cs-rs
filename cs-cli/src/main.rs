@@ -576,7 +576,7 @@ fn display_rolling_results(result: &cs_domain::RollingStraddleResult) {
                 exit: roll.exit_date.format("%Y-%m-%d").to_string(),
                 strike: format!("${:.2}", roll.strike),
                 pnl: format!("${:.2}", roll.pnl),
-                spot_move: format!("{:.1}%", roll.spot_move_pct * 100.0),
+                spot_move: format!("{:.1}%", roll.spot_move_pct),
                 iv_change: roll.iv_change.map(|c| format!("{:+.1}%", c * 100.0)).unwrap_or_else(|| "N/A".to_string()),
                 reason: roll.roll_reason.to_string(),
             }
