@@ -18,7 +18,7 @@ pub mod hedging_executor;  // Delta hedging wrapper
 pub mod hedging_analytics; // Hedging performance analytics
 pub mod calendar_straddle_pricer;
 pub mod calendar_straddle_executor;
-pub mod unified_executor;  // NEW: Unified executor for all trade types
+pub mod trade_orchestrator;  // Orchestrates strike selection, execution, and hedging
 pub mod timing_strategy;   // Timing strategy enum for different trade types
 pub mod backtest_use_case;
 pub mod atm_iv_use_case;
@@ -27,7 +27,7 @@ pub mod earnings_analysis_use_case;
 
 pub use config::{BacktestConfig, SpreadType, SelectionType};
 pub use backtest_use_case::{BacktestUseCase, BacktestResult, SessionProgress, TradeGenerationError};
-pub use unified_executor::{TradeResult, TradeStructure, UnifiedExecutor};
+pub use trade_orchestrator::{TradeResult, TradeStructure, TradeOrchestrator};
 pub use timing_strategy::TimingStrategy;
 pub use trade_executor::{TradeExecutor, ExecutionError};
 pub use spread_pricer::{SpreadPricer, SpreadPricing, LegPricing, PricingError};

@@ -452,7 +452,7 @@ async fn run_rolling_straddle(
     equity_repo: FinqEquityRepository,
     output: Option<PathBuf>,
 ) -> Result<()> {
-    use cs_backtest::{UnifiedExecutor, RollingStraddleExecutor, TimingStrategy, DefaultTradeFactory};
+    use cs_backtest::{TradeOrchestrator, RollingStraddleExecutor, TimingStrategy, DefaultTradeFactory};
     use cs_domain::{MarketTime, StraddleTradeTiming, TradeFactory};
     use std::sync::Arc;
 
@@ -481,7 +481,7 @@ async fn run_rolling_straddle(
     )) as Arc<dyn TradeFactory>;
 
     // Create unified executor with pricing model and hedging config
-    let mut unified_executor = UnifiedExecutor::new(
+    let mut unified_executor = TradeOrchestrator::new(
         Arc::clone(&options_repo),
         Arc::clone(&equity_repo),
     )

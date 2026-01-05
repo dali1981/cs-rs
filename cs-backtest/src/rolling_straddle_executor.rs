@@ -8,7 +8,7 @@ use cs_domain::{
     Straddle, StraddleResult, TradingCalendar, TradeFactory,
 };
 
-use crate::unified_executor::UnifiedExecutor;
+use crate::trade_orchestrator::TradeOrchestrator;
 
 /// Executor for rolling straddle strategies with optional hedging
 ///
@@ -16,14 +16,14 @@ use crate::unified_executor::UnifiedExecutor;
 /// - Enters new ATM position each roll period
 /// - Tracks cumulative P&L across rolls
 /// - Maintains rolling campaign from start to end date
-/// - Supports delta hedging if configured in UnifiedExecutor
+/// - Supports delta hedging if configured in TradeOrchestrator
 /// - Uses TradeFactory to construct straddles with REAL expirations from market data
 pub struct RollingStraddleExecutor<O, E>
 where
     O: OptionsDataRepository,
     E: EquityDataRepository,
 {
-    unified_executor: UnifiedExecutor<O, E>,
+    unified_executor: TradeOrchestrator<O, E>,
     trade_factory: Arc<dyn TradeFactory>,
     roll_policy: RollPolicy,
 }
@@ -34,7 +34,7 @@ where
     E: EquityDataRepository,
 {
     pub fn new(
-        unified_executor: UnifiedExecutor<O, E>,
+        unified_executor: TradeOrchestrator<O, E>,
         trade_factory: Arc<dyn TradeFactory>,
         roll_policy: RollPolicy,
     ) -> Self {

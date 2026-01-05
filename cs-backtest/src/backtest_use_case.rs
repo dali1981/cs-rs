@@ -7,7 +7,7 @@ use cs_domain::*;
 use cs_domain::timing::{EarningsTradeTiming, StraddleTradeTiming, PostEarningsStraddleTiming};
 use cs_domain::strike_selection::{StrikeSelector, ATMStrategy, DeltaStrategy, ExpirationCriteria, IronButterflyStrategy, StraddleStrategy};
 use crate::config::{BacktestConfig, SpreadType, SelectionType};
-use crate::unified_executor::{UnifiedExecutor, TradeStructure, TradeResult};
+use crate::trade_orchestrator::{TradeOrchestrator, TradeStructure, TradeResult};
 use crate::trade_executor::TradeExecutor;
 use crate::iron_butterfly_executor::IronButterflyExecutor;
 use crate::straddle_executor::StraddleExecutor;
@@ -1344,7 +1344,7 @@ where
         )
     }
 
-    /// NEW: Process earnings event using UnifiedExecutor (optimized IV surface building)
+    /// NEW: Process earnings event using TradeOrchestrator (optimized IV surface building)
     pub async fn process_event_unified(
         &self,
         event: &EarningsEvent,
@@ -1384,7 +1384,7 @@ where
         let criteria = self.build_expiration_criteria();
 
         // Create unified executor
-        let executor = UnifiedExecutor::new(self.options_repo.clone(), self.equity_repo.clone())
+        let executor = TradeOrchestrator::new(self.options_repo.clone(), self.equity_repo.clone())
             .with_pricing_model(self.config.pricing_model)
             .with_max_entry_iv(self.config.max_entry_iv)
             .with_hedge_config(self.config.hedge_config.clone())
@@ -1411,7 +1411,7 @@ where
         reason: String,
         structure: TradeStructure,
     ) -> TradeResult {
-        use crate::unified_executor::FailedTrade;
+        use crate::trade_orchestrator::FailedTrade;
 
         TradeResult::Failed(FailedTrade {
             symbol: event.symbol.clone(),

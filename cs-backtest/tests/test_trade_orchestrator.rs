@@ -1,4 +1,4 @@
-/// Integration test for UnifiedExecutor with optimized IV surface building
+/// Integration test for TradeOrchestrator with optimized IV surface building
 ///
 /// Tests that the new process_event_unified() method works correctly
 /// and achieves the IV surface optimization (build once, reuse for selection + entry)
@@ -45,7 +45,7 @@ async fn test_unified_executor_calendar_spread() {
         EarningsTime::AfterMarketClose,
     );
 
-    println!("\n=== Testing UnifiedExecutor with CRBG ===");
+    println!("\n=== Testing TradeOrchestrator with CRBG ===");
     println!("Symbol: {}", event.symbol);
     println!("Earnings date: {}", event.earnings_date);
     println!("Earnings time: {:?}", event.earnings_time);
@@ -116,7 +116,7 @@ async fn test_unified_executor_straddle() {
         EarningsTime::AfterMarketClose,
     );
 
-    println!("\n=== Testing UnifiedExecutor Straddle ===");
+    println!("\n=== Testing TradeOrchestrator Straddle ===");
 
     // Get selector and structure
     let selector = use_case.create_selector();

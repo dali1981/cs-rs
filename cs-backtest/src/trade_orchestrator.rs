@@ -156,7 +156,7 @@ pub enum UnifiedExecutionError {
 /// Key optimization: Accepts pre-built entry_surface to avoid redundant builds.
 /// The entry surface is built once in process_event() and reused for both
 /// selection AND entry pricing.
-pub struct UnifiedExecutor<O, E>
+pub struct TradeOrchestrator<O, E>
 where
     O: OptionsDataRepository,
     E: EquityDataRepository,
@@ -172,7 +172,7 @@ where
     pricing_model: PricingModel,
 }
 
-impl<O, E> UnifiedExecutor<O, E>
+impl<O, E> TradeOrchestrator<O, E>
 where
     O: OptionsDataRepository,
     E: EquityDataRepository,
