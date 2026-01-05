@@ -8,6 +8,8 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
 use crate::trade::TradeFactory;
+use crate::hedging::HedgePosition;
+use crate::PositionAttribution;
 
 /// A trade that can be constructed, executed, and rolled
 ///
@@ -61,8 +63,11 @@ pub trait RollableTrade: Sized + Send + Sync {
 /// Common interface for trade execution results
 ///
 /// All trade result types (StraddleResult, CalendarSpreadResult, etc.)
-/// must implement this trait to enable generic result aggregation.
+/// must implement this trait to enable generic result aggregation and hedging.
 pub trait TradeResult: Send + Sync {
+    /// Symbol being traded
+    fn symbol(&self) -> &str;
+
     /// Net P&L from the trade
     fn pnl(&self) -> Decimal;
 
@@ -75,9 +80,6 @@ pub trait TradeResult: Send + Sync {
     /// Whether the trade executed successfully
     fn success(&self) -> bool;
 
-    /// Hedge P&L if hedging was enabled
-    fn hedge_pnl(&self) -> Option<Decimal>;
-
     /// Entry timestamp
     fn entry_time(&self) -> DateTime<Utc>;
 
@@ -89,6 +91,31 @@ pub trait TradeResult: Send + Sync {
 
     /// Spot price at exit
     fn spot_at_exit(&self) -> f64;
+
+    // --- Hedging support (trade-agnostic) ---
+
+    /// Net delta of the position at entry
+    fn net_delta(&self) -> Option<f64>;
+
+    /// Net gamma of the position at entry
+    fn net_gamma(&self) -> Option<f64>;
+
+    /// Hedge P&L if hedging was applied
+    fn hedge_pnl(&self) -> Option<Decimal>;
+
+    /// Total P&L including hedge
+    fn total_pnl_with_hedge(&self) -> Option<Decimal>;
+
+    /// Apply hedge results to this trade result
+    ///
+    /// This is called after hedging simulation completes to store the results.
+    fn apply_hedge_results(
+        &mut self,
+        position: HedgePosition,
+        hedge_pnl: Decimal,
+        total_pnl: Decimal,
+        attribution: Option<PositionAttribution>,
+    );
 }
 
 /// Errors that can occur during trade construction

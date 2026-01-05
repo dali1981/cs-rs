@@ -132,6 +132,23 @@ impl CalendarStraddlePricer {
     }
 }
 
+// TradePricer trait implementation for generic execution
+impl crate::execution::TradePricer for CalendarStraddlePricer {
+    type Trade = CalendarStraddle;
+    type Pricing = CalendarStraddlePricing;
+
+    fn price_with_surface(
+        &self,
+        trade: &CalendarStraddle,
+        chain_df: &DataFrame,
+        spot: f64,
+        timestamp: DateTime<Utc>,
+        iv_surface: Option<&IVSurface>,
+    ) -> Result<CalendarStraddlePricing, PricingError> {
+        self.price_with_surface(trade, chain_df, spot, timestamp, iv_surface)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

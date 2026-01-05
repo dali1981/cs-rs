@@ -118,3 +118,20 @@ impl IronButterflyPricer {
         })
     }
 }
+
+// TradePricer trait implementation for generic execution
+impl crate::execution::TradePricer for IronButterflyPricer {
+    type Trade = IronButterfly;
+    type Pricing = IronButterflyPricing;
+
+    fn price_with_surface(
+        &self,
+        trade: &IronButterfly,
+        chain_df: &polars::prelude::DataFrame,
+        spot: f64,
+        timestamp: chrono::DateTime<chrono::Utc>,
+        iv_surface: Option<&cs_analytics::IVSurface>,
+    ) -> Result<IronButterflyPricing, PricingError> {
+        self.price_with_surface(trade, chain_df, spot, timestamp, iv_surface)
+    }
+}

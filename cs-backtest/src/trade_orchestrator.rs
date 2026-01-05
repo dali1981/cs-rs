@@ -21,6 +21,8 @@ use finq_core::OptionType;
 use crate::execution::{execute_trade, ExecutableTrade, ExecutionConfig};
 use crate::spread_pricer::SpreadPricer;
 use crate::straddle_pricer::StraddlePricer;
+use crate::calendar_straddle_pricer::CalendarStraddlePricer;
+use crate::iron_butterfly_pricer::IronButterflyPricer;
 use crate::timing_strategy::TimingStrategy;
 
 /// Trade structure type - defines WHAT to trade
@@ -333,9 +335,7 @@ where
             Err(e) => return self.selection_failed(event, structure, e),
         };
 
-        // 2. Create pricer on demand
-        // Note: CalendarStraddle needs its own ExecutableTrade impl
-        // For now, fall back to direct execution pattern
+        // 2. Execute trade
         let result = self.execute_calendar_straddle_direct(&cal_straddle, event, entry_time, exit_time).await;
 
         // 3. Wrap result
@@ -367,9 +367,7 @@ where
             Err(e) => return self.selection_failed(event, structure, e),
         };
 
-        // 2. Execute
-        // Note: IronButterfly needs its own ExecutableTrade impl
-        // For now, fall back to direct execution pattern
+        // 2. Execute trade
         let result = self.execute_iron_butterfly_direct(&butterfly, event, entry_time, exit_time).await;
 
         // 3. Wrap result
@@ -410,7 +408,7 @@ where
             let rehedge_times = self.timing_strategy.as_ref().unwrap()
                 .rehedge_times(entry_time, exit_time, &self.hedge_config.strategy);
 
-            if let Err(e) = self.apply_hedging(&mut result, straddle, entry_time, exit_time, rehedge_times).await {
+            if let Err(e) = self.apply_hedging(&mut result, entry_time, exit_time, rehedge_times).await {
                 eprintln!("Hedging failed: {}", e);
                 result.success = false;
                 result.failure_reason = Some(cs_domain::FailureReason::PricingError(
@@ -422,124 +420,88 @@ where
         result
     }
 
-    // Temporary: Direct execution for types without ExecutableTrade impl yet
+    /// Execute a calendar straddle using generic execution
     async fn execute_calendar_straddle_direct(
         &self,
-        _cal_straddle: &CalendarStraddle,
+        cal_straddle: &CalendarStraddle,
         event: &EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
     ) -> CalendarStraddleResult {
-        // TODO: Implement ExecutableTrade for CalendarStraddle
-        // Use Decimal::ONE since Strike::new() rejects zero
-        let placeholder_strike = Strike::new(Decimal::ONE).unwrap();
-        CalendarStraddleResult {
-            symbol: event.symbol.clone(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
-            short_strike: placeholder_strike.clone(),
-            long_strike: placeholder_strike,
-            short_expiry: event.earnings_date,
-            long_expiry: event.earnings_date,
+        // Create pricer on demand
+        let spread_pricer = SpreadPricer::new().with_pricing_model(self.pricing_model);
+        let pricer = CalendarStraddlePricer::new(spread_pricer);
+        let config = ExecutionConfig::for_calendar_spread(self.max_entry_iv);
+
+        // Execute using generic function
+        let mut result = execute_trade(
+            cal_straddle,
+            &pricer,
+            self.options_repo.as_ref(),
+            self.equity_repo.as_ref(),
+            &config,
+            event,
             entry_time,
-            short_call_entry: Decimal::ZERO,
-            short_put_entry: Decimal::ZERO,
-            long_call_entry: Decimal::ZERO,
-            long_put_entry: Decimal::ZERO,
-            entry_cost: Decimal::ZERO,
             exit_time,
-            short_call_exit: Decimal::ZERO,
-            short_put_exit: Decimal::ZERO,
-            long_call_exit: Decimal::ZERO,
-            long_put_exit: Decimal::ZERO,
-            exit_value: Decimal::ZERO,
-            entry_surface_time: None,
-            exit_surface_time: None,
-            pnl: Decimal::ZERO,
-            pnl_pct: Decimal::ZERO,
-            net_delta: None,
-            net_gamma: None,
-            net_theta: None,
-            net_vega: None,
-            short_iv_entry: None,
-            long_iv_entry: None,
-            short_iv_exit: None,
-            long_iv_exit: None,
-            iv_ratio_entry: None,
-            delta_pnl: None,
-            gamma_pnl: None,
-            theta_pnl: None,
-            vega_pnl: None,
-            unexplained_pnl: None,
-            spot_at_entry: 0.0,
-            spot_at_exit: 0.0,
-            success: false,
-            failure_reason: Some(cs_domain::FailureReason::PricingError(
-                "CalendarStraddle execution not yet implemented".to_string()
-            )),
+        ).await;
+
+        // Apply hedging if enabled (calendar straddles can be hedged like straddles)
+        if result.success && self.hedge_config.is_enabled() && self.timing_strategy.is_some() {
+            let rehedge_times = self.timing_strategy.as_ref().unwrap()
+                .rehedge_times(entry_time, exit_time, &self.hedge_config.strategy);
+
+            if let Err(e) = self.apply_hedging(&mut result, entry_time, exit_time, rehedge_times).await {
+                eprintln!("Hedging failed: {}", e);
+                result.success = false;
+                result.failure_reason = Some(cs_domain::FailureReason::PricingError(
+                    format!("Hedging failed: {}", e)
+                ));
+            }
         }
+
+        result
     }
 
+    /// Execute an iron butterfly using generic execution
     async fn execute_iron_butterfly_direct(
         &self,
-        _butterfly: &IronButterfly,
+        butterfly: &IronButterfly,
         event: &EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
     ) -> IronButterflyResult {
-        // TODO: Implement ExecutableTrade for IronButterfly
-        // Use Decimal::ONE since Strike::new() rejects zero
-        let placeholder_strike = Strike::new(Decimal::ONE).unwrap();
-        IronButterflyResult {
-            symbol: event.symbol.clone(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
-            center_strike: placeholder_strike.clone(),
-            upper_strike: placeholder_strike.clone(),
-            lower_strike: placeholder_strike,
-            expiration: event.earnings_date,
-            wing_width: Decimal::ZERO,
+        // Create pricer on demand
+        let spread_pricer = SpreadPricer::new().with_pricing_model(self.pricing_model);
+        let pricer = IronButterflyPricer::new(spread_pricer);
+        let config = ExecutionConfig::for_iron_butterfly(self.max_entry_iv);
+
+        // Execute using generic function
+        let mut result = execute_trade(
+            butterfly,
+            &pricer,
+            self.options_repo.as_ref(),
+            self.equity_repo.as_ref(),
+            &config,
+            event,
             entry_time,
-            short_call_entry: Decimal::ZERO,
-            short_put_entry: Decimal::ZERO,
-            long_call_entry: Decimal::ZERO,
-            long_put_entry: Decimal::ZERO,
-            entry_credit: Decimal::ZERO,
             exit_time,
-            short_call_exit: Decimal::ZERO,
-            short_put_exit: Decimal::ZERO,
-            long_call_exit: Decimal::ZERO,
-            long_put_exit: Decimal::ZERO,
-            exit_cost: Decimal::ZERO,
-            entry_surface_time: None,
-            exit_surface_time: None,
-            pnl: Decimal::ZERO,
-            pnl_pct: Decimal::ZERO,
-            max_loss: Decimal::ZERO,
-            net_delta: None,
-            net_gamma: None,
-            net_theta: None,
-            net_vega: None,
-            iv_entry: None,
-            iv_exit: None,
-            iv_crush: None,
-            delta_pnl: None,
-            gamma_pnl: None,
-            theta_pnl: None,
-            vega_pnl: None,
-            unexplained_pnl: None,
-            spot_at_entry: 0.0,
-            spot_at_exit: 0.0,
-            spot_move: 0.0,
-            spot_move_pct: 0.0,
-            breakeven_up: 0.0,
-            breakeven_down: 0.0,
-            within_breakeven: false,
-            success: false,
-            failure_reason: Some(cs_domain::FailureReason::PricingError(
-                "IronButterfly execution not yet implemented".to_string()
-            )),
+        ).await;
+
+        // Apply hedging if enabled (iron butterflies can be hedged)
+        if result.success && self.hedge_config.is_enabled() && self.timing_strategy.is_some() {
+            let rehedge_times = self.timing_strategy.as_ref().unwrap()
+                .rehedge_times(entry_time, exit_time, &self.hedge_config.strategy);
+
+            if let Err(e) = self.apply_hedging(&mut result, entry_time, exit_time, rehedge_times).await {
+                eprintln!("Hedging failed: {}", e);
+                result.success = false;
+                result.failure_reason = Some(cs_domain::FailureReason::PricingError(
+                    format!("Hedging failed: {}", e)
+                ));
+            }
         }
+
+        result
     }
 
     fn selection_failed(&self, event: &EarningsEvent, structure: TradeStructure, error: SelectionError) -> TradeResult {
@@ -566,11 +528,16 @@ where
         })
     }
 
-    /// Apply delta hedging to a straddle result
-    async fn apply_hedging(
+    /// Apply delta hedging to any trade result (trade-agnostic)
+    ///
+    /// This method:
+    /// 1. Initializes hedge state based on net delta/gamma at entry
+    /// 2. Rehedges at specified times based on delta drift
+    /// 3. Calculates hedge P&L and total P&L including hedge
+    /// 4. Stores results in the trade result via apply_hedge_results()
+    async fn apply_hedging<T: cs_domain::trade::TradeResult>(
         &self,
-        result: &mut StraddleResult,
-        straddle: &Straddle,
+        result: &mut T,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
         rehedge_times: Vec<DateTime<Utc>>,
@@ -578,48 +545,47 @@ where
         use cs_domain::HedgeState;
         use rust_decimal::prelude::ToPrimitive;
 
+        // Get net delta/gamma from the trade result (trade-agnostic)
+        let net_delta = result.net_delta().unwrap_or(0.0);
+        let net_gamma = result.net_gamma().unwrap_or(0.0);
+        let entry_spot = result.spot_at_entry();
+        let exit_spot = result.spot_at_exit();
+        let symbol = result.symbol();
+
         let mut hedge_state = HedgeState::new(
             self.hedge_config.clone(),
-            result.net_delta.unwrap_or(0.0),
-            result.net_gamma.unwrap_or(0.0),
-            result.spot_at_entry,
+            net_delta,
+            net_gamma,
+            entry_spot,
         );
 
-        let mut hedge_shares_timeline: Vec<(DateTime<Utc>, i32)> = vec![(entry_time, 0)];
+        let _hedge_shares_timeline: Vec<(DateTime<Utc>, i32)> = vec![(entry_time, 0)];
 
         for rehedge_time in rehedge_times {
             if hedge_state.at_max_rehedges() {
                 break;
             }
 
-            let spot = self.equity_repo.get_spot_price(straddle.symbol(), rehedge_time)
+            let spot = self.equity_repo.get_spot_price(symbol, rehedge_time)
                 .await
                 .map_err(|e| format!("Failed to get spot price at {}: {}", rehedge_time, e))?;
 
             hedge_state.update(rehedge_time, spot.to_f64());
-            hedge_shares_timeline.push((rehedge_time, hedge_state.stock_shares()));
         }
 
-        let hedge_position = hedge_state.finalize(result.spot_at_exit);
+        let hedge_position = hedge_state.finalize(exit_spot);
 
         if hedge_position.rehedge_count() > 0 {
-            let hedge_pnl = hedge_position.calculate_pnl(result.spot_at_exit);
-            let total_pnl = result.pnl + hedge_pnl - hedge_position.total_cost;
+            let hedge_pnl = hedge_position.calculate_pnl(exit_spot);
+            let total_pnl = result.pnl() + hedge_pnl - hedge_position.total_cost;
 
-            result.hedge_position = Some(hedge_position.clone());
-            result.hedge_pnl = Some(hedge_pnl);
-            result.total_pnl_with_hedge = Some(total_pnl);
-
-            match self.collect_daily_snapshots(straddle, &hedge_shares_timeline, entry_time, exit_time).await {
-                Ok(snapshots) if !snapshots.is_empty() => {
-                    let attribution = cs_domain::PositionAttribution::from_snapshots(snapshots, total_pnl);
-                    result.position_attribution = Some(attribution);
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("Warning: Failed to collect snapshots for attribution: {}", e);
-                }
-            }
+            // Use the trait method to apply hedge results (trade-agnostic)
+            result.apply_hedge_results(
+                hedge_position,
+                hedge_pnl,
+                total_pnl,
+                None, // Attribution can be added later as a trade-specific feature
+            );
         }
 
         Ok(())

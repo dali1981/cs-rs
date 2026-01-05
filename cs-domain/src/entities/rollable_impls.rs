@@ -42,6 +42,10 @@ impl RollableTrade for Straddle {
 }
 
 impl TradeResult for StraddleResult {
+    fn symbol(&self) -> &str {
+        &self.symbol
+    }
+
     fn pnl(&self) -> Decimal {
         self.pnl
     }
@@ -58,10 +62,6 @@ impl TradeResult for StraddleResult {
         self.success
     }
 
-    fn hedge_pnl(&self) -> Option<Decimal> {
-        self.hedge_pnl
-    }
-
     fn entry_time(&self) -> DateTime<Utc> {
         self.entry_time
     }
@@ -76,6 +76,35 @@ impl TradeResult for StraddleResult {
 
     fn spot_at_exit(&self) -> f64 {
         self.spot_at_exit
+    }
+
+    fn net_delta(&self) -> Option<f64> {
+        self.net_delta
+    }
+
+    fn net_gamma(&self) -> Option<f64> {
+        self.net_gamma
+    }
+
+    fn hedge_pnl(&self) -> Option<Decimal> {
+        self.hedge_pnl
+    }
+
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> {
+        self.total_pnl_with_hedge
+    }
+
+    fn apply_hedge_results(
+        &mut self,
+        position: crate::hedging::HedgePosition,
+        hedge_pnl: Decimal,
+        total_pnl: Decimal,
+        attribution: Option<crate::PositionAttribution>,
+    ) {
+        self.hedge_position = Some(position);
+        self.hedge_pnl = Some(hedge_pnl);
+        self.total_pnl_with_hedge = Some(total_pnl);
+        self.position_attribution = attribution;
     }
 }
 
@@ -114,6 +143,10 @@ impl RollableTrade for CalendarSpread {
 }
 
 impl TradeResult for CalendarSpreadResult {
+    fn symbol(&self) -> &str {
+        &self.symbol
+    }
+
     fn pnl(&self) -> Decimal {
         self.pnl
     }
@@ -130,8 +163,115 @@ impl TradeResult for CalendarSpreadResult {
         self.success
     }
 
+    fn entry_time(&self) -> DateTime<Utc> {
+        self.entry_time
+    }
+
+    fn exit_time(&self) -> DateTime<Utc> {
+        self.exit_time
+    }
+
+    fn spot_at_entry(&self) -> f64 {
+        self.spot_at_entry
+    }
+
+    fn spot_at_exit(&self) -> f64 {
+        self.spot_at_exit
+    }
+
+    fn net_delta(&self) -> Option<f64> {
+        // Net delta = long_delta - short_delta (since we're short the near leg)
+        match (self.long_delta, self.short_delta) {
+            (Some(long), Some(short)) => Some(long - short),
+            _ => None,
+        }
+    }
+
+    fn net_gamma(&self) -> Option<f64> {
+        // Net gamma = long_gamma - short_gamma
+        match (self.long_gamma, self.short_gamma) {
+            (Some(long), Some(short)) => Some(long - short),
+            _ => None,
+        }
+    }
+
     fn hedge_pnl(&self) -> Option<Decimal> {
-        None  // Calendar spreads typically aren't hedged
+        self.hedge_pnl
+    }
+
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> {
+        self.total_pnl_with_hedge
+    }
+
+    fn apply_hedge_results(
+        &mut self,
+        position: crate::hedging::HedgePosition,
+        hedge_pnl: Decimal,
+        total_pnl: Decimal,
+        attribution: Option<crate::PositionAttribution>,
+    ) {
+        self.hedge_position = Some(position);
+        self.hedge_pnl = Some(hedge_pnl);
+        self.total_pnl_with_hedge = Some(total_pnl);
+        self.position_attribution = attribution;
+    }
+}
+
+// ============================================================================
+// IronButterfly
+// ============================================================================
+
+#[async_trait]
+impl RollableTrade for IronButterfly {
+    type Result = IronButterflyResult;
+
+    async fn create(
+        _factory: &dyn TradeFactory,
+        _symbol: &str,
+        _dt: DateTime<Utc>,
+        _min_expiration: NaiveDate,
+    ) -> Result<Self, TradeConstructionError> {
+        // For now, return an error as iron butterfly factory method doesn't exist yet
+        // This will be implemented in Phase 2.5
+        Err(TradeConstructionError::FactoryError(
+            "create_iron_butterfly not yet implemented in TradeFactory".to_string()
+        ))
+    }
+
+    fn expiration(&self) -> NaiveDate {
+        self.expiration()
+    }
+
+    fn strike(&self) -> Decimal {
+        self.center_strike().value()
+    }
+
+    fn symbol(&self) -> &str {
+        self.symbol()
+    }
+}
+
+impl TradeResult for IronButterflyResult {
+    fn symbol(&self) -> &str {
+        &self.symbol
+    }
+
+    fn pnl(&self) -> Decimal {
+        self.pnl
+    }
+
+    fn entry_cost(&self) -> Decimal {
+        // Iron butterfly receives credit at entry (negative cost)
+        -self.entry_credit
+    }
+
+    fn exit_value(&self) -> Decimal {
+        // Pay to close (negative value)
+        -self.exit_cost
+    }
+
+    fn success(&self) -> bool {
+        self.success
     }
 
     fn entry_time(&self) -> DateTime<Utc> {
@@ -148,5 +288,105 @@ impl TradeResult for CalendarSpreadResult {
 
     fn spot_at_exit(&self) -> f64 {
         self.spot_at_exit
+    }
+
+    fn net_delta(&self) -> Option<f64> {
+        self.net_delta
+    }
+
+    fn net_gamma(&self) -> Option<f64> {
+        self.net_gamma
+    }
+
+    fn hedge_pnl(&self) -> Option<Decimal> {
+        self.hedge_pnl
+    }
+
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> {
+        self.total_pnl_with_hedge
+    }
+
+    fn apply_hedge_results(
+        &mut self,
+        position: crate::hedging::HedgePosition,
+        hedge_pnl: Decimal,
+        total_pnl: Decimal,
+        attribution: Option<crate::PositionAttribution>,
+    ) {
+        self.hedge_position = Some(position);
+        self.hedge_pnl = Some(hedge_pnl);
+        self.total_pnl_with_hedge = Some(total_pnl);
+        self.position_attribution = attribution;
+    }
+}
+
+// ============================================================================
+// CalendarStraddle
+// ============================================================================
+
+impl TradeResult for CalendarStraddleResult {
+    fn symbol(&self) -> &str {
+        &self.symbol
+    }
+
+    fn pnl(&self) -> Decimal {
+        self.pnl
+    }
+
+    fn entry_cost(&self) -> Decimal {
+        self.entry_cost
+    }
+
+    fn exit_value(&self) -> Decimal {
+        self.exit_value
+    }
+
+    fn success(&self) -> bool {
+        self.success
+    }
+
+    fn entry_time(&self) -> DateTime<Utc> {
+        self.entry_time
+    }
+
+    fn exit_time(&self) -> DateTime<Utc> {
+        self.exit_time
+    }
+
+    fn spot_at_entry(&self) -> f64 {
+        self.spot_at_entry
+    }
+
+    fn spot_at_exit(&self) -> f64 {
+        self.spot_at_exit
+    }
+
+    fn net_delta(&self) -> Option<f64> {
+        self.net_delta
+    }
+
+    fn net_gamma(&self) -> Option<f64> {
+        self.net_gamma
+    }
+
+    fn hedge_pnl(&self) -> Option<Decimal> {
+        self.hedge_pnl
+    }
+
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> {
+        self.total_pnl_with_hedge
+    }
+
+    fn apply_hedge_results(
+        &mut self,
+        position: crate::hedging::HedgePosition,
+        hedge_pnl: Decimal,
+        total_pnl: Decimal,
+        attribution: Option<crate::PositionAttribution>,
+    ) {
+        self.hedge_position = Some(position);
+        self.hedge_pnl = Some(hedge_pnl);
+        self.total_pnl_with_hedge = Some(total_pnl);
+        self.position_attribution = attribution;
     }
 }

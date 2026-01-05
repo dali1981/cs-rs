@@ -50,6 +50,15 @@ impl ExecutionConfig {
             min_credit: None,
         }
     }
+
+    /// Create config for iron butterfly execution (credit spread)
+    pub fn for_iron_butterfly(max_entry_iv: Option<f64>) -> Self {
+        Self {
+            max_entry_iv,
+            min_entry_cost: Decimal::new(10, 2), // $0.10 minimum credit for iron butterflies
+            min_credit: Some(Decimal::new(10, 2)),
+        }
+    }
 }
 
 /// Context passed to result construction

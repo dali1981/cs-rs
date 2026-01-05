@@ -177,6 +177,10 @@ impl ExecutableTrade for CalendarSpread {
             spot_at_exit: ctx.exit_spot,
             success: true,
             failure_reason: None,
+            hedge_position: None,
+            hedge_pnl: None,
+            total_pnl_with_hedge: None,
+            position_attribution: None,
         }
     }
 
@@ -240,6 +244,10 @@ impl ExecutableTrade for CalendarSpread {
             spot_at_exit: 0.0,
             success: false,
             failure_reason: Some(failure_reason),
+            hedge_position: None,
+            hedge_pnl: None,
+            total_pnl_with_hedge: None,
+            position_attribution: None,
         }
     }
 }

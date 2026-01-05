@@ -521,6 +521,18 @@ pub struct CalendarSpreadResult {
     // Status
     pub success: bool,
     pub failure_reason: Option<FailureReason>,
+
+    // Hedging fields (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_position: Option<crate::hedging::HedgePosition>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_pnl: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_pnl_with_hedge: Option<Decimal>,
+
+    // Integrated position attribution (when hedging is enabled)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_attribution: Option<crate::position::PositionAttribution>,
 }
 
 impl CalendarSpreadResult {
@@ -620,6 +632,18 @@ pub struct IronButterflyResult {
     // Status
     pub success: bool,
     pub failure_reason: Option<FailureReason>,
+
+    // Hedging fields (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_position: Option<crate::hedging::HedgePosition>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_pnl: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_pnl_with_hedge: Option<Decimal>,
+
+    // Integrated position attribution (when hedging is enabled)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_attribution: Option<crate::position::PositionAttribution>,
 }
 
 impl IronButterflyResult {
@@ -797,6 +821,18 @@ pub struct CalendarStraddleResult {
     // Status
     pub success: bool,
     pub failure_reason: Option<FailureReason>,
+
+    // Hedging fields (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_position: Option<crate::hedging::HedgePosition>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_pnl: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_pnl_with_hedge: Option<Decimal>,
+
+    // Integrated position attribution (when hedging is enabled)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_attribution: Option<crate::position::PositionAttribution>,
 }
 
 impl CalendarStraddleResult {
@@ -994,6 +1030,10 @@ mod tests {
             spot_at_exit: 182.0,
             success: true,
             failure_reason: None,
+            hedge_position: None,
+            hedge_pnl: None,
+            total_pnl_with_hedge: None,
+            position_attribution: None,
         };
 
         assert_eq!(result.iv_ratio(), Some(1.2));
