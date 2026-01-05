@@ -97,7 +97,8 @@ impl TimingStrategy {
         match strategy {
             HedgeStrategy::None => vec![],
             HedgeStrategy::TimeBased { interval } => {
-                let mut times = Vec::new();
+                // Include entry_time as first hedge to ensure delta-neutral entry
+                let mut times = vec![entry_time];
                 let mut current = entry_time + *interval;
                 while current < exit_time {
                     times.push(current);
@@ -116,13 +117,16 @@ impl TimingStrategy {
     /// Generate times to check delta (for threshold strategies)
     ///
     /// Checks every hour during market hours (14:30 - 21:00 UTC = 9:30 - 16:00 ET)
+    /// Includes entry_time as first check to ensure delta-neutral entry.
     fn generate_check_times(
         &self,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
     ) -> Vec<DateTime<Utc>> {
         let check_interval = Duration::hours(1);
-        let mut times = Vec::new();
+
+        // Include entry_time as first check
+        let mut times = vec![entry_time];
         let mut current = entry_time + check_interval;
 
         while current < exit_time {

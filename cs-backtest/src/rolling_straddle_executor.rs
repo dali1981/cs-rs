@@ -61,8 +61,8 @@ where
         let mut current_date = start_date;
 
         while current_date < end_date {
-            // Find ATM straddle at current spot
-            let straddle = match self.find_atm_straddle(symbol, current_date).await {
+            // Find ATM straddle at current spot using entry_time to avoid look-ahead bias
+            let straddle = match self.find_atm_straddle(symbol, current_date, entry_time).await {
                 Ok(s) => s,
                 Err(e) => {
                     eprintln!("Failed to find ATM straddle at {}: {}", current_date, e);
@@ -123,13 +123,17 @@ where
     ///
     /// Unlike the old implementation, this uses REAL expiration dates from
     /// the options chain, not hardcoded date arithmetic.
+    ///
+    /// IMPORTANT: Uses entry_time to avoid look-ahead bias. Strike selection
+    /// must use the same time as trade entry to ensure delta-neutral entry.
     async fn find_atm_straddle(
         &self,
         symbol: &str,
         date: NaiveDate,
+        entry_time: MarketTime,
     ) -> Result<Straddle, String> {
-        // Use 3:45pm ET as reference time for querying market data
-        let dt = self.to_datetime(date, MarketTime { hour: 15, minute: 45 });
+        // Use entry_time for strike selection to avoid look-ahead bias
+        let dt = self.to_datetime(date, entry_time);
 
         // Require options to expire at least 1 day after entry
         // This ensures we don't select same-day expirations

@@ -200,6 +200,8 @@ where
     }
 
     /// Apply delta hedging to a straddle result
+    ///
+    /// Returns an error if spot price lookup fails at any rehedge time.
     async fn apply_hedging(
         &self,
         result: &mut StraddleResult,
@@ -207,7 +209,7 @@ where
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
         rehedge_times: Vec<DateTime<Utc>>,
-    ) {
+    ) -> Result<(), String> {
         use cs_domain::HedgeState;
         use rust_decimal::prelude::ToPrimitive;
 
@@ -229,13 +231,15 @@ where
                 break;
             }
 
-            // Get spot price at rehedge time
-            if let Ok(spot) = self.equity_repo.get_spot_price(straddle.symbol(), rehedge_time).await {
-                // Update state - will hedge if needed
-                hedge_state.update(rehedge_time, spot.to_f64());
-                // Track hedge shares after this update
-                hedge_shares_timeline.push((rehedge_time, hedge_state.stock_shares()));
-            }
+            // Get spot price at rehedge time - fail if unavailable
+            let spot = self.equity_repo.get_spot_price(straddle.symbol(), rehedge_time)
+                .await
+                .map_err(|e| format!("Failed to get spot price at {}: {}", rehedge_time, e))?;
+
+            // Update state - will hedge if needed
+            hedge_state.update(rehedge_time, spot.to_f64());
+            // Track hedge shares after this update
+            hedge_shares_timeline.push((rehedge_time, hedge_state.stock_shares()));
         }
 
         // Finalize hedge state and calculate P&L
@@ -274,6 +278,8 @@ where
                 }
             }
         }
+
+        Ok(())
     }
 
     /// Collect daily snapshot pairs for P&L attribution
@@ -540,7 +546,13 @@ where
 
                             // If successful, apply hedging
                             if base_result.success {
-                                self.apply_hedging(&mut base_result, &straddle, entry_time, exit_time, rehedge_times).await;
+                                if let Err(e) = self.apply_hedging(&mut base_result, &straddle, entry_time, exit_time, rehedge_times).await {
+                                    eprintln!("Hedging failed: {}", e);
+                                    base_result.success = false;
+                                    base_result.failure_reason = Some(cs_domain::FailureReason::PricingError(
+                                        format!("Hedging failed: {}", e)
+                                    ));
+                                }
                             }
 
                             base_result
@@ -679,7 +691,13 @@ where
 
             // If successful, apply hedging
             if base_result.success {
-                self.apply_hedging(&mut base_result, straddle, entry_time, exit_time, rehedge_times).await;
+                if let Err(e) = self.apply_hedging(&mut base_result, straddle, entry_time, exit_time, rehedge_times).await {
+                    eprintln!("Hedging failed: {}", e);
+                    base_result.success = false;
+                    base_result.failure_reason = Some(cs_domain::FailureReason::PricingError(
+                        format!("Hedging failed: {}", e)
+                    ));
+                }
             }
 
             base_result

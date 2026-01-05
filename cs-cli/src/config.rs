@@ -133,11 +133,12 @@ impl Default for PathsConfig {
 
 impl Default for TimingConfig {
     fn default() -> Self {
+        use cs_domain::MarketTime;
         Self {
-            entry_hour: 9,
-            entry_minute: 35,
-            exit_hour: 15,
-            exit_minute: 55,
+            entry_hour: MarketTime::DEFAULT_ENTRY.hour,
+            entry_minute: MarketTime::DEFAULT_ENTRY.minute,
+            exit_hour: MarketTime::DEFAULT_HEDGE_CHECK.hour,
+            exit_minute: MarketTime::DEFAULT_HEDGE_CHECK.minute,
         }
     }
 }

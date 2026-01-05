@@ -39,7 +39,7 @@ pub struct TradingDate(i32);
 pub struct TradingTimestamp(i64);
 
 /// Time of day for market operations (no date component)
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MarketTime {
     pub hour: u32,
     pub minute: u32,
@@ -161,6 +161,36 @@ impl TradingTimestamp {
 }
 
 impl MarketTime {
+    /// Default entry time for trades: 10:00 AM ET
+    ///
+    /// Chosen to avoid:
+    /// - Market open volatility (9:30-10:00 AM)
+    /// - Wide bid-ask spreads at open
+    /// - Unstable pricing at market open
+    ///
+    /// This is the time used for:
+    /// - Strike selection (queries spot at this time)
+    /// - Trade entry (enters position at this time)
+    /// - First hedge check (hedge immediately at entry)
+    pub const DEFAULT_ENTRY: MarketTime = MarketTime { hour: 10, minute: 0 };
+
+    /// Default hedging check time: 3:45 PM ET
+    ///
+    /// Chosen as 15 minutes before market close (4:00 PM):
+    /// - Stable pricing
+    /// - Good liquidity
+    /// - Consistent daily timing independent of entry time
+    /// - Allows time to execute before close
+    ///
+    /// Note: First hedge happens at entry time, subsequent hedges at this time daily.
+    pub const DEFAULT_HEDGE_CHECK: MarketTime = MarketTime { hour: 15, minute: 45 };
+
+    /// Market open: 9:30 AM ET
+    pub const MARKET_OPEN: MarketTime = MarketTime { hour: 9, minute: 30 };
+
+    /// Market close: 4:00 PM ET
+    pub const MARKET_CLOSE: MarketTime = MarketTime { hour: 16, minute: 0 };
+
     pub fn new(hour: u32, minute: u32) -> Self {
         Self { hour, minute }
     }
