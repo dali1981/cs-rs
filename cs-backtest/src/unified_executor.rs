@@ -388,19 +388,41 @@ where
             straddle.symbol(),
         ).await;
 
-        // Get average IV for the straddle strike (average of call and put)
+        // Get average IV for the straddle strike using PricingModel for interpolation
         let strike_decimal = straddle.strike().value();
         let strike_f64 = strike_decimal.to_f64().unwrap_or(0.0);
+
+        // Create pricing provider for IV interpolation (SVI/Linear)
+        let risk_free_rate = 0.05;
+        let pricing_provider = self.pricing_model.to_provider_with_rate(risk_free_rate);
+
         let iv = if let Some(ref surface) = iv_surface {
-            let call_iv = surface.get_iv(strike_decimal, straddle.expiration(), true);
-            let put_iv = surface.get_iv(strike_decimal, straddle.expiration(), false);
+            // Use PricingModel's IV provider which does interpolation
+            let call_iv = pricing_provider.get_iv(
+                surface,
+                strike_decimal,
+                straddle.expiration(),
+                true,  // is_call
+            );
+            let put_iv = pricing_provider.get_iv(
+                surface,
+                strike_decimal,
+                straddle.expiration(),
+                false,  // is_put
+            );
+
             match (call_iv, put_iv) {
                 (Some(c), Some(p)) => (c + p) / 2.0,
                 (Some(c), None) => c,
                 (None, Some(p)) => p,
-                (None, None) => 0.30,  // Default to 30% if not found
+                (None, None) => {
+                    eprintln!("Warning: No IV data for {} strike ${} exp {} at {}",
+                        straddle.symbol(), strike_f64, straddle.expiration(), timestamp);
+                    0.30  // Last resort default
+                }
             }
         } else {
+            eprintln!("Warning: No IV surface for {} at {}", straddle.symbol(), timestamp);
             0.30
         };
 
