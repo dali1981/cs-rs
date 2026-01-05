@@ -1,0 +1,150 @@
+use chrono::{DateTime, NaiveDate, Utc};
+use cs_domain::{EarningsEvent, EarningsTradeTiming, StraddleTradeTiming, PostEarningsStraddleTiming};
+
+/// Timing strategy enum that wraps all timing implementations
+///
+/// This enum allows different trade structures to use different timing strategies
+/// without requiring dynamic dispatch or trait objects.
+#[derive(Clone)]
+pub enum TimingStrategy {
+    /// Calendar spread / Iron butterfly timing: enter on/before earnings day
+    Earnings(EarningsTradeTiming),
+
+    /// Straddle timing: enter N days before earnings to capture IV expansion
+    Straddle(StraddleTradeTiming),
+
+    /// Post-earnings straddle timing: enter day after earnings
+    PostEarnings(PostEarningsStraddleTiming),
+}
+
+impl TimingStrategy {
+    /// Get entry datetime for the trade
+    pub fn entry_datetime(&self, event: &EarningsEvent) -> DateTime<Utc> {
+        match self {
+            TimingStrategy::Earnings(t) => t.entry_datetime(event),
+            TimingStrategy::Straddle(t) => t.entry_datetime(event),
+            TimingStrategy::PostEarnings(t) => t.entry_datetime(event),
+        }
+    }
+
+    /// Get exit datetime for the trade
+    pub fn exit_datetime(&self, event: &EarningsEvent) -> DateTime<Utc> {
+        match self {
+            TimingStrategy::Earnings(t) => t.exit_datetime(event),
+            TimingStrategy::Straddle(t) => t.exit_datetime(event),
+            TimingStrategy::PostEarnings(t) => t.exit_datetime(event),
+        }
+    }
+
+    /// Get entry date for the trade
+    pub fn entry_date(&self, event: &EarningsEvent) -> NaiveDate {
+        match self {
+            TimingStrategy::Earnings(t) => t.entry_date(event),
+            TimingStrategy::Straddle(t) => t.entry_date(event),
+            TimingStrategy::PostEarnings(t) => t.entry_date(event),
+        }
+    }
+
+    /// Get exit date for the trade
+    pub fn exit_date(&self, event: &EarningsEvent) -> NaiveDate {
+        match self {
+            TimingStrategy::Earnings(t) => t.exit_date(event),
+            TimingStrategy::Straddle(t) => t.exit_date(event),
+            TimingStrategy::PostEarnings(t) => t.exit_date(event),
+        }
+    }
+
+    /// Calculate lookahead days needed for event loading
+    ///
+    /// This determines how far ahead to look when loading earnings events
+    /// for a given session date. Different timing strategies need different
+    /// lookahead windows:
+    ///
+    /// - Earnings: Small lookahead (2-3 days) since entry is on/near earnings
+    /// - Straddle: Large lookahead (entry_days * 1.5 + 7) to account for weekends
+    /// - PostEarnings: Negative lookahead (lookback) since we enter after earnings
+    pub fn lookahead_days(&self) -> i64 {
+        match self {
+            TimingStrategy::Earnings(_) => {
+                // Calendar spreads/butterflies enter on earnings day (AMC) or day before (BMO)
+                // Need small lookahead for AMC events
+                3
+            }
+            TimingStrategy::Straddle(t) => {
+                // Entry is N days before earnings
+                // Add buffer for weekends/holidays: multiply by 1.5 and add 7 days
+                let entry_days = t.entry_days_before();
+                ((entry_days as f64 * 1.5) as i64) + 7
+            }
+            TimingStrategy::PostEarnings(_) => {
+                // Post-earnings enters AFTER the event, so we need lookback, not lookahead
+                // Return negative to signal lookback
+                -3
+            }
+        }
+    }
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cs_domain::value_objects::{EarningsTime, TimingConfig};
+    use chrono::NaiveDate;
+
+    #[test]
+    fn test_earnings_timing_lookahead() {
+        let config = TimingConfig {
+            entry_hour: 9,
+            entry_minute: 30,
+            exit_hour: 15,
+            exit_minute: 55,
+        };
+        let timing = TimingStrategy::Earnings(EarningsTradeTiming::new(config));
+        assert_eq!(timing.lookahead_days(), 3);
+    }
+
+    #[test]
+    fn test_straddle_timing_lookahead() {
+        let config = TimingConfig {
+            entry_hour: 15,
+            entry_minute: 45,
+            exit_hour: 15,
+            exit_minute: 55,
+        };
+        let straddle_timing = StraddleTradeTiming::new(config)
+            .with_entry_days(10)
+            .with_exit_days(2);
+        let timing = TimingStrategy::Straddle(straddle_timing);
+
+        // 10 entry days * 1.5 + 7 = 22
+        assert_eq!(timing.lookahead_days(), 22);
+    }
+
+    #[test]
+    fn test_straddle_timing_entry_date() {
+        let config = TimingConfig {
+            entry_hour: 15,
+            entry_minute: 45,
+            exit_hour: 15,
+            exit_minute: 55,
+        };
+        let straddle_timing = StraddleTradeTiming::new(config)
+            .with_entry_days(10)
+            .with_exit_days(2);
+        let timing = TimingStrategy::Straddle(straddle_timing);
+
+        let event = EarningsEvent::new(
+            "PENG".to_string(),
+            NaiveDate::from_ymd_opt(2025, 4, 2).unwrap(),
+            EarningsTime::AfterMarketClose,
+        );
+
+        // Entry should be 10 trading days before Apr 2
+        let entry_date = timing.entry_date(&event);
+
+        // Apr 2 is Wednesday
+        // 10 trading days back: Mar 19 (Wed)
+        assert_eq!(entry_date, NaiveDate::from_ymd_opt(2025, 3, 19).unwrap());
+    }
+}

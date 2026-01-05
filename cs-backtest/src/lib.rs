@@ -13,6 +13,7 @@ pub mod straddle_executor;
 pub mod calendar_straddle_pricer;
 pub mod calendar_straddle_executor;
 pub mod unified_executor;  // NEW: Unified executor for all trade types
+pub mod timing_strategy;   // Timing strategy enum for different trade types
 pub mod backtest_use_case;
 pub mod atm_iv_use_case;
 pub mod minute_aligned_iv_use_case;

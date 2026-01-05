@@ -9,6 +9,7 @@ use super::{TradeTiming, TradingCalendar};
 /// Unlike EarningsTradeTiming (which handles IV crush trades), this service
 /// implements timing for IV expansion trades that profit from volatility
 /// buildup BEFORE earnings.
+#[derive(Clone, Copy)]
 pub struct StraddleTradeTiming {
     config: TimingConfig,
     entry_days_before: usize,  // Default: 5 (one week before)
@@ -63,6 +64,16 @@ impl StraddleTradeTiming {
     /// Get holding period in trading days
     pub fn holding_period(&self) -> usize {
         self.entry_days_before - self.exit_days_before
+    }
+
+    /// Get number of days before earnings for entry
+    pub fn entry_days_before(&self) -> usize {
+        self.entry_days_before
+    }
+
+    /// Get number of days before earnings for exit
+    pub fn exit_days_before(&self) -> usize {
+        self.exit_days_before
     }
 }
 

@@ -184,7 +184,6 @@ where
     options_repo: Arc<Opt>,
     equity_repo: Arc<Eq>,
     config: BacktestConfig,
-    earnings_timing: EarningsTradeTiming,
 }
 
 impl<Opt, Eq> BacktestUseCase<Opt, Eq>
@@ -198,13 +197,11 @@ where
         equity_repo: Eq,
         config: BacktestConfig,
     ) -> Self {
-        let earnings_timing = EarningsTradeTiming::new(config.timing);
         Self {
             earnings_repo: Arc::from(earnings_repo),
             options_repo: Arc::new(options_repo),
             equity_repo: Arc::new(equity_repo),
             config,
-            earnings_timing,
         }
     }
 
@@ -265,12 +262,16 @@ where
         let selector = self.create_selector();
         let structure = TradeStructure::CalendarSpread(option_type);
 
+        // Calendar spreads use earnings timing (enter on/before earnings day)
+        use crate::timing_strategy::TimingStrategy;
+        let timing = TimingStrategy::Earnings(EarningsTradeTiming::new(self.config.timing));
+
         for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
             sessions_processed += 1;
 
             // Load earnings for this session
             let events = self.load_earnings_window(session_date).await?;
-            let to_enter = self.filter_for_entry(&events, session_date);
+            let to_enter = self.filter_for_entry(&events, session_date, &timing);
 
             if to_enter.is_empty() {
                 if let Some(ref callback) = on_progress {
@@ -293,14 +294,14 @@ where
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_event_unified(event, &*selector, structure))
+                    .map(|event| self.process_event_unified(event, &*selector, structure, &timing))
                     .collect();
 
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(self.process_event_unified(event, &*selector, structure).await);
+                    results.push(self.process_event_unified(event, &*selector, structure, &timing).await);
                 }
                 results
             };
@@ -380,12 +381,16 @@ where
             wing_width: Decimal::try_from(self.config.wing_width).unwrap_or(Decimal::from(5)),
         };
 
+        // Iron butterflies use earnings timing (enter on/before earnings day)
+        use crate::timing_strategy::TimingStrategy;
+        let timing = TimingStrategy::Earnings(EarningsTradeTiming::new(self.config.timing));
+
         for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
             sessions_processed += 1;
 
             // Load earnings for this session
             let events = self.load_earnings_window(session_date).await?;
-            let to_enter = self.filter_for_entry(&events, session_date);
+            let to_enter = self.filter_for_entry(&events, session_date, &timing);
 
             if to_enter.is_empty() {
                 if let Some(ref callback) = on_progress {
@@ -408,13 +413,13 @@ where
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_event_unified(event, &*selector, structure))
+                    .map(|event| self.process_event_unified(event, &*selector, structure, &timing))
                     .collect();
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(self.process_event_unified(event, &*selector, structure).await);
+                    results.push(self.process_event_unified(event, &*selector, structure, &timing).await);
                 }
                 results
             };
@@ -481,9 +486,13 @@ where
         let structure = TradeStructure::Straddle;
 
         // Create straddle timing
-        let timing = StraddleTradeTiming::new(self.config.timing)
+        let timing_impl = StraddleTradeTiming::new(self.config.timing)
             .with_entry_days(self.config.straddle_entry_days)
             .with_exit_days(self.config.straddle_exit_days);
+
+        // Wrap in TimingStrategy enum
+        use crate::timing_strategy::TimingStrategy;
+        let timing = TimingStrategy::Straddle(timing_impl);
 
         info!(
             entry_days = self.config.straddle_entry_days,
@@ -496,7 +505,8 @@ where
 
             // Load earnings for wider window (need events where entry falls on session_date)
             // Entry is N days before earnings, so look for earnings N days ahead
-            let lookahead = self.config.straddle_entry_days as i64 + 5;  // Buffer for weekends
+            // Use timing-aware lookahead calculation
+            let lookahead = timing.lookahead_days();
             let events_end = session_date + chrono::Duration::days(lookahead);
             let events = self.earnings_repo
                 .load_earnings(session_date, events_end, self.config.symbols.as_deref())
@@ -553,13 +563,13 @@ where
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_event_unified(event, &*selector, structure))
+                    .map(|event| self.process_event_unified(event, &*selector, structure, &timing))
                     .collect();
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(self.process_event_unified(event, &*selector, structure).await);
+                    results.push(self.process_event_unified(event, &*selector, structure, &timing).await);
                 }
                 results
             };
@@ -630,8 +640,12 @@ where
         let structure = TradeStructure::Straddle;
 
         // Create post-earnings timing
-        let timing = PostEarningsStraddleTiming::new(self.config.timing)
+        let timing_impl = PostEarningsStraddleTiming::new(self.config.timing)
             .with_holding_days(self.config.post_earnings_holding_days);
+
+        // Wrap in TimingStrategy enum
+        use crate::timing_strategy::TimingStrategy;
+        let timing = TimingStrategy::PostEarnings(timing_impl);
 
         info!(
             holding_days = self.config.post_earnings_holding_days,
@@ -679,13 +693,13 @@ where
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_event_unified(event, &*selector, structure))
+                    .map(|event| self.process_event_unified(event, &*selector, structure, &timing))
                     .collect();
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(self.process_event_unified(event, &*selector, structure).await);
+                    results.push(self.process_event_unified(event, &*selector, structure, &timing).await);
                 }
                 results
             };
@@ -755,12 +769,16 @@ where
         let selector = self.create_selector();
         let structure = TradeStructure::CalendarStraddle;
 
+        // Calendar straddles use earnings timing (enter on/before earnings day)
+        use crate::timing_strategy::TimingStrategy;
+        let timing = TimingStrategy::Earnings(EarningsTradeTiming::new(self.config.timing));
+
         for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
             sessions_processed += 1;
 
             // Load earnings for this session
             let events = self.load_earnings_window(session_date).await?;
-            let to_enter = self.filter_for_entry(&events, session_date);
+            let to_enter = self.filter_for_entry(&events, session_date, &timing);
 
             if to_enter.is_empty() {
                 if let Some(ref callback) = on_progress {
@@ -783,13 +801,13 @@ where
             let session_results: Vec<_> = if self.config.parallel {
                 let futures: Vec<_> = to_enter
                     .iter()
-                    .map(|event| self.process_event_unified(event, &*selector, structure))
+                    .map(|event| self.process_event_unified(event, &*selector, structure, &timing))
                     .collect();
                 futures::future::join_all(futures).await
             } else {
                 let mut results = Vec::new();
                 for event in &to_enter {
-                    results.push(self.process_event_unified(event, &*selector, structure).await);
+                    results.push(self.process_event_unified(event, &*selector, structure, &timing).await);
                 }
                 results
             };
@@ -1311,10 +1329,11 @@ where
         event: &EarningsEvent,
         selector: &dyn StrikeSelector,
         structure: TradeStructure,
+        timing: &crate::timing_strategy::TimingStrategy,
     ) -> TradeResult {
-        // Determine entry/exit times
-        let entry_time = self.earnings_timing.entry_datetime(event);
-        let exit_time = self.earnings_timing.exit_datetime(event);
+        // Determine entry/exit times from the provided timing strategy
+        let entry_time = timing.entry_datetime(event);
+        let exit_time = timing.exit_datetime(event);
 
         // Build IV surface ONCE for entry (used for both selection AND entry pricing)
         let entry_chain = match self.options_repo
@@ -1408,18 +1427,18 @@ where
             .map_err(|e| BacktestError::Repository(e.to_string()))
     }
 
-    fn filter_for_entry(&self, events: &[EarningsEvent], session_date: NaiveDate) -> Vec<EarningsEvent> {
+    fn filter_for_entry(
+        &self,
+        events: &[EarningsEvent],
+        session_date: NaiveDate,
+        timing: &crate::timing_strategy::TimingStrategy,
+    ) -> Vec<EarningsEvent> {
         events
             .iter()
-            .filter(|e| self.should_enter_today(e, session_date))
+            .filter(|e| timing.entry_date(e) == session_date)
             .filter(|e| self.passes_market_cap_filter(e))
             .cloned()
             .collect()
-    }
-
-    fn should_enter_today(&self, event: &EarningsEvent, session_date: NaiveDate) -> bool {
-        // Use earnings_timing service to determine entry date
-        self.earnings_timing.entry_date(event) == session_date
     }
 
     fn passes_market_cap_filter(&self, event: &EarningsEvent) -> bool {

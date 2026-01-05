@@ -9,6 +9,7 @@ use super::{TradeTiming, TradingCalendar};
 /// Unlike EarningsTradeTiming (which enters BEFORE earnings for IV crush plays),
 /// this service enters AFTER earnings to capture continued momentum while
 /// benefiting from lower IV entry prices.
+#[derive(Clone, Copy)]
 pub struct PostEarningsStraddleTiming {
     config: TimingConfig,
     holding_days: usize,  // Default: 5 (one trading week)

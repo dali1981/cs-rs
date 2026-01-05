@@ -12,6 +12,7 @@ use super::{TradeTiming, TradingCalendar};
 ///
 /// The strategy profits from IV crush after earnings announcements, so
 /// trades must hold overnight through the earnings event.
+#[derive(Clone, Copy)]
 pub struct EarningsTradeTiming {
     config: TimingConfig,
 }
