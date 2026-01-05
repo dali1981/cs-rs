@@ -94,6 +94,10 @@ impl TradeResult for StraddleResult {
         self.total_pnl_with_hedge
     }
 
+    fn hedge_position(&self) -> Option<&crate::hedging::HedgePosition> {
+        self.hedge_position.as_ref()
+    }
+
     fn apply_hedge_results(
         &mut self,
         position: crate::hedging::HedgePosition,
@@ -203,6 +207,10 @@ impl TradeResult for CalendarSpreadResult {
         self.total_pnl_with_hedge
     }
 
+    fn hedge_position(&self) -> Option<&crate::hedging::HedgePosition> {
+        self.hedge_position.as_ref()
+    }
+
     fn apply_hedge_results(
         &mut self,
         position: crate::hedging::HedgePosition,
@@ -306,6 +314,10 @@ impl TradeResult for IronButterflyResult {
         self.total_pnl_with_hedge
     }
 
+    fn hedge_position(&self) -> Option<&crate::hedging::HedgePosition> {
+        self.hedge_position.as_ref()
+    }
+
     fn apply_hedge_results(
         &mut self,
         position: crate::hedging::HedgePosition,
@@ -375,6 +387,10 @@ impl TradeResult for CalendarStraddleResult {
 
     fn total_pnl_with_hedge(&self) -> Option<Decimal> {
         self.total_pnl_with_hedge
+    }
+
+    fn hedge_position(&self) -> Option<&crate::hedging::HedgePosition> {
+        self.hedge_position.as_ref()
     }
 
     fn apply_hedge_results(

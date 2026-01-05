@@ -121,6 +121,10 @@ mod tests {
             spot_at_exit: 102.0,
             success: true,
             failure_reason: None,
+            hedge_position: None,
+            hedge_pnl: None,
+            total_pnl_with_hedge: None,
+            position_attribution: None,
         }
     }
 

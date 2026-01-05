@@ -106,6 +106,11 @@ pub trait TradeResult: Send + Sync {
     /// Total P&L including hedge
     fn total_pnl_with_hedge(&self) -> Option<Decimal>;
 
+    /// Get the hedge position if hedging was applied
+    fn hedge_position(&self) -> Option<&HedgePosition> {
+        None
+    }
+
     /// Apply hedge results to this trade result
     ///
     /// This is called after hedging simulation completes to store the results.

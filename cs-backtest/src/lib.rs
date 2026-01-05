@@ -6,10 +6,12 @@ pub mod config;
 pub mod execution;  // Generic execution framework
 pub mod iv_surface_builder;
 pub mod spread_pricer;
+pub mod composite_pricer;  // Generic pricer for CompositeTrade types
 pub mod straddle_pricer;
 pub mod iron_butterfly_pricer;
 pub mod calendar_straddle_pricer;
 pub mod rolling_executor;  // Generic rolling executor for any trade type
+pub mod trade_executor;  // Unified executor with rolling + hedging support
 pub mod trade_factory_impl;
 pub mod hedging_analytics;
 pub mod trade_orchestrator;  // Orchestrates strike selection, execution, and hedging
@@ -33,9 +35,11 @@ pub use execution::{ExecutableTrade, TradePricer, ExecutionConfig, ExecutionCont
 pub use trade_orchestrator::{TradeResult, TradeStructure, TradeOrchestrator};
 pub use timing_strategy::TimingStrategy;
 pub use rolling_executor::RollingExecutor;
+pub use trade_executor::TradeExecutor;
 
 // Pricers
 pub use spread_pricer::{SpreadPricer, SpreadPricing, LegPricing, PricingError};
+pub use composite_pricer::{CompositePricer, CompositePricing};
 pub use straddle_pricer::{StraddlePricer, StraddlePricing};
 pub use iron_butterfly_pricer::{IronButterflyPricer, IronButterflyPricing};
 pub use calendar_straddle_pricer::{CalendarStraddlePricer, CalendarStraddlePricing};

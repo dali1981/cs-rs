@@ -848,6 +848,52 @@ impl CalendarStraddleResult {
     }
 }
 
+// ============================================================================
+// CompositeTrade Implementations
+// ============================================================================
+
+use crate::trade::{CompositeTrade, LegPosition};
+
+impl CompositeTrade for Straddle {
+    fn legs(&self) -> Vec<(&OptionLeg, LegPosition)> {
+        vec![
+            (&self.call_leg, LegPosition::Long),
+            (&self.put_leg, LegPosition::Long),
+        ]
+    }
+}
+
+impl CompositeTrade for CalendarSpread {
+    fn legs(&self) -> Vec<(&OptionLeg, LegPosition)> {
+        vec![
+            (&self.short_leg, LegPosition::Short),
+            (&self.long_leg, LegPosition::Long),
+        ]
+    }
+}
+
+impl CompositeTrade for IronButterfly {
+    fn legs(&self) -> Vec<(&OptionLeg, LegPosition)> {
+        vec![
+            (&self.short_call, LegPosition::Short),
+            (&self.short_put, LegPosition::Short),
+            (&self.long_call, LegPosition::Long),
+            (&self.long_put, LegPosition::Long),
+        ]
+    }
+}
+
+impl CompositeTrade for CalendarStraddle {
+    fn legs(&self) -> Vec<(&OptionLeg, LegPosition)> {
+        vec![
+            (&self.short_call, LegPosition::Short),
+            (&self.short_put, LegPosition::Short),
+            (&self.long_call, LegPosition::Long),
+            (&self.long_put, LegPosition::Long),
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1085,6 +1131,10 @@ mod tests {
             spot_at_exit: 182.0,
             success: true,
             failure_reason: None,
+            hedge_position: None,
+            hedge_pnl: None,
+            total_pnl_with_hedge: None,
+            position_attribution: None,
         };
 
         assert!(result.is_winner());
@@ -1278,6 +1328,10 @@ mod tests {
             spot_at_exit: 182.0,
             success: true,
             failure_reason: None,
+            hedge_position: None,
+            hedge_pnl: None,
+            total_pnl_with_hedge: None,
+            position_attribution: None,
         };
 
         assert!(result.is_winner());
