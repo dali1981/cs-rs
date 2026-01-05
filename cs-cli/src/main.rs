@@ -452,8 +452,8 @@ async fn run_rolling_straddle(
     equity_repo: FinqEquityRepository,
     output: Option<PathBuf>,
 ) -> Result<()> {
-    use cs_backtest::{TradeOrchestrator, RollingStraddleExecutor, TimingStrategy, DefaultTradeFactory};
-    use cs_domain::{MarketTime, StraddleTradeTiming, TradeFactory};
+    use cs_backtest::{RollingExecutor, DefaultTradeFactory, StraddlePricer, SpreadPricer, ExecutionConfig};
+    use cs_domain::{MarketTime, Straddle, TradeFactory, OptionsDataRepository, EquityDataRepository};
     use std::sync::Arc;
 
     println!("{}", style("Rolling Straddle Strategy").bold().green());
@@ -470,9 +470,9 @@ async fn run_rolling_straddle(
         None => anyhow::bail!("--symbols is required for rolling strategy"),
     };
 
-    // Create shared repos
-    let options_repo = Arc::new(options_repo);
-    let equity_repo = Arc::new(equity_repo);
+    // Create shared repos as trait objects
+    let options_repo: Arc<dyn OptionsDataRepository> = Arc::new(options_repo);
+    let equity_repo: Arc<dyn EquityDataRepository> = Arc::new(equity_repo);
 
     // Create trade factory for constructing straddles with real expirations
     let trade_factory = Arc::new(DefaultTradeFactory::new(
@@ -480,28 +480,21 @@ async fn run_rolling_straddle(
         Arc::clone(&equity_repo),
     )) as Arc<dyn TradeFactory>;
 
-    // Create unified executor with pricing model and hedging config
-    let mut unified_executor = TradeOrchestrator::new(
+    // Create straddle pricer with pricing model
+    let spread_pricer = SpreadPricer::new().with_pricing_model(backtest_config.pricing_model.clone());
+    let pricer = StraddlePricer::new(spread_pricer);
+
+    // Execution config for straddles
+    let config = ExecutionConfig::for_straddle(None);
+
+    // Create generic rolling executor for Straddle
+    let rolling_executor = RollingExecutor::<Straddle>::new(
         Arc::clone(&options_repo),
         Arc::clone(&equity_repo),
-    )
-    .with_pricing_model(backtest_config.pricing_model.clone())
-    .with_hedge_config(backtest_config.hedge_config.clone());
-
-    // Add timing strategy if hedging is enabled
-    if backtest_config.hedge_config.is_enabled() {
-        // For rolling strategies, we use a dummy straddle timing since entry/exit
-        // times are managed by the rolling executor itself
-        let straddle_timing = StraddleTradeTiming::new(backtest_config.timing.clone());
-        let timing = TimingStrategy::Straddle(straddle_timing);
-        unified_executor = unified_executor.with_timing_strategy(timing);
-    }
-
-    // Create rolling executor with trade factory
-    let rolling_executor = RollingStraddleExecutor::new(
-        unified_executor,
+        pricer,
         trade_factory,
         roll_policy,
+        config,
     );
 
     // Define entry and exit times

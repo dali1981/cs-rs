@@ -10,8 +10,7 @@ pub mod trade_executor;
 pub mod iron_butterfly_pricer;
 pub mod iron_butterfly_executor;
 pub mod straddle_pricer;
-pub mod straddle_executor;
-pub mod rolling_straddle_executor;  // Rolling straddle strategy (specific)
+pub mod straddle_executor;  // TODO: Remove once TradeOrchestrator uses execute_trade()
 pub mod rolling_executor;  // Generic rolling executor for any trade type
 pub mod trade_factory_impl;  // Trade factory implementation
 pub mod hedging_executor;  // Delta hedging wrapper
@@ -36,7 +35,6 @@ pub use iron_butterfly_pricer::{IronButterflyPricer, IronButterflyPricing};
 pub use iron_butterfly_executor::IronButterflyExecutor;
 pub use straddle_pricer::{StraddlePricer, StraddlePricing};
 pub use straddle_executor::StraddleExecutor;
-pub use rolling_straddle_executor::RollingStraddleExecutor;
 pub use rolling_executor::RollingExecutor;  // Generic rolling executor
 pub use trade_factory_impl::DefaultTradeFactory;
 pub use hedging_executor::HedgingExecutor;

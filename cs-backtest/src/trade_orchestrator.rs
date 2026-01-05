@@ -1,22 +1,26 @@
+//! Trade orchestrator - selects and executes trades
+//!
+//! Orchestrates:
+//! 1. Strike/expiration selection via StrikeSelector
+//! 2. Trade execution via generic execute_trade()
+//! 3. Optional hedging for straddles
+
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use std::sync::Arc;
 
 use cs_analytics::{IVSurface, PricingModel};
 use cs_domain::{
-    CalendarSpreadResult, StraddleResult,
-    CalendarStraddleResult, IronButterflyResult,
-    EarningsEvent, SpotPrice, Strike, Straddle,
-    EquityDataRepository, OptionsDataRepository,
+    CalendarSpread, CalendarSpreadResult, CalendarStraddle, CalendarStraddleResult,
+    EarningsEvent, EquityDataRepository, IronButterfly, IronButterflyResult,
+    OptionsDataRepository, SpotPrice, Straddle, StraddleResult, Strike,
 };
-use cs_domain::strike_selection::{StrikeSelector, ExpirationCriteria, SelectionError};
+use cs_domain::strike_selection::{ExpirationCriteria, SelectionError, StrikeSelector};
 use finq_core::OptionType;
 
-use crate::trade_executor::TradeExecutor;
-use crate::straddle_executor::StraddleExecutor;
-use crate::calendar_straddle_executor::CalendarStraddleExecutor;
-use crate::iron_butterfly_executor::IronButterflyExecutor;
-use crate::hedging_executor::HedgingExecutor;
+use crate::execution::{execute_trade, ExecutableTrade, ExecutionConfig};
+use crate::spread_pricer::SpreadPricer;
+use crate::straddle_pricer::StraddlePricer;
 use crate::timing_strategy::TimingStrategy;
 
 /// Trade structure type - defines WHAT to trade
@@ -30,9 +34,6 @@ pub enum TradeStructure {
 }
 
 /// Unified result type for any trade
-///
-/// Each variant contains full trade data. The Failed variant contains only metadata
-/// (no Strike, no prices), eliminating the need for dummy values.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "trade_type", rename_all = "snake_case")]
 pub enum TradeResult {
@@ -51,7 +52,7 @@ pub struct FailedTrade {
     pub earnings_time: cs_domain::EarningsTime,
     pub trade_structure: TradeStructure,
     pub reason: cs_domain::FailureReason,
-    pub phase: String,  // "selection", "entry_pricing", "exit_pricing", etc.
+    pub phase: String,
     pub details: Option<String>,
 }
 
@@ -113,11 +114,10 @@ impl TradeResult {
             TradeResult::IronButterfly(r) => Some(r.center_strike),
             TradeResult::Straddle(r) => Some(r.strike),
             TradeResult::CalendarStraddle(r) => Some(r.short_strike),
-            TradeResult::Failed(_) => None,  // No strike for failed trades!
+            TradeResult::Failed(_) => None,
         }
     }
 
-    /// Get hedge P&L if hedging was applied
     pub fn hedge_pnl(&self) -> Option<Decimal> {
         match self {
             TradeResult::Straddle(r) => r.hedge_pnl,
@@ -125,7 +125,6 @@ impl TradeResult {
         }
     }
 
-    /// Get total P&L including hedge if hedging was applied
     pub fn total_pnl_with_hedge(&self) -> Option<Decimal> {
         match self {
             TradeResult::Straddle(r) => r.total_pnl_with_hedge,
@@ -133,7 +132,6 @@ impl TradeResult {
         }
     }
 
-    /// Check if this trade has hedging data
     pub fn has_hedge_data(&self) -> bool {
         match self {
             TradeResult::Straddle(r) => r.hedge_position.is_some(),
@@ -142,7 +140,7 @@ impl TradeResult {
     }
 }
 
-/// Error type for unified executor
+/// Error type for orchestrator
 #[derive(Debug, thiserror::Error)]
 pub enum UnifiedExecutionError {
     #[error("Selection error: {0}")]
@@ -151,44 +149,50 @@ pub enum UnifiedExecutionError {
     NoSpread,
 }
 
-/// Unified trade executor that delegates to specialized executors
+/// Trade orchestrator - selects and executes trades
 ///
-/// Key optimization: Accepts pre-built entry_surface to avoid redundant builds.
-/// The entry surface is built once in process_event() and reused for both
-/// selection AND entry pricing.
+/// Lightweight orchestrator that:
+/// - Uses StrikeSelector for strike/expiration selection
+/// - Creates pricers on demand (no stored executor objects)
+/// - Delegates execution to generic execute_trade()
+/// - Handles straddle hedging when configured
 pub struct TradeOrchestrator<O, E>
 where
     O: OptionsDataRepository,
     E: EquityDataRepository,
 {
     options_repo: Arc<O>,
-    calendar_executor: TradeExecutor<O, E>,
-    straddle_executor: StraddleExecutor<O, E>,
-    calendar_straddle_executor: CalendarStraddleExecutor<O, E>,
-    butterfly_executor: IronButterflyExecutor<O, E>,
     equity_repo: Arc<E>,
+    pricing_model: PricingModel,
+    max_entry_iv: Option<f64>,
     hedge_config: cs_domain::HedgeConfig,
     timing_strategy: Option<TimingStrategy>,
-    pricing_model: PricingModel,
 }
 
 impl<O, E> TradeOrchestrator<O, E>
 where
-    O: OptionsDataRepository,
-    E: EquityDataRepository,
+    O: OptionsDataRepository + 'static,
+    E: EquityDataRepository + 'static,
 {
     pub fn new(options_repo: Arc<O>, equity_repo: Arc<E>) -> Self {
         Self {
-            options_repo: options_repo.clone(),
-            calendar_executor: TradeExecutor::new(options_repo.clone(), equity_repo.clone()),
-            straddle_executor: StraddleExecutor::new(options_repo.clone(), equity_repo.clone()),
-            calendar_straddle_executor: CalendarStraddleExecutor::new(options_repo.clone(), equity_repo.clone()),
-            butterfly_executor: IronButterflyExecutor::new(options_repo, equity_repo.clone()),
+            options_repo,
             equity_repo,
+            pricing_model: PricingModel::default(),
+            max_entry_iv: None,
             hedge_config: cs_domain::HedgeConfig::default(),
             timing_strategy: None,
-            pricing_model: PricingModel::default(),
         }
+    }
+
+    pub fn with_pricing_model(mut self, model: PricingModel) -> Self {
+        self.pricing_model = model;
+        self
+    }
+
+    pub fn with_max_entry_iv(mut self, max_iv: Option<f64>) -> Self {
+        self.max_entry_iv = max_iv;
+        self
     }
 
     pub fn with_hedge_config(mut self, hedge_config: cs_domain::HedgeConfig) -> Self {
@@ -201,13 +205,372 @@ where
         self
     }
 
+    /// Execute any trade type with selection
+    pub async fn execute_with_selection(
+        &self,
+        event: &EarningsEvent,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+        entry_surface: &IVSurface,
+        selector: &dyn StrikeSelector,
+        structure: TradeStructure,
+        criteria: &ExpirationCriteria,
+    ) -> TradeResult {
+        let spot = SpotPrice::new(entry_surface.spot_price(), entry_time);
+
+        match structure {
+            TradeStructure::CalendarSpread(option_type) => {
+                self.execute_calendar_spread(
+                    event, entry_time, exit_time, &spot, entry_surface,
+                    selector, option_type, criteria, structure,
+                ).await
+            }
+            TradeStructure::Straddle => {
+                self.execute_straddle_with_selection(
+                    event, entry_time, exit_time, &spot, entry_surface,
+                    selector, structure,
+                ).await
+            }
+            TradeStructure::CalendarStraddle => {
+                self.execute_calendar_straddle(
+                    event, entry_time, exit_time, &spot, entry_surface,
+                    selector, criteria, structure,
+                ).await
+            }
+            TradeStructure::IronButterfly { wing_width } => {
+                self.execute_iron_butterfly(
+                    event, entry_time, exit_time, &spot, entry_surface,
+                    selector, wing_width, criteria, structure,
+                ).await
+            }
+        }
+    }
+
+    async fn execute_calendar_spread(
+        &self,
+        event: &EarningsEvent,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+        spot: &SpotPrice,
+        entry_surface: &IVSurface,
+        selector: &dyn StrikeSelector,
+        option_type: OptionType,
+        criteria: &ExpirationCriteria,
+        structure: TradeStructure,
+    ) -> TradeResult {
+        // 1. Select trade
+        let spread = match selector.select_calendar_spread(spot, entry_surface, option_type, criteria) {
+            Ok(s) => s,
+            Err(e) => return self.selection_failed(event, structure, e),
+        };
+
+        // 2. Create pricer on demand
+        let pricer = SpreadPricer::new().with_pricing_model(self.pricing_model);
+
+        // 3. Execute using generic function
+        let config = ExecutionConfig::for_calendar_spread(self.max_entry_iv);
+        let result = execute_trade(
+            &spread,
+            &pricer,
+            self.options_repo.as_ref(),
+            self.equity_repo.as_ref(),
+            &config,
+            event,
+            entry_time,
+            exit_time,
+        ).await;
+
+        // 4. Wrap result
+        if result.success {
+            TradeResult::CalendarSpread(result)
+        } else {
+            self.execution_failed(event, structure, result.failure_reason)
+        }
+    }
+
+    async fn execute_straddle_with_selection(
+        &self,
+        event: &EarningsEvent,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+        spot: &SpotPrice,
+        entry_surface: &IVSurface,
+        selector: &dyn StrikeSelector,
+        structure: TradeStructure,
+    ) -> TradeResult {
+        // 1. Select trade
+        let min_expiration = exit_time.date_naive();
+        let straddle = match selector.select_straddle(spot, entry_surface, min_expiration) {
+            Ok(s) => s,
+            Err(e) => return self.selection_failed(event, structure, e),
+        };
+
+        // 2. Execute (with hedging if enabled)
+        let result = self.execute_straddle(&straddle, event, entry_time, exit_time).await;
+
+        // 3. Wrap result
+        if result.success {
+            TradeResult::Straddle(result)
+        } else {
+            self.execution_failed(event, structure, result.failure_reason)
+        }
+    }
+
+    async fn execute_calendar_straddle(
+        &self,
+        event: &EarningsEvent,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+        spot: &SpotPrice,
+        entry_surface: &IVSurface,
+        selector: &dyn StrikeSelector,
+        criteria: &ExpirationCriteria,
+        structure: TradeStructure,
+    ) -> TradeResult {
+        // 1. Select trade
+        let cal_straddle = match selector.select_calendar_straddle(spot, entry_surface, criteria) {
+            Ok(s) => s,
+            Err(e) => return self.selection_failed(event, structure, e),
+        };
+
+        // 2. Create pricer on demand
+        // Note: CalendarStraddle needs its own ExecutableTrade impl
+        // For now, fall back to direct execution pattern
+        let result = self.execute_calendar_straddle_direct(&cal_straddle, event, entry_time, exit_time).await;
+
+        // 3. Wrap result
+        if result.success {
+            TradeResult::CalendarStraddle(result)
+        } else {
+            self.execution_failed(event, structure, result.failure_reason)
+        }
+    }
+
+    async fn execute_iron_butterfly(
+        &self,
+        event: &EarningsEvent,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+        spot: &SpotPrice,
+        entry_surface: &IVSurface,
+        selector: &dyn StrikeSelector,
+        wing_width: Decimal,
+        criteria: &ExpirationCriteria,
+        structure: TradeStructure,
+    ) -> TradeResult {
+        // 1. Select trade
+        let butterfly = match selector.select_iron_butterfly(
+            spot, entry_surface, wing_width,
+            criteria.min_short_dte, criteria.max_short_dte,
+        ) {
+            Ok(b) => b,
+            Err(e) => return self.selection_failed(event, structure, e),
+        };
+
+        // 2. Execute
+        // Note: IronButterfly needs its own ExecutableTrade impl
+        // For now, fall back to direct execution pattern
+        let result = self.execute_iron_butterfly_direct(&butterfly, event, entry_time, exit_time).await;
+
+        // 3. Wrap result
+        if result.success {
+            TradeResult::IronButterfly(result)
+        } else {
+            self.execution_failed(event, structure, result.failure_reason)
+        }
+    }
+
+    /// Execute a pre-built straddle directly (for rolling strategies)
+    pub async fn execute_straddle(
+        &self,
+        straddle: &Straddle,
+        event: &EarningsEvent,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+    ) -> StraddleResult {
+        // Create pricer on demand
+        let spread_pricer = SpreadPricer::new().with_pricing_model(self.pricing_model);
+        let pricer = StraddlePricer::new(spread_pricer);
+        let config = ExecutionConfig::for_straddle(self.max_entry_iv);
+
+        // Execute using generic function
+        let mut result = execute_trade(
+            straddle,
+            &pricer,
+            self.options_repo.as_ref(),
+            self.equity_repo.as_ref(),
+            &config,
+            event,
+            entry_time,
+            exit_time,
+        ).await;
+
+        // Apply hedging if enabled
+        if result.success && self.hedge_config.is_enabled() && self.timing_strategy.is_some() {
+            let rehedge_times = self.timing_strategy.as_ref().unwrap()
+                .rehedge_times(entry_time, exit_time, &self.hedge_config.strategy);
+
+            if let Err(e) = self.apply_hedging(&mut result, straddle, entry_time, exit_time, rehedge_times).await {
+                eprintln!("Hedging failed: {}", e);
+                result.success = false;
+                result.failure_reason = Some(cs_domain::FailureReason::PricingError(
+                    format!("Hedging failed: {}", e)
+                ));
+            }
+        }
+
+        result
+    }
+
+    // Temporary: Direct execution for types without ExecutableTrade impl yet
+    async fn execute_calendar_straddle_direct(
+        &self,
+        _cal_straddle: &CalendarStraddle,
+        event: &EarningsEvent,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+    ) -> CalendarStraddleResult {
+        // TODO: Implement ExecutableTrade for CalendarStraddle
+        // Use Decimal::ONE since Strike::new() rejects zero
+        let placeholder_strike = Strike::new(Decimal::ONE).unwrap();
+        CalendarStraddleResult {
+            symbol: event.symbol.clone(),
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
+            short_strike: placeholder_strike.clone(),
+            long_strike: placeholder_strike,
+            short_expiry: event.earnings_date,
+            long_expiry: event.earnings_date,
+            entry_time,
+            short_call_entry: Decimal::ZERO,
+            short_put_entry: Decimal::ZERO,
+            long_call_entry: Decimal::ZERO,
+            long_put_entry: Decimal::ZERO,
+            entry_cost: Decimal::ZERO,
+            exit_time,
+            short_call_exit: Decimal::ZERO,
+            short_put_exit: Decimal::ZERO,
+            long_call_exit: Decimal::ZERO,
+            long_put_exit: Decimal::ZERO,
+            exit_value: Decimal::ZERO,
+            entry_surface_time: None,
+            exit_surface_time: None,
+            pnl: Decimal::ZERO,
+            pnl_pct: Decimal::ZERO,
+            net_delta: None,
+            net_gamma: None,
+            net_theta: None,
+            net_vega: None,
+            short_iv_entry: None,
+            long_iv_entry: None,
+            short_iv_exit: None,
+            long_iv_exit: None,
+            iv_ratio_entry: None,
+            delta_pnl: None,
+            gamma_pnl: None,
+            theta_pnl: None,
+            vega_pnl: None,
+            unexplained_pnl: None,
+            spot_at_entry: 0.0,
+            spot_at_exit: 0.0,
+            success: false,
+            failure_reason: Some(cs_domain::FailureReason::PricingError(
+                "CalendarStraddle execution not yet implemented".to_string()
+            )),
+        }
+    }
+
+    async fn execute_iron_butterfly_direct(
+        &self,
+        _butterfly: &IronButterfly,
+        event: &EarningsEvent,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+    ) -> IronButterflyResult {
+        // TODO: Implement ExecutableTrade for IronButterfly
+        // Use Decimal::ONE since Strike::new() rejects zero
+        let placeholder_strike = Strike::new(Decimal::ONE).unwrap();
+        IronButterflyResult {
+            symbol: event.symbol.clone(),
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
+            center_strike: placeholder_strike.clone(),
+            upper_strike: placeholder_strike.clone(),
+            lower_strike: placeholder_strike,
+            expiration: event.earnings_date,
+            wing_width: Decimal::ZERO,
+            entry_time,
+            short_call_entry: Decimal::ZERO,
+            short_put_entry: Decimal::ZERO,
+            long_call_entry: Decimal::ZERO,
+            long_put_entry: Decimal::ZERO,
+            entry_credit: Decimal::ZERO,
+            exit_time,
+            short_call_exit: Decimal::ZERO,
+            short_put_exit: Decimal::ZERO,
+            long_call_exit: Decimal::ZERO,
+            long_put_exit: Decimal::ZERO,
+            exit_cost: Decimal::ZERO,
+            entry_surface_time: None,
+            exit_surface_time: None,
+            pnl: Decimal::ZERO,
+            pnl_pct: Decimal::ZERO,
+            max_loss: Decimal::ZERO,
+            net_delta: None,
+            net_gamma: None,
+            net_theta: None,
+            net_vega: None,
+            iv_entry: None,
+            iv_exit: None,
+            iv_crush: None,
+            delta_pnl: None,
+            gamma_pnl: None,
+            theta_pnl: None,
+            vega_pnl: None,
+            unexplained_pnl: None,
+            spot_at_entry: 0.0,
+            spot_at_exit: 0.0,
+            spot_move: 0.0,
+            spot_move_pct: 0.0,
+            breakeven_up: 0.0,
+            breakeven_down: 0.0,
+            within_breakeven: false,
+            success: false,
+            failure_reason: Some(cs_domain::FailureReason::PricingError(
+                "IronButterfly execution not yet implemented".to_string()
+            )),
+        }
+    }
+
+    fn selection_failed(&self, event: &EarningsEvent, structure: TradeStructure, error: SelectionError) -> TradeResult {
+        TradeResult::Failed(FailedTrade {
+            symbol: event.symbol.clone(),
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
+            trade_structure: structure,
+            reason: cs_domain::FailureReason::PricingError(error.to_string()),
+            phase: "selection".to_string(),
+            details: Some(error.to_string()),
+        })
+    }
+
+    fn execution_failed(&self, event: &EarningsEvent, structure: TradeStructure, reason: Option<cs_domain::FailureReason>) -> TradeResult {
+        TradeResult::Failed(FailedTrade {
+            symbol: event.symbol.clone(),
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
+            trade_structure: structure,
+            reason: reason.unwrap_or(cs_domain::FailureReason::PricingError("Unknown".to_string())),
+            phase: "execution".to_string(),
+            details: None,
+        })
+    }
+
     /// Apply delta hedging to a straddle result
-    ///
-    /// Returns an error if spot price lookup fails at any rehedge time.
     async fn apply_hedging(
         &self,
         result: &mut StraddleResult,
-        straddle: &cs_domain::Straddle,
+        straddle: &Straddle,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
         rehedge_times: Vec<DateTime<Utc>>,
@@ -215,7 +578,6 @@ where
         use cs_domain::HedgeState;
         use rust_decimal::prelude::ToPrimitive;
 
-        // Initialize hedge state from option position at entry
         let mut hedge_state = HedgeState::new(
             self.hedge_config.clone(),
             result.net_delta.unwrap_or(0.0),
@@ -223,31 +585,23 @@ where
             result.spot_at_entry,
         );
 
-        // Track hedge shares over time for snapshot collection
         let mut hedge_shares_timeline: Vec<(DateTime<Utc>, i32)> = vec![(entry_time, 0)];
 
-        // Process each rehedge time - state machine handles all logic
         for rehedge_time in rehedge_times {
-            // Check max rehedges limit
             if hedge_state.at_max_rehedges() {
                 break;
             }
 
-            // Get spot price at rehedge time - fail if unavailable
             let spot = self.equity_repo.get_spot_price(straddle.symbol(), rehedge_time)
                 .await
                 .map_err(|e| format!("Failed to get spot price at {}: {}", rehedge_time, e))?;
 
-            // Update state - will hedge if needed
             hedge_state.update(rehedge_time, spot.to_f64());
-            // Track hedge shares after this update
             hedge_shares_timeline.push((rehedge_time, hedge_state.stock_shares()));
         }
 
-        // Finalize hedge state and calculate P&L
         let hedge_position = hedge_state.finalize(result.spot_at_exit);
 
-        // Calculate hedge P&L if any hedges were performed
         if hedge_position.rehedge_count() > 0 {
             let hedge_pnl = hedge_position.calculate_pnl(result.spot_at_exit);
             let total_pnl = result.pnl + hedge_pnl - hedge_position.total_cost;
@@ -256,25 +610,12 @@ where
             result.hedge_pnl = Some(hedge_pnl);
             result.total_pnl_with_hedge = Some(total_pnl);
 
-            // Collect daily snapshots for integrated attribution
-            match self.collect_daily_snapshots(
-                straddle,
-                &hedge_shares_timeline,
-                entry_time,
-                exit_time,
-            ).await {
+            match self.collect_daily_snapshots(straddle, &hedge_shares_timeline, entry_time, exit_time).await {
                 Ok(snapshots) if !snapshots.is_empty() => {
-                    let total_pnl_with_hedge = total_pnl;
-                    let attribution = cs_domain::PositionAttribution::from_snapshots(
-                        snapshots,
-                        total_pnl_with_hedge,
-                    );
+                    let attribution = cs_domain::PositionAttribution::from_snapshots(snapshots, total_pnl);
                     result.position_attribution = Some(attribution);
                 }
-                Ok(_) => {
-                    // No snapshots collected (very short holding period?)
-                    eprintln!("Warning: No daily snapshots collected for attribution");
-                }
+                Ok(_) => {}
                 Err(e) => {
                     eprintln!("Warning: Failed to collect snapshots for attribution: {}", e);
                 }
@@ -284,18 +625,9 @@ where
         Ok(())
     }
 
-    /// Collect daily snapshot pairs for P&L attribution
-    ///
-    /// Creates close-to-close pairs to capture overnight moves:
-    /// 1. Entry → Day 1 EOD (4:00 PM)
-    /// 2. Day 1 EOD → Day 2 EOD (includes overnight)
-    /// 3. Day 2 EOD → Day 3 EOD (includes overnight)
-    /// 4. Day N EOD → Exit
-    ///
-    /// Uses PricingModel for IV interpolation instead of exact IV surface lookups.
     async fn collect_daily_snapshots(
         &self,
-        straddle: &cs_domain::Straddle,
+        straddle: &Straddle,
         hedge_shares_timeline: &[(DateTime<Utc>, i32)],
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
@@ -312,38 +644,18 @@ where
         }
 
         let mut snapshots = Vec::new();
+        let mut prev_snapshot = self.create_snapshot(straddle, entry_time, hedge_shares_timeline).await
+            .map_err(|e| format!("Failed to create entry snapshot: {}", e))?;
 
-        // Start with entry snapshot
-        let mut prev_snapshot = match self.create_snapshot(
-            straddle,
-            entry_time,
-            hedge_shares_timeline,
-        ).await {
-            Ok(s) => s,
-            Err(e) => return Err(format!("Failed to create entry snapshot: {}", e)),
-        };
-
-        // Create EOD snapshots and pair with previous
         for day in trading_days {
             let close_time = cs_domain::datetime::eastern_to_utc(
                 day,
                 chrono::NaiveTime::from_hms_opt(16, 0, 0).unwrap(),
             );
 
-            // Use exit_time for last day if exit is before 4 PM
-            let actual_close = if day == exit_time.date_naive() && exit_time < close_time {
-                exit_time
-            } else if day == exit_time.date_naive() {
-                exit_time
-            } else {
-                close_time
-            };
+            let actual_close = if day == exit_time.date_naive() { exit_time } else { close_time };
 
-            let close_snapshot = match self.create_snapshot(
-                straddle,
-                actual_close,
-                hedge_shares_timeline,
-            ).await {
+            let close_snapshot = match self.create_snapshot(straddle, actual_close, hedge_shares_timeline).await {
                 Ok(s) => s,
                 Err(e) => {
                     eprintln!("Warning: Failed to create EOD snapshot for {}: {}", day, e);
@@ -351,7 +663,6 @@ where
                 }
             };
 
-            // Pair previous snapshot with this EOD snapshot
             snapshots.push((prev_snapshot, close_snapshot.clone()));
             prev_snapshot = close_snapshot;
         }
@@ -359,10 +670,9 @@ where
         Ok(snapshots)
     }
 
-    /// Create a single position snapshot at a given time
     async fn create_snapshot(
         &self,
-        straddle: &cs_domain::Straddle,
+        straddle: &Straddle,
         timestamp: DateTime<Utc>,
         hedge_shares_timeline: &[(DateTime<Utc>, i32)],
     ) -> Result<cs_domain::PositionSnapshot, String> {
@@ -370,90 +680,46 @@ where
         use cs_domain::{PositionGreeks, PositionSnapshot, CONTRACT_MULTIPLIER};
         use rust_decimal::prelude::ToPrimitive;
 
-        // Get spot price at this time
         let spot = self.equity_repo.get_spot_price(straddle.symbol(), timestamp)
             .await
             .map_err(|e| format!("Failed to get spot price: {}", e))?;
 
-        // Get option chain to compute IV
-        let chain = self.options_repo.get_option_bars_at_time(
-            straddle.symbol(),
-            timestamp,
-        ).await.map_err(|e| format!("Failed to get option chain: {}", e))?;
+        let chain = self.options_repo.get_option_bars_at_time(straddle.symbol(), timestamp)
+            .await
+            .map_err(|e| format!("Failed to get option chain: {}", e))?;
 
-        // Build IV surface
         let iv_surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
             &chain,
             self.equity_repo.as_ref(),
             straddle.symbol(),
         ).await;
 
-        // Get average IV for the straddle strike using PricingModel for interpolation
         let strike_decimal = straddle.strike().value();
         let strike_f64 = strike_decimal.to_f64().unwrap_or(0.0);
-
-        // Create pricing provider for IV interpolation (SVI/Linear)
         let risk_free_rate = 0.05;
         let pricing_provider = self.pricing_model.to_provider_with_rate(risk_free_rate);
 
         let iv = if let Some(ref surface) = iv_surface {
-            // Use PricingModel's IV provider which does interpolation
-            let call_iv = pricing_provider.get_iv(
-                surface,
-                strike_decimal,
-                straddle.expiration(),
-                true,  // is_call
-            );
-            let put_iv = pricing_provider.get_iv(
-                surface,
-                strike_decimal,
-                straddle.expiration(),
-                false,  // is_put
-            );
+            let call_iv = pricing_provider.get_iv(surface, strike_decimal, straddle.expiration(), true);
+            let put_iv = pricing_provider.get_iv(surface, strike_decimal, straddle.expiration(), false);
 
             match (call_iv, put_iv) {
                 (Some(c), Some(p)) => (c + p) / 2.0,
                 (Some(c), None) => c,
                 (None, Some(p)) => p,
-                (None, None) => {
-                    eprintln!("Warning: No IV data for {} strike ${} exp {} at {}",
-                        straddle.symbol(), strike_f64, straddle.expiration(), timestamp);
-                    0.30  // Last resort default
-                }
+                (None, None) => 0.30,
             }
         } else {
-            eprintln!("Warning: No IV surface for {} at {}", straddle.symbol(), timestamp);
             0.30
         };
 
-        // Compute time to expiration in years
         let tte_days = (straddle.expiration() - timestamp.date_naive()).num_days() as f64;
         let tte = tte_days / 365.0;
 
-        // Recompute Greeks using Black-Scholes
-        let risk_free_rate = 0.05;  // 5% annual risk-free rate
-        let call_greeks = bs_greeks(
-            spot.to_f64(),
-            strike_f64,
-            tte,
-            iv,
-            true,  // is_call
-            risk_free_rate,
-        );
-
-        let put_greeks = bs_greeks(
-            spot.to_f64(),
-            strike_f64,
-            tte,
-            iv,
-            false,  // is_call
-            risk_free_rate,
-        );
-
-        // Combine call + put Greeks for position level
+        let call_greeks = bs_greeks(spot.to_f64(), strike_f64, tte, iv, true, risk_free_rate);
+        let put_greeks = bs_greeks(spot.to_f64(), strike_f64, tte, iv, false, risk_free_rate);
         let position_greeks = PositionGreeks::straddle(&call_greeks, &put_greeks, CONTRACT_MULTIPLIER);
 
-        // Find hedge shares at this time (most recent before timestamp)
         let hedge_shares = hedge_shares_timeline
             .iter()
             .rev()
@@ -461,270 +727,6 @@ where
             .map(|(_, shares)| *shares)
             .unwrap_or(0);
 
-        Ok(PositionSnapshot::new(
-            timestamp,
-            spot.to_f64(),
-            iv,
-            position_greeks,
-            hedge_shares,
-        ))
-    }
-
-    pub fn with_pricing_model(mut self, model: PricingModel) -> Self {
-        self.pricing_model = model;
-        self.calendar_executor = self.calendar_executor.with_pricing_model(model);
-        self.straddle_executor = self.straddle_executor.with_pricing_model(model);
-        self.calendar_straddle_executor = self.calendar_straddle_executor.with_pricing_model(model);
-        self.butterfly_executor = self.butterfly_executor.with_pricing_model(model);
-        self
-    }
-
-    pub fn with_max_entry_iv(mut self, max_iv: Option<f64>) -> Self {
-        self.calendar_executor = self.calendar_executor.with_max_entry_iv(max_iv);
-        self.straddle_executor = self.straddle_executor.with_max_entry_iv(max_iv);
-        self.calendar_straddle_executor = self.calendar_straddle_executor.with_max_entry_iv(max_iv);
-        self.butterfly_executor = self.butterfly_executor.with_max_entry_iv(max_iv);
-        self
-    }
-
-    /// Execute any trade type
-    ///
-    /// IMPORTANT: entry_surface is passed in to avoid rebuilding.
-    /// It was already built for selection and is reused for entry pricing.
-    ///
-    /// For now, this method selects the trade and then delegates to the appropriate
-    /// executor. In the future, the executors will be modified to accept the
-    /// pre-built entry_surface to avoid redundant IV surface builds.
-    pub async fn execute_with_selection(
-        &self,
-        event: &EarningsEvent,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-        entry_surface: &IVSurface,
-        selector: &dyn StrikeSelector,
-        structure: TradeStructure,
-        criteria: &ExpirationCriteria,
-    ) -> TradeResult {
-        let spot = SpotPrice::new(entry_surface.spot_price(), entry_time);
-
-        // Select trade using the SAME surface that will be used for pricing
-        match structure {
-            TradeStructure::CalendarSpread(option_type) => {
-                match selector.select_calendar_spread(&spot, entry_surface, option_type, criteria) {
-                    Ok(spread) => {
-                        let result = self.calendar_executor
-                            .execute_trade(&spread, event, entry_time, exit_time)
-                            .await;
-
-                        // Check if execution succeeded
-                        if result.success {
-                            TradeResult::CalendarSpread(result)
-                        } else {
-                            TradeResult::Failed(FailedTrade {
-                                symbol: result.symbol,
-                                earnings_date: result.earnings_date,
-                                earnings_time: result.earnings_time,
-                                trade_structure: structure,
-                                reason: result.failure_reason.unwrap_or(cs_domain::FailureReason::PricingError("Unknown".to_string())),
-                                phase: "execution".to_string(),
-                                details: None,
-                            })
-                        }
-                    }
-                    Err(e) => {
-                        TradeResult::Failed(FailedTrade {
-                            symbol: event.symbol.clone(),
-                            earnings_date: event.earnings_date,
-                            earnings_time: event.earnings_time,
-                            trade_structure: structure,
-                            reason: cs_domain::FailureReason::PricingError(e.to_string()),
-                            phase: "selection".to_string(),
-                            details: Some(e.to_string()),
-                        })
-                    }
-                }
-            }
-            TradeStructure::Straddle => {
-                // Use exit date as minimum expiration - options must expire AFTER we exit
-                let min_expiration = exit_time.date_naive();
-
-                match selector.select_straddle(&spot, entry_surface, min_expiration) {
-                    Ok(straddle) => {
-                        // Execute trade (with hedging if enabled)
-                        let result = if self.hedge_config.is_enabled() && self.timing_strategy.is_some() {
-                            // Generate rehedge times
-                            let rehedge_times = self.timing_strategy.as_ref().unwrap()
-                                .rehedge_times(entry_time, exit_time, &self.hedge_config.strategy);
-
-                            // Execute base trade first
-                            let mut base_result = self.straddle_executor
-                                .execute_trade(&straddle, event, entry_time, exit_time)
-                                .await;
-
-                            // If successful, apply hedging
-                            if base_result.success {
-                                if let Err(e) = self.apply_hedging(&mut base_result, &straddle, entry_time, exit_time, rehedge_times).await {
-                                    eprintln!("Hedging failed: {}", e);
-                                    base_result.success = false;
-                                    base_result.failure_reason = Some(cs_domain::FailureReason::PricingError(
-                                        format!("Hedging failed: {}", e)
-                                    ));
-                                }
-                            }
-
-                            base_result
-                        } else {
-                            // Execute without hedging
-                            self.straddle_executor
-                                .execute_trade(&straddle, event, entry_time, exit_time)
-                                .await
-                        };
-
-                        if result.success {
-                            TradeResult::Straddle(result)
-                        } else {
-                            TradeResult::Failed(FailedTrade {
-                                symbol: result.symbol,
-                                earnings_date: result.earnings_date,
-                                earnings_time: result.earnings_time,
-                                trade_structure: structure,
-                                reason: result.failure_reason.unwrap_or(cs_domain::FailureReason::PricingError("Unknown".to_string())),
-                                phase: "execution".to_string(),
-                                details: None,
-                            })
-                        }
-                    }
-                    Err(e) => {
-                        TradeResult::Failed(FailedTrade {
-                            symbol: event.symbol.clone(),
-                            earnings_date: event.earnings_date,
-                            earnings_time: event.earnings_time,
-                            trade_structure: structure,
-                            reason: cs_domain::FailureReason::PricingError(e.to_string()),
-                            phase: "selection".to_string(),
-                            details: Some(e.to_string()),
-                        })
-                    }
-                }
-            }
-            TradeStructure::CalendarStraddle => {
-                match selector.select_calendar_straddle(&spot, entry_surface, criteria) {
-                    Ok(cal_straddle) => {
-                        let result = self.calendar_straddle_executor
-                            .execute_trade(&cal_straddle, event, entry_time, exit_time)
-                            .await;
-
-                        if result.success {
-                            TradeResult::CalendarStraddle(result)
-                        } else {
-                            TradeResult::Failed(FailedTrade {
-                                symbol: result.symbol,
-                                earnings_date: result.earnings_date,
-                                earnings_time: result.earnings_time,
-                                trade_structure: structure,
-                                reason: result.failure_reason.unwrap_or(cs_domain::FailureReason::PricingError("Unknown".to_string())),
-                                phase: "execution".to_string(),
-                                details: None,
-                            })
-                        }
-                    }
-                    Err(e) => {
-                        TradeResult::Failed(FailedTrade {
-                            symbol: event.symbol.clone(),
-                            earnings_date: event.earnings_date,
-                            earnings_time: event.earnings_time,
-                            trade_structure: structure,
-                            reason: cs_domain::FailureReason::PricingError(e.to_string()),
-                            phase: "selection".to_string(),
-                            details: Some(e.to_string()),
-                        })
-                    }
-                }
-            }
-            TradeStructure::IronButterfly { wing_width } => {
-                match selector.select_iron_butterfly(
-                    &spot,
-                    entry_surface,
-                    wing_width,
-                    criteria.min_short_dte,
-                    criteria.max_short_dte,
-                ) {
-                    Ok(butterfly) => {
-                        let result = self.butterfly_executor
-                            .execute_trade(&butterfly, event, entry_time, exit_time)
-                            .await;
-
-                        if result.success {
-                            TradeResult::IronButterfly(result)
-                        } else {
-                            TradeResult::Failed(FailedTrade {
-                                symbol: result.symbol,
-                                earnings_date: result.earnings_date,
-                                earnings_time: result.earnings_time,
-                                trade_structure: structure,
-                                reason: result.failure_reason.unwrap_or(cs_domain::FailureReason::PricingError("Unknown".to_string())),
-                                phase: "execution".to_string(),
-                                details: None,
-                            })
-                        }
-                    }
-                    Err(e) => {
-                        TradeResult::Failed(FailedTrade {
-                            symbol: event.symbol.clone(),
-                            earnings_date: event.earnings_date,
-                            earnings_time: event.earnings_time,
-                            trade_structure: structure,
-                            reason: cs_domain::FailureReason::PricingError(e.to_string()),
-                            phase: "selection".to_string(),
-                            details: Some(e.to_string()),
-                        })
-                    }
-                }
-            }
-        }
-    }
-
-    /// Execute a pre-built straddle directly (for rolling strategies)
-    ///
-    /// This method bypasses the selection process and executes a pre-constructed
-    /// straddle trade. If hedging is configured, it will be applied automatically.
-    pub async fn execute_straddle(
-        &self,
-        straddle: &Straddle,
-        event: &EarningsEvent,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-    ) -> StraddleResult {
-        // Execute trade (with hedging if enabled)
-        let result = if self.hedge_config.is_enabled() && self.timing_strategy.is_some() {
-            // Generate rehedge times
-            let rehedge_times = self.timing_strategy.as_ref().unwrap()
-                .rehedge_times(entry_time, exit_time, &self.hedge_config.strategy);
-
-            // Execute base trade first
-            let mut base_result = self.straddle_executor
-                .execute_trade(straddle, event, entry_time, exit_time)
-                .await;
-
-            // If successful, apply hedging
-            if base_result.success {
-                if let Err(e) = self.apply_hedging(&mut base_result, straddle, entry_time, exit_time, rehedge_times).await {
-                    eprintln!("Hedging failed: {}", e);
-                    base_result.success = false;
-                    base_result.failure_reason = Some(cs_domain::FailureReason::PricingError(
-                        format!("Hedging failed: {}", e)
-                    ));
-                }
-            }
-
-            base_result
-        } else {
-            // Execute without hedging
-            self.straddle_executor
-                .execute_trade(straddle, event, entry_time, exit_time)
-                .await
-        };
-
-        result
+        Ok(PositionSnapshot::new(timestamp, spot.to_f64(), iv, position_greeks, hedge_shares))
     }
 }

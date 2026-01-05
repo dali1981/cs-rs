@@ -15,23 +15,18 @@ use cs_domain::strike_selection::{ATMStrategy, StrikeSelector};
 /// trades using real market data. It uses the ATM selection strategy to
 /// find the strike closest to spot price and selects the nearest available
 /// expiration that meets minimum DTE requirements.
-pub struct DefaultTradeFactory<O, E>
-where
-    O: OptionsDataRepository,
-    E: EquityDataRepository,
-{
-    options_repo: Arc<O>,
-    equity_repo: Arc<E>,
+pub struct DefaultTradeFactory {
+    options_repo: Arc<dyn OptionsDataRepository>,
+    equity_repo: Arc<dyn EquityDataRepository>,
     selector: ATMStrategy,
 }
 
-impl<O, E> DefaultTradeFactory<O, E>
-where
-    O: OptionsDataRepository,
-    E: EquityDataRepository,
-{
+impl DefaultTradeFactory {
     /// Create a new trade factory with default ATM selection strategy
-    pub fn new(options_repo: Arc<O>, equity_repo: Arc<E>) -> Self {
+    pub fn new(
+        options_repo: Arc<dyn OptionsDataRepository>,
+        equity_repo: Arc<dyn EquityDataRepository>,
+    ) -> Self {
         Self {
             options_repo,
             equity_repo,
@@ -47,11 +42,7 @@ where
 }
 
 #[async_trait]
-impl<O, E> TradeFactory for DefaultTradeFactory<O, E>
-where
-    O: OptionsDataRepository,
-    E: EquityDataRepository,
-{
+impl TradeFactory for DefaultTradeFactory {
     async fn create_atm_straddle(
         &self,
         symbol: &str,

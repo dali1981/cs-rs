@@ -4,10 +4,10 @@
 /// and achieves the IV surface optimization (build once, reuse for selection + entry)
 
 use chrono::NaiveDate;
-use cs_backtest::{BacktestUseCase, BacktestConfig, SpreadType, SelectionType, TradeStructure, TradeResult};
+use cs_backtest::{BacktestUseCase, BacktestConfig, SpreadType, SelectionType, TradeStructure, TradeResult, TimingStrategy};
 use cs_domain::{
     infrastructure::{FinqEquityRepository, FinqOptionsRepository, ParquetEarningsRepository},
-    EarningsEvent, EarningsTime, TimingConfig,
+    EarningsEvent, EarningsTime, TimingConfig, EarningsTradeTiming, StraddleTradeTiming,
 };
 use std::path::PathBuf;
 
@@ -32,10 +32,10 @@ async fn test_unified_executor_calendar_spread() {
 
     // Create backtest use case (earnings_repo, options_repo, equity_repo, config)
     let use_case = BacktestUseCase::new(
-        earnings_repo,
+        Box::new(earnings_repo),
         options_repo,
         equity_repo,
-        config,
+        config.clone(),
     );
 
     // Create test event (CRBG from our known working test case)
@@ -54,6 +54,9 @@ async fn test_unified_executor_calendar_spread() {
     let selector = use_case.create_selector();
     let structure = TradeStructure::CalendarSpread(finq_core::OptionType::Call);
 
+    // Create timing strategy for calendar spread (uses Earnings timing)
+    let timing = TimingStrategy::Earnings(EarningsTradeTiming::new(config.timing.clone()));
+
     println!("\n--- Calling process_event_unified ---");
 
     // Call the new optimized method
@@ -61,6 +64,7 @@ async fn test_unified_executor_calendar_spread() {
         &event,
         &*selector,
         structure,
+        &timing,
     ).await;
 
     println!("\n--- Result ---");
@@ -103,10 +107,10 @@ async fn test_unified_executor_straddle() {
 
     // Create backtest use case
     let use_case = BacktestUseCase::new(
-        earnings_repo,
+        Box::new(earnings_repo),
         options_repo,
         equity_repo,
-        config,
+        config.clone(),
     );
 
     // Create test event
@@ -122,11 +126,15 @@ async fn test_unified_executor_straddle() {
     let selector = use_case.create_selector();
     let structure = TradeStructure::Straddle;
 
+    // Create timing strategy for straddle
+    let timing = TimingStrategy::Straddle(StraddleTradeTiming::new(config.timing.clone()));
+
     // Call the new optimized method
     let result = use_case.process_event_unified(
         &event,
         &*selector,
         structure,
+        &timing,
     ).await;
 
     println!("Success: {}", result.success());
