@@ -126,6 +126,13 @@ pub struct RollPeriod {
     pub net_theta: Option<f64>,
     pub net_vega: Option<f64>,
 
+    // P&L Attribution
+    pub delta_pnl: Option<Decimal>,
+    pub gamma_pnl: Option<Decimal>,
+    pub theta_pnl: Option<Decimal>,
+    pub vega_pnl: Option<Decimal>,
+    pub unexplained_pnl: Option<Decimal>,
+
     pub hedge_pnl: Option<Decimal>,
     pub hedge_count: usize,
     pub transaction_cost: Decimal,

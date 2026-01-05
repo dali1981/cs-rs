@@ -10,6 +10,7 @@ pub mod value_objects;
 pub mod entities;
 pub mod strike_selection;
 pub mod repositories;
+pub mod ports;
 pub mod timing;
 pub mod infrastructure;
 pub mod hedging;
@@ -31,6 +32,7 @@ pub use strike_selection::{
 #[allow(deprecated)]
 pub use strike_selection::TradingStrategy;
 pub use repositories::*;
+pub use ports::{TradeFactory, TradeFactoryError};
 pub use timing::*;
 pub use hedging::*;
 pub use expiration::{ExpirationCycle, ExpirationPolicy};

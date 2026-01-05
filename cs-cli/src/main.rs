@@ -452,12 +452,15 @@ async fn run_rolling_straddle(
     equity_repo: FinqEquityRepository,
     output: Option<PathBuf>,
 ) -> Result<()> {
-    use cs_backtest::{UnifiedExecutor, RollingStraddleExecutor};
-    use cs_domain::MarketTime;
+    use cs_backtest::{UnifiedExecutor, RollingStraddleExecutor, TimingStrategy, DefaultTradeFactory};
+    use cs_domain::{MarketTime, StraddleTradeTiming, TradeFactory};
     use std::sync::Arc;
 
     println!("{}", style("Rolling Straddle Strategy").bold().green());
     println!("  Roll policy:   {}", roll_policy.description());
+    if backtest_config.hedge_config.is_enabled() {
+        println!("  Hedging:       Enabled ({:?})", backtest_config.hedge_config.strategy);
+    }
     println!();
 
     // Get symbol to run (for now, require single symbol)
@@ -471,16 +474,33 @@ async fn run_rolling_straddle(
     let options_repo = Arc::new(options_repo);
     let equity_repo = Arc::new(equity_repo);
 
-    // Create unified executor with pricing model (hedging TODO: add in next step)
-    let unified_executor = UnifiedExecutor::new(
+    // Create trade factory for constructing straddles with real expirations
+    let trade_factory = Arc::new(DefaultTradeFactory::new(
         Arc::clone(&options_repo),
         Arc::clone(&equity_repo),
-    ).with_pricing_model(backtest_config.pricing_model.clone());
+    )) as Arc<dyn TradeFactory>;
 
-    // Create rolling executor
+    // Create unified executor with pricing model and hedging config
+    let mut unified_executor = UnifiedExecutor::new(
+        Arc::clone(&options_repo),
+        Arc::clone(&equity_repo),
+    )
+    .with_pricing_model(backtest_config.pricing_model.clone())
+    .with_hedge_config(backtest_config.hedge_config.clone());
+
+    // Add timing strategy if hedging is enabled
+    if backtest_config.hedge_config.is_enabled() {
+        // For rolling strategies, we use a dummy straddle timing since entry/exit
+        // times are managed by the rolling executor itself
+        let straddle_timing = StraddleTradeTiming::new(backtest_config.timing.clone());
+        let timing = TimingStrategy::Straddle(straddle_timing);
+        unified_executor = unified_executor.with_timing_strategy(timing);
+    }
+
+    // Create rolling executor with trade factory
     let rolling_executor = RollingStraddleExecutor::new(
         unified_executor,
-        Arc::clone(&equity_repo),
+        trade_factory,
         roll_policy,
     );
 
@@ -557,10 +577,20 @@ fn display_rolling_results(result: &cs_domain::RollingResult) {
             entry: String,
             #[tabled(rename = "Exit")]
             exit: String,
+            #[tabled(rename = "Expiry")]
+            expiration: String,
             #[tabled(rename = "Strike")]
             strike: String,
-            #[tabled(rename = "P&L")]
+            #[tabled(rename = "Opt P&L")]
             pnl: String,
+            #[tabled(rename = "Hedge P&L")]
+            hedge_pnl: String,
+            #[tabled(rename = "Hedges")]
+            hedge_count: String,
+            #[tabled(rename = "Cost")]
+            tx_cost: String,
+            #[tabled(rename = "Net P&L")]
+            net_pnl: String,
             #[tabled(rename = "Spot Δ%")]
             spot_move: String,
             #[tabled(rename = "IV Δ%")]
@@ -570,12 +600,32 @@ fn display_rolling_results(result: &cs_domain::RollingResult) {
         }
 
         let rows: Vec<RollRow> = result.rolls.iter().enumerate().map(|(i, roll)| {
+            let hedge_pnl_val = roll.hedge_pnl.unwrap_or(rust_decimal::Decimal::ZERO);
+            let net_pnl = roll.pnl + hedge_pnl_val - roll.transaction_cost;
+
             RollRow {
                 num: i + 1,
                 entry: roll.entry_date.format("%Y-%m-%d").to_string(),
                 exit: roll.exit_date.format("%Y-%m-%d").to_string(),
+                expiration: roll.expiration.format("%Y-%m-%d").to_string(),
                 strike: format!("${:.2}", roll.strike),
                 pnl: format!("${:.2}", roll.pnl),
+                hedge_pnl: if roll.hedge_count > 0 {
+                    format!("${:.2}", hedge_pnl_val)
+                } else {
+                    "-".to_string()
+                },
+                hedge_count: if roll.hedge_count > 0 {
+                    format!("{}", roll.hedge_count)
+                } else {
+                    "-".to_string()
+                },
+                tx_cost: if roll.transaction_cost > rust_decimal::Decimal::ZERO {
+                    format!("${:.2}", roll.transaction_cost)
+                } else {
+                    "-".to_string()
+                },
+                net_pnl: format!("${:.2}", net_pnl),
                 spot_move: format!("{:.1}%", roll.spot_move_pct),
                 iv_change: roll.iv_change.map(|c| format!("{:+.1}%", c * 100.0)).unwrap_or_else(|| "N/A".to_string()),
                 reason: roll.roll_reason.to_string(),
@@ -584,6 +634,44 @@ fn display_rolling_results(result: &cs_domain::RollingResult) {
 
         let table = Table::new(rows);
         println!("{}", table);
+
+        // Show P&L attribution if available
+        let has_attribution = result.rolls.iter().any(|r| r.delta_pnl.is_some());
+        if has_attribution {
+            println!();
+            println!("{}", style("P&L Attribution (Greeks):").bold());
+            println!();
+
+            #[derive(Tabled)]
+            struct AttributionRow {
+                #[tabled(rename = "#")]
+                num: usize,
+                #[tabled(rename = "Delta P&L")]
+                delta: String,
+                #[tabled(rename = "Gamma P&L")]
+                gamma: String,
+                #[tabled(rename = "Theta P&L")]
+                theta: String,
+                #[tabled(rename = "Vega P&L")]
+                vega: String,
+                #[tabled(rename = "Unexplained")]
+                unexplained: String,
+            }
+
+            let attr_rows: Vec<AttributionRow> = result.rolls.iter().enumerate().map(|(i, roll)| {
+                AttributionRow {
+                    num: i + 1,
+                    delta: roll.delta_pnl.map(|v| format!("${:.2}", v)).unwrap_or_else(|| "-".to_string()),
+                    gamma: roll.gamma_pnl.map(|v| format!("${:.2}", v)).unwrap_or_else(|| "-".to_string()),
+                    theta: roll.theta_pnl.map(|v| format!("${:.2}", v)).unwrap_or_else(|| "-".to_string()),
+                    vega: roll.vega_pnl.map(|v| format!("${:.2}", v)).unwrap_or_else(|| "-".to_string()),
+                    unexplained: roll.unexplained_pnl.map(|v| format!("${:.2}", v)).unwrap_or_else(|| "-".to_string()),
+                }
+            }).collect();
+
+            let attr_table = Table::new(attr_rows);
+            println!("{}", attr_table);
+        }
     }
 }
 

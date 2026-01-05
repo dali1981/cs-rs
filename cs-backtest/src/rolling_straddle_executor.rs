@@ -5,7 +5,7 @@ use std::sync::Arc;
 use cs_domain::{
     EquityDataRepository, OptionsDataRepository, MarketTime,
     RollPolicy, RollPeriod, RollReason, RollingResult,
-    Straddle, StraddleResult, TradingCalendar,
+    Straddle, StraddleResult, TradingCalendar, TradeFactory,
 };
 
 use crate::unified_executor::UnifiedExecutor;
@@ -17,13 +17,14 @@ use crate::unified_executor::UnifiedExecutor;
 /// - Tracks cumulative P&L across rolls
 /// - Maintains rolling campaign from start to end date
 /// - Supports delta hedging if configured in UnifiedExecutor
+/// - Uses TradeFactory to construct straddles with REAL expirations from market data
 pub struct RollingStraddleExecutor<O, E>
 where
     O: OptionsDataRepository,
     E: EquityDataRepository,
 {
     unified_executor: UnifiedExecutor<O, E>,
-    equity_repo: Arc<E>,
+    trade_factory: Arc<dyn TradeFactory>,
     roll_policy: RollPolicy,
 }
 
@@ -34,12 +35,12 @@ where
 {
     pub fn new(
         unified_executor: UnifiedExecutor<O, E>,
-        equity_repo: Arc<E>,
+        trade_factory: Arc<dyn TradeFactory>,
         roll_policy: RollPolicy,
     ) -> Self {
         Self {
             unified_executor,
-            equity_repo,
+            trade_factory,
             roll_policy,
         }
     }
@@ -112,46 +113,33 @@ where
         )
     }
 
-    /// Find ATM straddle at given date
+    /// Find ATM straddle at given date using real market data
+    ///
+    /// This method delegates to the TradeFactory which:
+    /// 1. Queries the option chain from the repository
+    /// 2. Builds an IV surface with available strikes and expirations
+    /// 3. Selects the ATM strike (closest to spot)
+    /// 4. Selects the first valid expiration after min_expiration
+    ///
+    /// Unlike the old implementation, this uses REAL expiration dates from
+    /// the options chain, not hardcoded date arithmetic.
     async fn find_atm_straddle(
         &self,
         symbol: &str,
         date: NaiveDate,
     ) -> Result<Straddle, String> {
-        use finq_core::OptionType;
-
-        // Get spot price
+        // Use 3:45pm ET as reference time for querying market data
         let dt = self.to_datetime(date, MarketTime { hour: 15, minute: 45 });
-        let spot = self.equity_repo
-            .get_spot_price(symbol, dt)
+
+        // Require options to expire at least 1 day after entry
+        // This ensures we don't select same-day expirations
+        let min_expiration = date + chrono::Duration::days(1);
+
+        // Delegate to factory - uses REAL expirations from market data
+        self.trade_factory
+            .create_atm_straddle(symbol, dt, min_expiration)
             .await
-            .map_err(|e| format!("Failed to get spot: {}", e))?;
-
-        // Find nearest strike
-        let strike_value = spot.to_f64().round() as u32;
-        let strike = cs_domain::Strike::new(Decimal::from(strike_value))
-            .map_err(|e| format!("Invalid strike: {}", e))?;
-
-        // Find next available expiration (simplified - should use expiration selection)
-        let expiration = date + chrono::Duration::days(7);  // Assume 1-week expiry
-
-        // Create option legs
-        let call_leg = cs_domain::OptionLeg {
-            symbol: symbol.to_string(),
-            strike,
-            expiration,
-            option_type: OptionType::Call,
-        };
-
-        let put_leg = cs_domain::OptionLeg {
-            symbol: symbol.to_string(),
-            strike,
-            expiration,
-            option_type: OptionType::Put,
-        };
-
-        Straddle::new(call_leg, put_leg)
-            .map_err(|e| format!("Failed to create straddle: {}", e))
+            .map_err(|e| format!("Trade factory error: {}", e))
     }
 
     /// Determine when to exit this roll period
@@ -211,6 +199,13 @@ where
             net_gamma: result.net_gamma,
             net_theta: result.net_theta,
             net_vega: result.net_vega,
+
+            // P&L Attribution
+            delta_pnl: result.delta_pnl,
+            gamma_pnl: result.gamma_pnl,
+            theta_pnl: result.theta_pnl,
+            vega_pnl: result.vega_pnl,
+            unexplained_pnl: result.unexplained_pnl,
 
             hedge_pnl: result.hedge_pnl,
             hedge_count: result.hedge_position.as_ref().map(|p| p.rehedge_count()).unwrap_or(0),
