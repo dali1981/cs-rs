@@ -1,4 +1,5 @@
 use chrono::NaiveDate;
+use serde::{Deserialize, Serialize};
 use super::ExpirationCycle;
 use crate::strike_selection::SelectionError;
 
@@ -8,7 +9,7 @@ use crate::strike_selection::SelectionError;
 /// - Minimum date constraint (must expire after a certain date)
 /// - Cycle preference (prefer weeklies or monthlies)
 /// - Target DTE (days to expiration from entry)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExpirationPolicy {
     /// Select first expiration >= min_date
     ///

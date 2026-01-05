@@ -167,6 +167,12 @@ enum Commands {
         /// Transaction cost per share (default: 0.01)
         #[arg(long, default_value = "0.01")]
         hedge_cost_per_share: f64,
+        /// Rolling strategy (weekly, monthly, or days:N) - only for straddle spreads
+        #[arg(long)]
+        roll_strategy: Option<String>,
+        /// Day of week for weekly rolls (monday, tuesday, ..., friday)
+        #[arg(long)]
+        roll_day: Option<String>,
     },
 
     /// Analyze results from a run
@@ -316,6 +322,8 @@ async fn main() -> Result<()> {
             delta_threshold,
             max_rehedges,
             hedge_cost_per_share,
+            roll_strategy,
+            roll_day,
         } => {
             run_backtest(
                 conf,
@@ -359,6 +367,8 @@ async fn main() -> Result<()> {
                 delta_threshold,
                 max_rehedges,
                 hedge_cost_per_share,
+                roll_strategy,
+                roll_day,
             )
             .await?;
         }
@@ -430,6 +440,180 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Run rolling straddle strategy
+async fn run_rolling_straddle(
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+    roll_policy: cs_domain::RollPolicy,
+    backtest_config: cs_backtest::BacktestConfig,
+    options_repo: FinqOptionsRepository,
+    equity_repo: FinqEquityRepository,
+    output: Option<PathBuf>,
+) -> Result<()> {
+    use cs_backtest::{StraddleExecutor, RollingStraddleExecutor};
+    use cs_domain::MarketTime;
+    use std::sync::Arc;
+
+    println!("{}", style("Rolling Straddle Strategy").bold().green());
+    println!("  Roll policy:   {}", roll_policy.description());
+    println!();
+
+    // Get symbol to run (for now, require single symbol)
+    let symbol = match &backtest_config.symbols {
+        Some(syms) if syms.len() == 1 => &syms[0],
+        Some(syms) => anyhow::bail!("Rolling strategy currently supports single symbol only, got {} symbols", syms.len()),
+        None => anyhow::bail!("--symbols is required for rolling strategy"),
+    };
+
+    // Create shared repos
+    let options_repo = Arc::new(options_repo);
+    let equity_repo = Arc::new(equity_repo);
+
+    // Create executor with pricing model
+    let executor = StraddleExecutor::new(
+        Arc::clone(&options_repo),
+        Arc::clone(&equity_repo),
+    ).with_pricing_model(backtest_config.pricing_model.clone());
+
+    // Create rolling executor
+    let rolling_executor = RollingStraddleExecutor::new(
+        executor,
+        Arc::clone(&equity_repo),
+        roll_policy,
+    );
+
+    // Define entry and exit times
+    let entry_time = MarketTime {
+        hour: backtest_config.timing.entry_hour,
+        minute: backtest_config.timing.entry_minute,
+    };
+    let exit_time = MarketTime {
+        hour: backtest_config.timing.exit_hour,
+        minute: backtest_config.timing.exit_minute,
+    };
+
+    println!("{}", style("Executing rolling straddle...").bold());
+
+    // Execute the rolling strategy
+    let result = rolling_executor.execute_rolling(
+        symbol,
+        start_date,
+        end_date,
+        entry_time,
+        exit_time,
+    ).await;
+
+    println!("{}", style("Results:").bold().green());
+    println!();
+
+    // Display results
+    display_rolling_results(&result);
+
+    // Save results if output specified
+    if let Some(output_path) = output {
+        info!("Saving results to {:?}...", output_path);
+        let json_content = serde_json::to_string_pretty(&result)
+            .context("Failed to serialize results to JSON")?;
+        std::fs::write(&output_path, json_content)
+            .context("Failed to write JSON file")?;
+        println!("{}", style(format!("Results saved to {:?}", output_path)).green());
+    }
+
+    Ok(())
+}
+
+/// Display rolling straddle results
+fn display_rolling_results(result: &cs_domain::RollingStraddleResult) {
+    println!("  Symbol:               {}", result.symbol);
+    println!("  Period:               {} to {}", result.start_date, result.end_date);
+    println!("  Number of rolls:      {}", result.num_rolls);
+    println!();
+    println!("  Total Option P&L:     ${:.2}", result.total_option_pnl);
+    if result.total_hedge_pnl != rust_decimal::Decimal::ZERO {
+        println!("  Total Hedge P&L:      ${:.2}", result.total_hedge_pnl);
+        println!("  Transaction Cost:     ${:.2}", result.total_transaction_cost);
+    }
+    println!("  Total P&L:            ${:.2}", result.total_pnl);
+    println!();
+    println!("  Win Rate:             {:.1}%", result.win_rate * 100.0);
+    println!("  Avg P&L per Roll:     ${:.2}", result.avg_roll_pnl);
+    println!("  Max Drawdown:         ${:.2}", result.max_drawdown);
+    println!();
+
+    // Show individual rolls
+    if !result.rolls.is_empty() {
+        println!("{}", style("Individual Rolls:").bold());
+        println!();
+
+        use tabled::{Table, Tabled};
+
+        #[derive(Tabled)]
+        struct RollRow {
+            #[tabled(rename = "#")]
+            num: usize,
+            #[tabled(rename = "Entry")]
+            entry: String,
+            #[tabled(rename = "Exit")]
+            exit: String,
+            #[tabled(rename = "Strike")]
+            strike: String,
+            #[tabled(rename = "P&L")]
+            pnl: String,
+            #[tabled(rename = "Spot Δ%")]
+            spot_move: String,
+            #[tabled(rename = "IV Δ%")]
+            iv_change: String,
+            #[tabled(rename = "Reason")]
+            reason: String,
+        }
+
+        let rows: Vec<RollRow> = result.rolls.iter().enumerate().map(|(i, roll)| {
+            RollRow {
+                num: i + 1,
+                entry: roll.entry_date.format("%Y-%m-%d").to_string(),
+                exit: roll.exit_date.format("%Y-%m-%d").to_string(),
+                strike: format!("${:.2}", roll.strike),
+                pnl: format!("${:.2}", roll.pnl),
+                spot_move: format!("{:.1}%", roll.spot_move_pct * 100.0),
+                iv_change: roll.iv_change.map(|c| format!("{:+.1}%", c * 100.0)).unwrap_or_else(|| "N/A".to_string()),
+                reason: roll.roll_reason.to_string(),
+            }
+        }).collect();
+
+        let table = Table::new(rows);
+        println!("{}", table);
+    }
+}
+
+/// Parse roll strategy from CLI arguments
+fn parse_roll_policy(strategy_str: &str, roll_day_str: Option<&str>) -> Result<cs_domain::RollPolicy> {
+    use chrono::Weekday;
+
+    match strategy_str.to_lowercase().as_str() {
+        "weekly" => {
+            // Require --roll-day for weekly
+            let day_str = roll_day_str.context("--roll-day is required for weekly roll strategy")?;
+            let weekday = match day_str.to_lowercase().as_str() {
+                "monday" => Weekday::Mon,
+                "tuesday" => Weekday::Tue,
+                "wednesday" => Weekday::Wed,
+                "thursday" => Weekday::Thu,
+                "friday" => Weekday::Fri,
+                _ => anyhow::bail!("Invalid --roll-day: {}. Must be monday-friday", day_str),
+            };
+            Ok(cs_domain::RollPolicy::Weekly { roll_day: weekday })
+        }
+        s if s.starts_with("days:") => {
+            // Parse days:N format
+            let interval_str = &s[5..];
+            let interval: u16 = interval_str.parse()
+                .with_context(|| format!("Invalid interval in '{}'. Expected days:N (e.g., days:5)", strategy_str))?;
+            Ok(cs_domain::RollPolicy::TradingDays { interval })
+        }
+        _ => anyhow::bail!("Invalid --roll-strategy: {}. Must be 'weekly' or 'days:N'", strategy_str),
+    }
 }
 
 /// Build CLI overrides from command-line arguments
@@ -604,6 +788,8 @@ async fn run_backtest(
     delta_threshold: f64,
     max_rehedges: Option<usize>,
     hedge_cost_per_share: f64,
+    roll_strategy_str: Option<String>,
+    roll_day_str: Option<String>,
 ) -> Result<()> {
     // Parse dates
     let start_date = NaiveDate::parse_from_str(start_str, "%Y-%m-%d")
@@ -768,6 +954,18 @@ async fn run_backtest(
     let (entry_hour, entry_minute) = parse_time(entry_time)?;
     let (exit_hour, exit_minute) = parse_time(exit_time)?;
 
+    // Parse roll strategy if provided
+    let roll_policy_opt = if let Some(strategy_str) = roll_strategy_str {
+        // Validate that spread is straddle
+        if spread_opt != Some("straddle") {
+            anyhow::bail!("--roll-strategy is only valid for straddle spreads");
+        }
+
+        Some(parse_roll_policy(&strategy_str, roll_day_str.as_deref())?)
+    } else {
+        None
+    };
+
     // Build CLI overrides
     let cli_overrides = build_cli_overrides(
         data_dir,
@@ -919,6 +1117,20 @@ async fn run_backtest(
     // Options and equity data from FINQ_DATA_DIR
     let options_repo = FinqOptionsRepository::new(data_dir.clone());
     let equity_repo = FinqEquityRepository::new(data_dir.clone());
+
+    // Check if we're doing rolling strategy
+    if let Some(roll_policy) = roll_policy_opt {
+        // Rolling straddle execution - different path
+        return run_rolling_straddle(
+            start_date,
+            end_date,
+            roll_policy,
+            backtest_config,
+            options_repo,
+            equity_repo,
+            output,
+        ).await;
+    }
 
     // Create backtest use case
     let backtest = BacktestUseCase::new(

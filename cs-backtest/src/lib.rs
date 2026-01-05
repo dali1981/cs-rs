@@ -10,6 +10,7 @@ pub mod iron_butterfly_pricer;
 pub mod iron_butterfly_executor;
 pub mod straddle_pricer;
 pub mod straddle_executor;
+pub mod rolling_straddle_executor;  // Rolling straddle strategy
 pub mod hedging_executor;  // Delta hedging wrapper
 pub mod hedging_analytics; // Hedging performance analytics
 pub mod calendar_straddle_pricer;
@@ -30,6 +31,7 @@ pub use iron_butterfly_pricer::{IronButterflyPricer, IronButterflyPricing};
 pub use iron_butterfly_executor::IronButterflyExecutor;
 pub use straddle_pricer::{StraddlePricer, StraddlePricing};
 pub use straddle_executor::StraddleExecutor;
+pub use rolling_straddle_executor::RollingStraddleExecutor;
 pub use hedging_executor::HedgingExecutor;
 pub use hedging_analytics::{HedgingComparison, HedgingStats};
 pub use calendar_straddle_pricer::{CalendarStraddlePricer, CalendarStraddlePricing};

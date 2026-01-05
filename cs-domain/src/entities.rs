@@ -5,6 +5,10 @@ use serde::{Serialize, Deserialize};
 
 use crate::value_objects::*;
 
+// Submodule for rolling results
+pub mod rolling_result;
+pub use rolling_result::{RollingStraddleResult, RollPeriod, RollReason};
+
 /// Earnings event for a symbol
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EarningsEvent {
