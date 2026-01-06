@@ -282,17 +282,25 @@ where
             None
         };
 
+        // Initialize snapshot collector
+        let snapshot_collector = crate::attribution::SnapshotCollector::new(
+            self.equity_repo.clone(),
+            self.options_repo.clone(),
+        );
+
         // Dispatch based on delta computation mode
         use cs_domain::DeltaComputation;
-        let hedge_position = match &hedge_config.delta_computation {
+        let (hedge_position, snapshots) = match &hedge_config.delta_computation {
             DeltaComputation::GammaApproximation => {
-                self.hedge_with_gamma_approximation(
+                // Gamma approximation doesn't recompute Greeks, so no attribution
+                let pos = self.hedge_with_gamma_approximation(
                     result,
                     entry_time,
                     exit_time,
                     rehedge_times,
                     &mut rv_tracker,
-                ).await?
+                ).await?;
+                (pos, Vec::new())
             }
             DeltaComputation::EntryHV { window } => {
                 self.hedge_with_entry_hv(
@@ -303,6 +311,7 @@ where
                     rehedge_times,
                     *window,
                     &mut rv_tracker,
+                    &snapshot_collector,
                 ).await?
             }
             DeltaComputation::EntryIV { .. } => {
@@ -313,6 +322,7 @@ where
                     exit_time,
                     rehedge_times,
                     &mut rv_tracker,
+                    &snapshot_collector,
                 ).await?
             }
             DeltaComputation::CurrentHV { window } => {
@@ -324,20 +334,22 @@ where
                     rehedge_times,
                     *window,
                     &mut rv_tracker,
+                    &snapshot_collector,
                 ).await?
             }
             DeltaComputation::CurrentMarketIV { .. } => {
-                self.hedge_with_current_market_iv(
+                let pos = self.hedge_with_current_market_iv(
                     trade,
                     result,
                     entry_time,
                     exit_time,
                     rehedge_times,
                     &mut rv_tracker,
-                ).await?
+                ).await?;
+                (pos, Vec::new())  // TODO: Implement when CurrentMarketIV is complete
             }
             DeltaComputation::HistoricalAverageIV { lookback_days, .. } => {
-                self.hedge_with_historical_average_iv(
+                let pos = self.hedge_with_historical_average_iv(
                     trade,
                     result,
                     entry_time,
@@ -345,8 +357,16 @@ where
                     rehedge_times,
                     *lookback_days,
                     &mut rv_tracker,
-                ).await?
+                ).await?;
+                (pos, Vec::new())  // TODO: Implement when HistoricalAverageIV is complete
             }
+        };
+
+        // Build attribution from snapshots if we have them
+        let attribution = if !snapshots.is_empty() {
+            Some(self.build_attribution(snapshots, result.pnl()))
+        } else {
+            None
         };
 
         // Apply hedge results if any rehedges occurred
@@ -355,10 +375,30 @@ where
             let hedge_pnl = hedge_position.calculate_pnl(exit_spot);
             let total_pnl = result.pnl() + hedge_pnl - hedge_position.total_cost;
 
-            result.apply_hedge_results(hedge_position, hedge_pnl, total_pnl, None);
+            result.apply_hedge_results(hedge_position, hedge_pnl, total_pnl, attribution);
         }
 
         Ok(())
+    }
+
+    /// Build position attribution from snapshots
+    ///
+    /// Pairs up consecutive snapshots and computes daily attribution,
+    /// then aggregates into total attribution.
+    fn build_attribution(
+        &self,
+        snapshots: Vec<cs_domain::PositionSnapshot>,
+        actual_pnl: Decimal,
+    ) -> cs_domain::PositionAttribution {
+        use cs_domain::DailyAttribution;
+
+        // Pair up consecutive snapshots (start-of-day, end-of-day)
+        let daily_attributions: Vec<DailyAttribution> = snapshots
+            .windows(2)
+            .map(|pair| DailyAttribution::compute(&pair[0], &pair[1]))
+            .collect();
+
+        cs_domain::PositionAttribution::from_daily(daily_attributions, actual_pnl)
     }
 
     /// Hedge using gamma approximation (original/default behavior)
@@ -479,7 +519,8 @@ where
         rehedge_times: Vec<DateTime<Utc>>,
         hv_window: u32,
         rv_tracker: &mut Option<RealizedVolatilityTracker>,
-    ) -> Result<cs_domain::HedgePosition, String> {
+        snapshot_collector: &crate::attribution::SnapshotCollector,
+    ) -> Result<(cs_domain::HedgePosition, Vec<cs_domain::PositionSnapshot>), String> {
         use cs_analytics::realized_volatility;
 
         let hedge_config = self.hedge_config.as_ref().unwrap();
@@ -493,11 +534,18 @@ where
         // Initialize position tracking
         let mut position = cs_domain::HedgePosition::new();
         let mut current_shares = 0i32;
+        let mut snapshots = Vec::new();
 
         // Record entry spot for RV tracking
         if let Some(ref mut tracker) = rv_tracker {
             tracker.record(entry_time, entry_spot);
         }
+
+        // Capture entry snapshot
+        let entry_snapshot = snapshot_collector
+            .capture_snapshot(trade, entry_time, entry_hv, current_shares, hedge_config.contract_multiplier)
+            .await?;
+        snapshots.push(entry_snapshot);
 
         // Rehedge at specified times
         for rehedge_time in rehedge_times {
@@ -533,6 +581,12 @@ where
             let stock_delta = current_shares as f64 / hedge_config.contract_multiplier as f64;
             let net_delta = position_delta + stock_delta;
 
+            // Capture snapshot before rehedge
+            let snapshot = snapshot_collector
+                .capture_snapshot(trade, rehedge_time, entry_hv, current_shares, hedge_config.contract_multiplier)
+                .await?;
+            snapshots.push(snapshot);
+
             // Check if rehedge is needed
             if !hedge_config.should_rehedge(net_delta, spot_f64, 0.0) {
                 continue;
@@ -566,13 +620,18 @@ where
             tracker.record(exit_time, exit_spot);
         }
 
+        // Capture exit snapshot
+        let exit_iv = result.exit_iv().map(|iv| iv.primary);
+        let exit_snapshot = snapshot_collector
+            .capture_snapshot(trade, exit_time, entry_hv, current_shares, hedge_config.contract_multiplier)
+            .await?;
+        snapshots.push(exit_snapshot);
+
         // Finalize position
         position.unrealized_pnl = position.calculate_pnl(exit_spot);
 
         // Attach RV metrics if tracking is enabled
         if let Some(tracker) = rv_tracker.take() {
-            let exit_iv = result.exit_iv().map(|iv| iv.primary);
-
             // Update tracker with entry_hv before finalizing
             let tracker_with_hv = RealizedVolatilityTracker {
                 spot_history: tracker.spot_history.clone(),
@@ -581,13 +640,13 @@ where
             };
 
             // Store spot history
-            position.spot_history = tracker.spot_history;
+            position.spot_history = tracker.spot_history.clone();
 
             // Compute and attach metrics
             position.realized_vol_metrics = Some(tracker_with_hv.finalize(exit_iv));
         }
 
-        Ok(position)
+        Ok((position, snapshots))
     }
 
     /// Hedge using Entry IV (Implied Volatility at trade entry)
@@ -599,7 +658,8 @@ where
         exit_time: DateTime<Utc>,
         rehedge_times: Vec<DateTime<Utc>>,
         rv_tracker: &mut Option<RealizedVolatilityTracker>,
-    ) -> Result<cs_domain::HedgePosition, String> {
+        snapshot_collector: &crate::attribution::SnapshotCollector,
+    ) -> Result<(cs_domain::HedgePosition, Vec<cs_domain::PositionSnapshot>), String> {
         let hedge_config = self.hedge_config.as_ref().unwrap();
         let symbol = result.symbol();
         let entry_spot = result.spot_at_entry();
@@ -613,11 +673,18 @@ where
         // Initialize position tracking
         let mut position = cs_domain::HedgePosition::new();
         let mut current_shares = 0i32;
+        let mut snapshots = Vec::new();
 
         // Record entry spot for RV tracking
         if let Some(ref mut tracker) = rv_tracker {
             tracker.record(entry_time, entry_spot);
         }
+
+        // Capture entry snapshot
+        let entry_snapshot = snapshot_collector
+            .capture_snapshot(trade, entry_time, entry_iv, current_shares, hedge_config.contract_multiplier)
+            .await?;
+        snapshots.push(entry_snapshot);
 
         // Rehedge at specified times
         for rehedge_time in rehedge_times {
@@ -653,6 +720,12 @@ where
             let stock_delta = current_shares as f64 / hedge_config.contract_multiplier as f64;
             let net_delta = position_delta + stock_delta;
 
+            // Capture snapshot before rehedge
+            let snapshot = snapshot_collector
+                .capture_snapshot(trade, rehedge_time, entry_iv, current_shares, hedge_config.contract_multiplier)
+                .await?;
+            snapshots.push(snapshot);
+
             // Check if rehedge is needed
             if !hedge_config.should_rehedge(net_delta, spot_f64, 0.0) {
                 continue;
@@ -686,21 +759,28 @@ where
             tracker.record(exit_time, exit_spot);
         }
 
+        // Capture exit snapshot
+        let exit_iv = result.exit_iv().map(|iv| iv.primary).unwrap_or(entry_iv);
+        let exit_snapshot = snapshot_collector
+            .capture_snapshot(trade, exit_time, exit_iv, current_shares, hedge_config.contract_multiplier)
+            .await?;
+        snapshots.push(exit_snapshot);
+
         // Finalize position
         position.unrealized_pnl = position.calculate_pnl(exit_spot);
 
         // Attach RV metrics if tracking is enabled
         if let Some(tracker) = rv_tracker.take() {
-            let exit_iv = result.exit_iv().map(|iv| iv.primary);
+            let exit_iv_opt = result.exit_iv().map(|iv| iv.primary);
 
             // Store spot history
             position.spot_history = tracker.spot_history.clone();
 
             // Compute and attach metrics
-            position.realized_vol_metrics = Some(tracker.finalize(exit_iv));
+            position.realized_vol_metrics = Some(tracker.finalize(exit_iv_opt));
         }
 
-        Ok(position)
+        Ok((position, snapshots))
     }
 
     /// Hedge using Current HV (recompute HV at each rehedge)
@@ -713,23 +793,31 @@ where
         rehedge_times: Vec<DateTime<Utc>>,
         hv_window: u32,
         rv_tracker: &mut Option<RealizedVolatilityTracker>,
-    ) -> Result<cs_domain::HedgePosition, String> {
+        snapshot_collector: &crate::attribution::SnapshotCollector,
+    ) -> Result<(cs_domain::HedgePosition, Vec<cs_domain::PositionSnapshot>), String> {
         let hedge_config = self.hedge_config.as_ref().unwrap();
         let symbol = result.symbol();
         let entry_spot = result.spot_at_entry();
         let exit_spot = result.spot_at_exit();
 
-        // Compute HV at entry for RV metrics
-        let entry_hv = self.compute_hv_at_time(symbol, entry_time, hv_window).await.ok();
+        // Compute HV at entry for RV metrics and first snapshot
+        let entry_hv = self.compute_hv_at_time(symbol, entry_time, hv_window).await?;
 
         // Initialize position tracking
         let mut position = cs_domain::HedgePosition::new();
         let mut current_shares = 0i32;
+        let mut snapshots = Vec::new();
 
         // Record entry spot for RV tracking
         if let Some(ref mut tracker) = rv_tracker {
             tracker.record(entry_time, entry_spot);
         }
+
+        // Capture entry snapshot with entry HV
+        let entry_snapshot = snapshot_collector
+            .capture_snapshot(trade, entry_time, entry_hv, current_shares, hedge_config.contract_multiplier)
+            .await?;
+        snapshots.push(entry_snapshot);
 
         // Rehedge at specified times
         for rehedge_time in rehedge_times {
@@ -768,6 +856,12 @@ where
             let stock_delta = current_shares as f64 / hedge_config.contract_multiplier as f64;
             let net_delta = position_delta + stock_delta;
 
+            // Capture snapshot with current HV (before rehedge)
+            let snapshot = snapshot_collector
+                .capture_snapshot(trade, rehedge_time, current_hv, current_shares, hedge_config.contract_multiplier)
+                .await?;
+            snapshots.push(snapshot);
+
             // Check if rehedge is needed
             if !hedge_config.should_rehedge(net_delta, spot_f64, 0.0) {
                 continue;
@@ -801,6 +895,13 @@ where
             tracker.record(exit_time, exit_spot);
         }
 
+        // Compute HV at exit and capture exit snapshot
+        let exit_hv = self.compute_hv_at_time(symbol, exit_time, hv_window).await?;
+        let exit_snapshot = snapshot_collector
+            .capture_snapshot(trade, exit_time, exit_hv, current_shares, hedge_config.contract_multiplier)
+            .await?;
+        snapshots.push(exit_snapshot);
+
         // Finalize position
         position.unrealized_pnl = position.calculate_pnl(exit_spot);
 
@@ -810,15 +911,15 @@ where
 
             let tracker_with_hv = RealizedVolatilityTracker {
                 spot_history: tracker.spot_history.clone(),
-                entry_hv,
+                entry_hv: Some(entry_hv),
                 entry_iv: tracker.entry_iv,
             };
 
-            position.spot_history = tracker.spot_history;
+            position.spot_history = tracker.spot_history.clone();
             position.realized_vol_metrics = Some(tracker_with_hv.finalize(exit_iv));
         }
 
-        Ok(position)
+        Ok((position, snapshots))
     }
 
     /// Hedge using Current Market IV (build IV surface at each rehedge)

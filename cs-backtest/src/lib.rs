@@ -21,6 +21,7 @@ mod backtest_use_case_helpers;
 pub mod atm_iv_use_case;
 pub mod minute_aligned_iv_use_case;
 pub mod earnings_analysis_use_case;
+pub mod attribution;
 
 // Config
 pub use config::{BacktestConfig, SpreadType, SelectionType};
