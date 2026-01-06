@@ -315,11 +315,37 @@ where
                     &mut rv_tracker,
                 ).await?
             }
-            _ => {
-                return Err(format!(
-                    "Delta computation mode {:?} not yet implemented",
-                    hedge_config.delta_computation
-                ));
+            DeltaComputation::CurrentHV { window } => {
+                self.hedge_with_current_hv(
+                    trade,
+                    result,
+                    entry_time,
+                    exit_time,
+                    rehedge_times,
+                    *window,
+                    &mut rv_tracker,
+                ).await?
+            }
+            DeltaComputation::CurrentMarketIV { .. } => {
+                self.hedge_with_current_market_iv(
+                    trade,
+                    result,
+                    entry_time,
+                    exit_time,
+                    rehedge_times,
+                    &mut rv_tracker,
+                ).await?
+            }
+            DeltaComputation::HistoricalAverageIV { lookback_days, .. } => {
+                self.hedge_with_historical_average_iv(
+                    trade,
+                    result,
+                    entry_time,
+                    exit_time,
+                    rehedge_times,
+                    *lookback_days,
+                    &mut rv_tracker,
+                ).await?
             }
         };
 
@@ -675,6 +701,154 @@ where
         }
 
         Ok(position)
+    }
+
+    /// Hedge using Current HV (recompute HV at each rehedge)
+    async fn hedge_with_current_hv(
+        &self,
+        trade: &T,
+        result: &<T as ExecutableTrade>::Result,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+        rehedge_times: Vec<DateTime<Utc>>,
+        hv_window: u32,
+        rv_tracker: &mut Option<RealizedVolatilityTracker>,
+    ) -> Result<cs_domain::HedgePosition, String> {
+        let hedge_config = self.hedge_config.as_ref().unwrap();
+        let symbol = result.symbol();
+        let entry_spot = result.spot_at_entry();
+        let exit_spot = result.spot_at_exit();
+
+        // Compute HV at entry for RV metrics
+        let entry_hv = self.compute_hv_at_time(symbol, entry_time, hv_window).await.ok();
+
+        // Initialize position tracking
+        let mut position = cs_domain::HedgePosition::new();
+        let mut current_shares = 0i32;
+
+        // Record entry spot for RV tracking
+        if let Some(ref mut tracker) = rv_tracker {
+            tracker.record(entry_time, entry_spot);
+        }
+
+        // Rehedge at specified times
+        for rehedge_time in rehedge_times {
+            if let Some(max) = hedge_config.max_rehedges {
+                if position.rehedge_count() >= max {
+                    break;
+                }
+            }
+
+            let spot = self.equity_repo
+                .get_spot_price(symbol, rehedge_time)
+                .await
+                .map_err(|e| format!("Failed to get spot at {}: {}", rehedge_time, e))?;
+
+            let spot_f64 = spot.to_f64();
+
+            // Track for RV computation
+            if let Some(ref mut tracker) = rv_tracker {
+                tracker.record(rehedge_time, spot_f64);
+            }
+
+            // Recompute HV at current time
+            let current_hv = self.compute_hv_at_time(symbol, rehedge_time, hv_window).await?;
+
+            // Recompute position delta using current HV
+            let position_delta = Self::compute_position_delta(
+                trade,
+                spot_f64,
+                current_hv,
+                rehedge_time,
+                0.05,
+                hedge_config.contract_multiplier,
+            );
+
+            // Calculate net delta
+            let stock_delta = current_shares as f64 / hedge_config.contract_multiplier as f64;
+            let net_delta = position_delta + stock_delta;
+
+            // Check if rehedge is needed
+            if !hedge_config.should_rehedge(net_delta, spot_f64, 0.0) {
+                continue;
+            }
+
+            // Calculate shares needed
+            let shares = hedge_config.shares_to_hedge(net_delta);
+            if shares == 0 {
+                continue;
+            }
+
+            let delta_before = net_delta;
+            current_shares += shares;
+            let stock_delta_after = current_shares as f64 / hedge_config.contract_multiplier as f64;
+            let delta_after = position_delta + stock_delta_after;
+
+            let action = cs_domain::HedgeAction {
+                timestamp: rehedge_time,
+                shares,
+                spot_price: spot_f64,
+                delta_before,
+                delta_after,
+                cost: hedge_config.transaction_cost_per_share * Decimal::from(shares.abs()),
+            };
+
+            position.add_hedge(action);
+        }
+
+        // Record exit spot
+        if let Some(ref mut tracker) = rv_tracker {
+            tracker.record(exit_time, exit_spot);
+        }
+
+        // Finalize position
+        position.unrealized_pnl = position.calculate_pnl(exit_spot);
+
+        // Attach RV metrics if tracking is enabled
+        if let Some(tracker) = rv_tracker.take() {
+            let exit_iv = result.exit_iv().map(|iv| iv.primary);
+
+            let tracker_with_hv = RealizedVolatilityTracker {
+                spot_history: tracker.spot_history.clone(),
+                entry_hv,
+                entry_iv: tracker.entry_iv,
+            };
+
+            position.spot_history = tracker.spot_history;
+            position.realized_vol_metrics = Some(tracker_with_hv.finalize(exit_iv));
+        }
+
+        Ok(position)
+    }
+
+    /// Hedge using Current Market IV (build IV surface at each rehedge)
+    async fn hedge_with_current_market_iv(
+        &self,
+        trade: &T,
+        result: &<T as ExecutableTrade>::Result,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+        rehedge_times: Vec<DateTime<Utc>>,
+        rv_tracker: &mut Option<RealizedVolatilityTracker>,
+    ) -> Result<cs_domain::HedgePosition, String> {
+        // For now, return error - this requires IV surface building
+        // which needs access to PricingModel configuration
+        Err("CurrentMarketIV mode not yet implemented - requires IV surface builder integration".to_string())
+    }
+
+    /// Hedge using Historical Average IV
+    async fn hedge_with_historical_average_iv(
+        &self,
+        trade: &T,
+        result: &<T as ExecutableTrade>::Result,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+        rehedge_times: Vec<DateTime<Utc>>,
+        lookback_days: u32,
+        rv_tracker: &mut Option<RealizedVolatilityTracker>,
+    ) -> Result<cs_domain::HedgePosition, String> {
+        // For now, return error - this requires historical IV data
+        Err("HistoricalAverageIV mode not yet implemented - requires historical IV database".to_string())
     }
 
     /// Compute HV at a specific time using recent price history

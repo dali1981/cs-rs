@@ -1006,6 +1006,9 @@ fn build_cli_overrides(
                 delta_threshold,
                 max_rehedges,
                 cost_per_share: hedge_cost_per_share,
+                delta_mode: None,  // TODO: Add CLI flag
+                hv_window: None,  // TODO: Add CLI flag
+                track_realized_vol: None,  // TODO: Add CLI flag
             })
         } else {
             None

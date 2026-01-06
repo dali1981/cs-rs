@@ -98,6 +98,9 @@ pub struct HedgingConfig {
     pub delta_threshold: f64,
     pub max_rehedges: Option<usize>,
     pub cost_per_share: f64,
+    pub delta_mode: String,  // "gamma", "entry-hv", "entry-iv", "current-hv", "current-iv", "historical-iv"
+    pub hv_window: u32,  // HV lookback window in days
+    pub track_realized_vol: bool,
 }
 
 // Default implementations
@@ -192,6 +195,9 @@ impl Default for HedgingConfig {
             delta_threshold: 0.10,
             max_rehedges: None,
             cost_per_share: 0.01,
+            delta_mode: "gamma".to_string(),
+            hv_window: 20,
+            track_realized_vol: false,
         }
     }
 }
@@ -312,14 +318,35 @@ impl AppConfig {
             _ => HedgeStrategy::None,
         };
 
+        // Parse delta computation mode
+        let delta_computation = match self.hedging.delta_mode.to_lowercase().as_str() {
+            "gamma" | "gamma-approximation" => cs_domain::DeltaComputation::GammaApproximation,
+            "entry-hv" => cs_domain::DeltaComputation::EntryHV {
+                window: self.hedging.hv_window,
+            },
+            "entry-iv" => cs_domain::DeltaComputation::EntryIV { _marker: () },
+            "current-hv" => cs_domain::DeltaComputation::CurrentHV {
+                window: self.hedging.hv_window,
+            },
+            "current-iv" | "current-market-iv" => cs_domain::DeltaComputation::CurrentMarketIV { _marker: () },
+            "historical-iv" | "historical-average-iv" => cs_domain::DeltaComputation::HistoricalAverageIV {
+                lookback_days: self.hedging.hv_window,
+                _marker: (),
+            },
+            _ => {
+                tracing::warn!("Unknown delta mode '{}', using GammaApproximation", self.hedging.delta_mode);
+                cs_domain::DeltaComputation::GammaApproximation
+            }
+        };
+
         HedgeConfig {
             strategy,
             max_rehedges: self.hedging.max_rehedges,
             min_hedge_size: 1,
             transaction_cost_per_share: Decimal::try_from(self.hedging.cost_per_share).unwrap_or(Decimal::ZERO),
             contract_multiplier: 100,
-            delta_computation: cs_domain::DeltaComputation::default(),
-            track_realized_vol: false,
+            delta_computation,
+            track_realized_vol: self.hedging.track_realized_vol,
         }
     }
 }

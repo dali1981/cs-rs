@@ -128,4 +128,13 @@ pub struct CliHedging {
     pub max_rehedges: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_per_share: Option<f64>,
+    /// Delta computation mode: gamma, entry-hv, entry-iv, current-hv, current-iv, historical-iv
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta_mode: Option<String>,
+    /// HV window for HV-based delta modes (default: 20 days)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hv_window: Option<u32>,
+    /// Enable realized volatility tracking
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track_realized_vol: Option<bool>,
 }
