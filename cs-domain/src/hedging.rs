@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -165,6 +166,44 @@ impl HedgeConfig {
     }
 }
 
+// =============================================================================
+// Delta Provider Trait (Strategy Pattern)
+// =============================================================================
+
+/// Strategy for computing position delta at a given point in time
+///
+/// Implementations provide different methods:
+/// - GammaApproximation: δ' = δ + γ × ΔS (fast, incremental)
+/// - EntryVolatility: Recompute from Black-Scholes with fixed volatility
+/// - CurrentMarketIV: Build IV surface and compute fresh delta
+///
+/// # Delta Convention
+/// All implementations MUST return per-share delta (e.g., 0.5 for ATM call, NOT 50).
+/// The contract multiplier (typically 100) is applied separately in HedgeState.
+#[async_trait]
+pub trait DeltaProvider: Send + Sync {
+    /// Compute the current per-share position delta
+    ///
+    /// # Arguments
+    /// * `spot` - Current spot price
+    /// * `timestamp` - Current time (for DTE calculation)
+    ///
+    /// # Returns
+    /// Per-share position delta (e.g., 0.5 for ATM call, NOT 50)
+    async fn compute_delta(&mut self, spot: f64, timestamp: DateTime<Utc>) -> Result<f64, String>;
+
+    /// Optional: Compute position gamma (for reporting)
+    ///
+    /// # Returns
+    /// Per-share position gamma if available
+    fn compute_gamma(&self, _spot: f64, _timestamp: DateTime<Utc>) -> Option<f64> {
+        None
+    }
+
+    /// Human-readable name for logging
+    fn name(&self) -> &'static str;
+}
+
 /// Stateful delta hedge manager
 ///
 /// Tracks both option greeks and stock position to compute net exposure.
@@ -292,6 +331,170 @@ impl HedgeState {
     pub fn finalize(mut self, exit_spot: f64) -> HedgePosition {
         // Calculate unrealized P&L
         self.position.unrealized_pnl = self.position.calculate_pnl(exit_spot);
+        self.position
+    }
+}
+
+// =============================================================================
+// Generic HedgeState with Pluggable Delta Provider
+// =============================================================================
+
+/// Generic stateful delta hedge manager with pluggable delta computation
+///
+/// This is the new version that supports multiple delta computation strategies
+/// via the DeltaProvider trait. It replaces the old HedgeState which used
+/// gamma approximation exclusively.
+///
+/// # Key Features
+/// - Pluggable delta computation via DeltaProvider trait
+/// - Tracks net position delta (options + stock)
+/// - Optional realized volatility tracking
+/// - Same interface works for real-time and historical backtesting
+///
+/// # Type Parameters
+/// * `P` - Delta provider implementation (GammaApproximation, EntryVolatility, etc.)
+pub struct GenericHedgeState<P: DeltaProvider> {
+    // Configuration (immutable after creation)
+    config: HedgeConfig,
+    delta_provider: P,
+
+    // Stock hedge position
+    stock_shares: i32,
+
+    // Last known values
+    last_delta: f64,
+    last_gamma: Option<f64>,
+
+    // Transaction history
+    position: HedgePosition,
+
+    // RV tracking (optional)
+    spot_history: Vec<(DateTime<Utc>, f64)>,
+    track_rv: bool,
+}
+
+impl<P: DeltaProvider> GenericHedgeState<P> {
+    /// Create new hedge state with delta provider
+    ///
+    /// # Arguments
+    /// * `config` - Hedge configuration
+    /// * `delta_provider` - Strategy for computing position delta
+    /// * `initial_spot` - Spot price at entry (for RV tracking)
+    pub fn new(config: HedgeConfig, delta_provider: P, initial_spot: f64) -> Self {
+        let track_rv = config.track_realized_vol;
+        Self {
+            config,
+            delta_provider,
+            stock_shares: 0,
+            last_delta: 0.0,
+            last_gamma: None,
+            position: HedgePosition::new(),
+            spot_history: if track_rv { vec![(Utc::now(), initial_spot)] } else { vec![] },
+            track_rv,
+        }
+    }
+
+    /// Net position delta (options + stock) - ALWAYS per-share
+    pub fn net_delta(&self) -> f64 {
+        // stock_shares is actual shares, convert to per-share delta
+        let stock_delta = self.stock_shares as f64 / self.config.contract_multiplier as f64;
+        self.last_delta + stock_delta
+    }
+
+    /// Current stock position
+    pub fn stock_shares(&self) -> i32 {
+        self.stock_shares
+    }
+
+    /// Number of rehedges executed
+    pub fn rehedge_count(&self) -> usize {
+        self.position.rehedge_count()
+    }
+
+    /// Check if max rehedges reached
+    pub fn at_max_rehedges(&self) -> bool {
+        if let Some(max) = self.config.max_rehedges {
+            self.rehedge_count() >= max
+        } else {
+            false
+        }
+    }
+
+    /// Process a new spot price observation
+    ///
+    /// Returns Some(HedgeAction) if a rebalance was executed.
+    ///
+    /// # State Transitions
+    /// 1. Get fresh delta from provider (per-share)
+    /// 2. Compute net delta (options + stock)
+    /// 3. Check if rehedge needed
+    /// 4. If yes, compute shares to trade and execute
+    pub async fn update(
+        &mut self,
+        timestamp: DateTime<Utc>,
+        spot: f64,
+    ) -> Result<Option<HedgeAction>, String> {
+        // Track spot for RV computation
+        if self.track_rv {
+            self.spot_history.push((timestamp, spot));
+        }
+
+        // 1. Get fresh delta from provider (per-share)
+        let option_delta = self.delta_provider.compute_delta(spot, timestamp).await?;
+        self.last_delta = option_delta;
+        self.last_gamma = self.delta_provider.compute_gamma(spot, timestamp);
+
+        // 2. Compute net delta (options + stock hedge)
+        let net_delta = self.net_delta();
+
+        // 3. Check if rehedge needed
+        let gamma = self.last_gamma.unwrap_or(0.0);
+        if !self.config.should_rehedge(net_delta, spot, gamma) {
+            return Ok(None);
+        }
+
+        // 4. Calculate shares to trade (multiplier applied INSIDE shares_to_hedge)
+        let shares = self.config.shares_to_hedge(net_delta);
+        if shares == 0 {
+            return Ok(None);
+        }
+
+        // 5. Execute hedge
+        let delta_before = net_delta;
+        self.stock_shares += shares;
+        let delta_after = self.net_delta();
+
+        let action = HedgeAction {
+            timestamp,
+            shares,
+            spot_price: spot,
+            delta_before,
+            delta_after,
+            cost: self.config.transaction_cost_per_share * Decimal::from(shares.abs()),
+        };
+
+        self.position.add_hedge(action.clone());
+
+        Ok(Some(action))
+    }
+
+    /// Finalize and compute P&L
+    pub fn finalize(mut self, exit_spot: f64, entry_iv: Option<f64>, exit_iv: Option<f64>) -> HedgePosition {
+        self.position.unrealized_pnl = self.position.calculate_pnl(exit_spot);
+
+        // Compute RV metrics if tracking was enabled
+        if self.track_rv && !self.spot_history.is_empty() {
+            self.position.realized_vol_metrics = Some(
+                RealizedVolatilityMetrics::from_spot_history(
+                    &self.spot_history,
+                    None,  // entry_hv - could be passed if available
+                    entry_iv,
+                    exit_iv,
+                )
+            );
+            self.position.spot_history = self.spot_history;
+        }
+
         self.position
     }
 }

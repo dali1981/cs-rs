@@ -98,7 +98,7 @@ where
 
 impl<T> TradeExecutor<T>
 where
-    T: RollableTrade + ExecutableTrade + CompositeTrade,
+    T: RollableTrade + ExecutableTrade + CompositeTrade + Clone,
 {
     /// Create a new trade executor
     pub fn new(
@@ -260,9 +260,10 @@ where
         )
     }
 
-    /// Apply hedging to any trade result (trade-agnostic)
+    /// Apply hedging to any trade result (UNIFIED for all delta computation modes)
     ///
-    /// Dispatches to appropriate delta computation method based on config
+    /// This method replaces the previous 6 mode-specific implementations with
+    /// a single unified loop that uses the DeltaProvider strategy pattern.
     async fn apply_hedging(
         &self,
         trade: &T,
@@ -274,993 +275,101 @@ where
         let hedge_config = self.hedge_config.as_ref()
             .ok_or("Hedge config not set")?;
 
-        // Initialize RV tracker if enabled
-        let mut rv_tracker = if hedge_config.track_realized_vol {
-            let entry_iv = result.entry_iv().map(|iv| iv.primary);
-            Some(RealizedVolatilityTracker::new(None, entry_iv))
-        } else {
-            None
-        };
+        let symbol = result.symbol();
+        let entry_spot = result.spot_at_entry();
+        let exit_spot = result.spot_at_exit();
 
-        // Initialize snapshot collector
-        let snapshot_collector = crate::attribution::SnapshotCollector::new(
-            self.equity_repo.clone(),
-            self.options_repo.clone(),
-        );
-
-        // Dispatch based on delta computation mode
+        // Create delta provider based on mode
         use cs_domain::DeltaComputation;
-        let (hedge_position, snapshots) = match &hedge_config.delta_computation {
+        use crate::delta_providers::*;
+
+        // Helper macro to execute hedging with a specific provider
+        macro_rules! hedge_with_provider {
+            ($provider:expr) => {{
+                let mut hedge_state = cs_domain::GenericHedgeState::new(
+                    hedge_config.clone(),
+                    $provider,
+                    entry_spot,
+                );
+
+                // === UNIFIED HEDGING LOOP (no more duplication!) ===
+                for rehedge_time in rehedge_times {
+                    if hedge_state.at_max_rehedges() {
+                        break;
+                    }
+
+                    let spot = self.equity_repo
+                        .get_spot_price(symbol, rehedge_time)
+                        .await
+                        .map_err(|e| e.to_string())?
+                        .to_f64();
+
+                    hedge_state.update(rehedge_time, spot).await?;
+                }
+
+                // Finalize
+                let entry_iv = result.entry_iv().map(|iv| iv.primary);
+                let exit_iv = result.exit_iv().map(|iv| iv.primary);
+                hedge_state.finalize(exit_spot, entry_iv, exit_iv)
+            }};
+        }
+
+        let hedge_position = match &hedge_config.delta_computation {
             DeltaComputation::GammaApproximation => {
-                // Gamma approximation doesn't recompute Greeks, so no attribution
-                let pos = self.hedge_with_gamma_approximation(
-                    result,
-                    entry_time,
-                    exit_time,
-                    rehedge_times,
-                    &mut rv_tracker,
-                ).await?;
-                (pos, Vec::new())
+                let delta = result.net_delta().unwrap_or(0.0);
+                let gamma = result.net_gamma().unwrap_or(0.0);
+                hedge_with_provider!(GammaApproximationProvider::new(delta, gamma, entry_spot))
             }
             DeltaComputation::EntryHV { window } => {
-                self.hedge_with_entry_hv(
-                    trade,
-                    result,
-                    entry_time,
-                    exit_time,
-                    rehedge_times,
-                    *window,
-                    &mut rv_tracker,
-                    &snapshot_collector,
-                ).await?
+                let entry_hv = self.compute_hv_at_time(symbol, entry_time, *window).await?;
+                hedge_with_provider!(EntryVolatilityProvider::new_entry_hv((*trade).clone(), entry_hv, 0.05))
             }
             DeltaComputation::EntryIV { .. } => {
-                self.hedge_with_entry_iv(
-                    trade,
-                    result,
-                    entry_time,
-                    exit_time,
-                    rehedge_times,
-                    &mut rv_tracker,
-                    &snapshot_collector,
-                ).await?
+                let entry_iv = result.entry_iv()
+                    .map(|iv| iv.primary)
+                    .ok_or("No entry IV available")?;
+                hedge_with_provider!(EntryVolatilityProvider::new_entry_iv((*trade).clone(), entry_iv, 0.05))
             }
             DeltaComputation::CurrentHV { window } => {
-                self.hedge_with_current_hv(
-                    trade,
-                    result,
-                    entry_time,
-                    exit_time,
-                    rehedge_times,
+                hedge_with_provider!(CurrentHVProvider::new(
+                    (*trade).clone(),
+                    self.equity_repo.clone(),
+                    symbol.to_string(),
                     *window,
-                    &mut rv_tracker,
-                    &snapshot_collector,
-                ).await?
+                    0.05,
+                ))
             }
             DeltaComputation::CurrentMarketIV { .. } => {
-                let pos = self.hedge_with_current_market_iv(
-                    trade,
-                    result,
-                    entry_time,
-                    exit_time,
-                    rehedge_times,
-                    &mut rv_tracker,
-                ).await?;
-                (pos, Vec::new())  // TODO: Implement when CurrentMarketIV is complete
+                hedge_with_provider!(CurrentMarketIVProvider::new(
+                    (*trade).clone(),
+                    self.options_repo.clone(),
+                    self.equity_repo.clone(),
+                    symbol.to_string(),
+                    0.05,
+                ))
             }
             DeltaComputation::HistoricalAverageIV { lookback_days, .. } => {
-                let pos = self.hedge_with_historical_average_iv(
-                    trade,
-                    result,
-                    entry_time,
-                    exit_time,
-                    rehedge_times,
+                hedge_with_provider!(HistoricalAverageIVProvider::new(
+                    (*trade).clone(),
+                    self.options_repo.clone(),
+                    self.equity_repo.clone(),
+                    symbol.to_string(),
                     *lookback_days,
-                    &mut rv_tracker,
-                ).await?;
-                (pos, Vec::new())  // TODO: Implement when HistoricalAverageIV is complete
+                    0.05,
+                ))
             }
         };
 
-        // Build attribution from snapshots if we have them
-        let attribution = if !snapshots.is_empty() {
-            Some(self.build_attribution(snapshots, result.pnl()))
-        } else {
-            None
-        };
-
-        // Apply hedge results if any rehedges occurred
+        // Apply results
         if hedge_position.rehedge_count() > 0 {
-            let exit_spot = result.spot_at_exit();
             let hedge_pnl = hedge_position.calculate_pnl(exit_spot);
             let total_pnl = result.pnl() + hedge_pnl - hedge_position.total_cost;
-
-            result.apply_hedge_results(hedge_position, hedge_pnl, total_pnl, attribution);
+            result.apply_hedge_results(hedge_position, hedge_pnl, total_pnl, None);
         }
 
         Ok(())
     }
 
-    /// Build position attribution from snapshots
-    ///
-    /// Pairs up consecutive snapshots and computes daily attribution,
-    /// then aggregates into total attribution.
-    fn build_attribution(
-        &self,
-        snapshots: Vec<cs_domain::PositionSnapshot>,
-        actual_pnl: Decimal,
-    ) -> cs_domain::PositionAttribution {
-        use cs_domain::DailyAttribution;
-
-        // Pair up consecutive snapshots (start-of-day, end-of-day)
-        let daily_attributions: Vec<DailyAttribution> = snapshots
-            .windows(2)
-            .map(|pair| DailyAttribution::compute(&pair[0], &pair[1]))
-            .collect();
-
-        cs_domain::PositionAttribution::from_daily(daily_attributions, actual_pnl)
-    }
-
-    /// Hedge using gamma approximation (original/default behavior)
-    async fn hedge_with_gamma_approximation(
-        &self,
-        result: &<T as ExecutableTrade>::Result,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-        rehedge_times: Vec<DateTime<Utc>>,
-        rv_tracker: &mut Option<RealizedVolatilityTracker>,
-    ) -> Result<cs_domain::HedgePosition, String> {
-        let hedge_config = self.hedge_config.as_ref().unwrap();
-        let net_delta = result.net_delta().unwrap_or(0.0);
-        let net_gamma = result.net_gamma().unwrap_or(0.0);
-        let entry_spot = result.spot_at_entry();
-        let exit_spot = result.spot_at_exit();
-        let symbol = result.symbol();
-
-        // Record entry spot for RV tracking
-        if let Some(ref mut tracker) = rv_tracker {
-            tracker.record(entry_time, entry_spot);
-        }
-
-        let mut hedge_state = HedgeState::new(
-            hedge_config.clone(),
-            net_delta,
-            net_gamma,
-            entry_spot,
-        );
-
-        // Rehedge at specified times
-        for rehedge_time in rehedge_times {
-            if hedge_state.at_max_rehedges() {
-                break;
-            }
-
-            let spot = self.equity_repo
-                .get_spot_price(symbol, rehedge_time)
-                .await
-                .map_err(|e| format!("Failed to get spot at {}: {}", rehedge_time, e))?;
-
-            let spot_f64 = spot.to_f64();
-
-            // Track for RV computation
-            if let Some(ref mut tracker) = rv_tracker {
-                tracker.record(rehedge_time, spot_f64);
-            }
-
-            hedge_state.update(rehedge_time, spot_f64);
-        }
-
-        // Record exit spot
-        if let Some(ref mut tracker) = rv_tracker {
-            tracker.record(exit_time, exit_spot);
-        }
-
-        // Finalize hedge position
-        let mut hedge_position = hedge_state.finalize(exit_spot);
-
-        // Attach RV metrics and spot history if tracking is enabled
-        if let Some(tracker) = rv_tracker.take() {
-            let exit_iv = result.exit_iv().map(|iv| iv.primary);
-
-            // Store spot history before finalizing
-            hedge_position.spot_history = tracker.spot_history.clone();
-
-            // Compute and attach metrics
-            hedge_position.realized_vol_metrics = Some(tracker.finalize(exit_iv));
-        }
-
-        Ok(hedge_position)
-    }
-
-    /// Compute position delta from leg structure
-    ///
-    /// Recomputes delta for composite trades by summing leg deltas using Black-Scholes.
-    /// Works for any trade implementing CompositeTrade (straddles, spreads, butterflies).
-    fn compute_position_delta(
-        trade: &T,
-        spot: f64,
-        volatility: f64,
-        at_time: DateTime<Utc>,
-        risk_free_rate: f64,
-        contract_multiplier: i32,
-    ) -> f64 {
-        use cs_analytics::bs_delta;
-
-        trade.legs().iter().map(|(leg, position)| {
-            let tte = (leg.expiration - at_time.date_naive()).num_days() as f64 / 365.0;
-            if tte <= 0.0 {
-                return 0.0;
-            }
-
-            let is_call = leg.option_type == OptionType::Call;
-            let strike_f64 = leg.strike.value().to_f64().unwrap_or(0.0);
-
-            let leg_delta = bs_delta(
-                spot,
-                strike_f64,
-                tte,
-                volatility,
-                is_call,
-                risk_free_rate,
-            );
-
-            // Apply position sign (long = +1, short = -1) and contract multiplier
-            leg_delta * position.sign() * contract_multiplier as f64
-        }).sum()
-    }
-
-    /// Hedge using Entry HV (Historical Volatility at trade entry)
-    async fn hedge_with_entry_hv(
-        &self,
-        trade: &T,
-        result: &<T as ExecutableTrade>::Result,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-        rehedge_times: Vec<DateTime<Utc>>,
-        hv_window: u32,
-        rv_tracker: &mut Option<RealizedVolatilityTracker>,
-        snapshot_collector: &crate::attribution::SnapshotCollector,
-    ) -> Result<(cs_domain::HedgePosition, Vec<cs_domain::PositionSnapshot>), String> {
-        use cs_analytics::realized_volatility;
-
-        let hedge_config = self.hedge_config.as_ref().unwrap();
-        let symbol = result.symbol();
-        let entry_spot = result.spot_at_entry();
-        let exit_spot = result.spot_at_exit();
-
-        // Compute HV at entry
-        let entry_hv = self.compute_hv_at_time(symbol, entry_time, hv_window).await?;
-
-        // Initialize position tracking
-        let mut position = cs_domain::HedgePosition::new();
-        let mut current_shares = 0i32;
-        let mut snapshots = Vec::new();
-
-        // Record entry spot for RV tracking
-        if let Some(ref mut tracker) = rv_tracker {
-            tracker.record(entry_time, entry_spot);
-        }
-
-        // Capture entry snapshot
-        let entry_snapshot = snapshot_collector
-            .capture_snapshot(trade, entry_time, entry_hv, current_shares, hedge_config.contract_multiplier)
-            .await?;
-        snapshots.push(entry_snapshot);
-
-        // Rehedge at specified times
-        for rehedge_time in rehedge_times {
-            if let Some(max) = hedge_config.max_rehedges {
-                if position.rehedge_count() >= max {
-                    break;
-                }
-            }
-
-            let spot = self.equity_repo
-                .get_spot_price(symbol, rehedge_time)
-                .await
-                .map_err(|e| format!("Failed to get spot at {}: {}", rehedge_time, e))?;
-
-            let spot_f64 = spot.to_f64();
-
-            // Track for RV computation
-            if let Some(ref mut tracker) = rv_tracker {
-                tracker.record(rehedge_time, spot_f64);
-            }
-
-            // Recompute position delta using entry HV
-            let position_delta = Self::compute_position_delta(
-                trade,
-                spot_f64,
-                entry_hv,
-                rehedge_time,
-                0.05, // risk-free rate
-                hedge_config.contract_multiplier,
-            );
-
-            // Calculate net delta (position delta + stock hedge delta)
-            let stock_delta = current_shares as f64 / hedge_config.contract_multiplier as f64;
-            let net_delta = position_delta + stock_delta;
-
-            // Capture snapshot before rehedge
-            let snapshot = snapshot_collector
-                .capture_snapshot(trade, rehedge_time, entry_hv, current_shares, hedge_config.contract_multiplier)
-                .await?;
-            snapshots.push(snapshot);
-
-            // Check if rehedge is needed
-            if !hedge_config.should_rehedge(net_delta, spot_f64, 0.0) {
-                continue;
-            }
-
-            // Calculate shares needed to neutralize
-            let shares = hedge_config.shares_to_hedge(net_delta);
-            if shares == 0 {
-                continue;
-            }
-
-            let delta_before = net_delta;
-            current_shares += shares;
-            let stock_delta_after = current_shares as f64 / hedge_config.contract_multiplier as f64;
-            let delta_after = position_delta + stock_delta_after;
-
-            let action = cs_domain::HedgeAction {
-                timestamp: rehedge_time,
-                shares,
-                spot_price: spot_f64,
-                delta_before,
-                delta_after,
-                cost: hedge_config.transaction_cost_per_share * Decimal::from(shares.abs()),
-            };
-
-            position.add_hedge(action);
-        }
-
-        // Record exit spot
-        if let Some(ref mut tracker) = rv_tracker {
-            tracker.record(exit_time, exit_spot);
-        }
-
-        // Capture exit snapshot
-        let exit_iv = result.exit_iv().map(|iv| iv.primary);
-        let exit_snapshot = snapshot_collector
-            .capture_snapshot(trade, exit_time, entry_hv, current_shares, hedge_config.contract_multiplier)
-            .await?;
-        snapshots.push(exit_snapshot);
-
-        // Finalize position
-        position.unrealized_pnl = position.calculate_pnl(exit_spot);
-
-        // Attach RV metrics if tracking is enabled
-        if let Some(tracker) = rv_tracker.take() {
-            // Update tracker with entry_hv before finalizing
-            let tracker_with_hv = RealizedVolatilityTracker {
-                spot_history: tracker.spot_history.clone(),
-                entry_hv: Some(entry_hv),
-                entry_iv: tracker.entry_iv,
-            };
-
-            // Store spot history
-            position.spot_history = tracker.spot_history.clone();
-
-            // Compute and attach metrics
-            position.realized_vol_metrics = Some(tracker_with_hv.finalize(exit_iv));
-        }
-
-        Ok((position, snapshots))
-    }
-
-    /// Hedge using Entry IV (Implied Volatility at trade entry)
-    async fn hedge_with_entry_iv(
-        &self,
-        trade: &T,
-        result: &<T as ExecutableTrade>::Result,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-        rehedge_times: Vec<DateTime<Utc>>,
-        rv_tracker: &mut Option<RealizedVolatilityTracker>,
-        snapshot_collector: &crate::attribution::SnapshotCollector,
-    ) -> Result<(cs_domain::HedgePosition, Vec<cs_domain::PositionSnapshot>), String> {
-        let hedge_config = self.hedge_config.as_ref().unwrap();
-        let symbol = result.symbol();
-        let entry_spot = result.spot_at_entry();
-        let exit_spot = result.spot_at_exit();
-
-        // Get IV at entry from result
-        let entry_iv = result.entry_iv()
-            .ok_or("Entry IV not available")?
-            .primary;
-
-        // Initialize position tracking
-        let mut position = cs_domain::HedgePosition::new();
-        let mut current_shares = 0i32;
-        let mut snapshots = Vec::new();
-
-        // Record entry spot for RV tracking
-        if let Some(ref mut tracker) = rv_tracker {
-            tracker.record(entry_time, entry_spot);
-        }
-
-        // Capture entry snapshot
-        let entry_snapshot = snapshot_collector
-            .capture_snapshot(trade, entry_time, entry_iv, current_shares, hedge_config.contract_multiplier)
-            .await?;
-        snapshots.push(entry_snapshot);
-
-        // Rehedge at specified times
-        for rehedge_time in rehedge_times {
-            if let Some(max) = hedge_config.max_rehedges {
-                if position.rehedge_count() >= max {
-                    break;
-                }
-            }
-
-            let spot = self.equity_repo
-                .get_spot_price(symbol, rehedge_time)
-                .await
-                .map_err(|e| format!("Failed to get spot at {}: {}", rehedge_time, e))?;
-
-            let spot_f64 = spot.to_f64();
-
-            // Track for RV computation
-            if let Some(ref mut tracker) = rv_tracker {
-                tracker.record(rehedge_time, spot_f64);
-            }
-
-            // Recompute position delta using entry IV
-            let position_delta = Self::compute_position_delta(
-                trade,
-                spot_f64,
-                entry_iv,
-                rehedge_time,
-                0.05, // risk-free rate
-                hedge_config.contract_multiplier,
-            );
-
-            // Calculate net delta (position delta + stock hedge delta)
-            let stock_delta = current_shares as f64 / hedge_config.contract_multiplier as f64;
-            let net_delta = position_delta + stock_delta;
-
-            // Capture snapshot before rehedge
-            let snapshot = snapshot_collector
-                .capture_snapshot(trade, rehedge_time, entry_iv, current_shares, hedge_config.contract_multiplier)
-                .await?;
-            snapshots.push(snapshot);
-
-            // Check if rehedge is needed
-            if !hedge_config.should_rehedge(net_delta, spot_f64, 0.0) {
-                continue;
-            }
-
-            // Calculate shares needed to neutralize
-            let shares = hedge_config.shares_to_hedge(net_delta);
-            if shares == 0 {
-                continue;
-            }
-
-            let delta_before = net_delta;
-            current_shares += shares;
-            let stock_delta_after = current_shares as f64 / hedge_config.contract_multiplier as f64;
-            let delta_after = position_delta + stock_delta_after;
-
-            let action = cs_domain::HedgeAction {
-                timestamp: rehedge_time,
-                shares,
-                spot_price: spot_f64,
-                delta_before,
-                delta_after,
-                cost: hedge_config.transaction_cost_per_share * Decimal::from(shares.abs()),
-            };
-
-            position.add_hedge(action);
-        }
-
-        // Record exit spot
-        if let Some(ref mut tracker) = rv_tracker {
-            tracker.record(exit_time, exit_spot);
-        }
-
-        // Capture exit snapshot
-        let exit_iv = result.exit_iv().map(|iv| iv.primary).unwrap_or(entry_iv);
-        let exit_snapshot = snapshot_collector
-            .capture_snapshot(trade, exit_time, exit_iv, current_shares, hedge_config.contract_multiplier)
-            .await?;
-        snapshots.push(exit_snapshot);
-
-        // Finalize position
-        position.unrealized_pnl = position.calculate_pnl(exit_spot);
-
-        // Attach RV metrics if tracking is enabled
-        if let Some(tracker) = rv_tracker.take() {
-            let exit_iv_opt = result.exit_iv().map(|iv| iv.primary);
-
-            // Store spot history
-            position.spot_history = tracker.spot_history.clone();
-
-            // Compute and attach metrics
-            position.realized_vol_metrics = Some(tracker.finalize(exit_iv_opt));
-        }
-
-        Ok((position, snapshots))
-    }
-
-    /// Hedge using Current HV (recompute HV at each rehedge)
-    async fn hedge_with_current_hv(
-        &self,
-        trade: &T,
-        result: &<T as ExecutableTrade>::Result,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-        rehedge_times: Vec<DateTime<Utc>>,
-        hv_window: u32,
-        rv_tracker: &mut Option<RealizedVolatilityTracker>,
-        snapshot_collector: &crate::attribution::SnapshotCollector,
-    ) -> Result<(cs_domain::HedgePosition, Vec<cs_domain::PositionSnapshot>), String> {
-        let hedge_config = self.hedge_config.as_ref().unwrap();
-        let symbol = result.symbol();
-        let entry_spot = result.spot_at_entry();
-        let exit_spot = result.spot_at_exit();
-
-        // Compute HV at entry for RV metrics and first snapshot
-        let entry_hv = self.compute_hv_at_time(symbol, entry_time, hv_window).await?;
-
-        // Initialize position tracking
-        let mut position = cs_domain::HedgePosition::new();
-        let mut current_shares = 0i32;
-        let mut snapshots = Vec::new();
-
-        // Record entry spot for RV tracking
-        if let Some(ref mut tracker) = rv_tracker {
-            tracker.record(entry_time, entry_spot);
-        }
-
-        // Capture entry snapshot with entry HV
-        let entry_snapshot = snapshot_collector
-            .capture_snapshot(trade, entry_time, entry_hv, current_shares, hedge_config.contract_multiplier)
-            .await?;
-        snapshots.push(entry_snapshot);
-
-        // Rehedge at specified times
-        for rehedge_time in rehedge_times {
-            if let Some(max) = hedge_config.max_rehedges {
-                if position.rehedge_count() >= max {
-                    break;
-                }
-            }
-
-            let spot = self.equity_repo
-                .get_spot_price(symbol, rehedge_time)
-                .await
-                .map_err(|e| format!("Failed to get spot at {}: {}", rehedge_time, e))?;
-
-            let spot_f64 = spot.to_f64();
-
-            // Track for RV computation
-            if let Some(ref mut tracker) = rv_tracker {
-                tracker.record(rehedge_time, spot_f64);
-            }
-
-            // Recompute HV at current time
-            let current_hv = self.compute_hv_at_time(symbol, rehedge_time, hv_window).await?;
-
-            // Recompute position delta using current HV
-            let position_delta = Self::compute_position_delta(
-                trade,
-                spot_f64,
-                current_hv,
-                rehedge_time,
-                0.05,
-                hedge_config.contract_multiplier,
-            );
-
-            // Calculate net delta
-            let stock_delta = current_shares as f64 / hedge_config.contract_multiplier as f64;
-            let net_delta = position_delta + stock_delta;
-
-            // Capture snapshot with current HV (before rehedge)
-            let snapshot = snapshot_collector
-                .capture_snapshot(trade, rehedge_time, current_hv, current_shares, hedge_config.contract_multiplier)
-                .await?;
-            snapshots.push(snapshot);
-
-            // Check if rehedge is needed
-            if !hedge_config.should_rehedge(net_delta, spot_f64, 0.0) {
-                continue;
-            }
-
-            // Calculate shares needed
-            let shares = hedge_config.shares_to_hedge(net_delta);
-            if shares == 0 {
-                continue;
-            }
-
-            let delta_before = net_delta;
-            current_shares += shares;
-            let stock_delta_after = current_shares as f64 / hedge_config.contract_multiplier as f64;
-            let delta_after = position_delta + stock_delta_after;
-
-            let action = cs_domain::HedgeAction {
-                timestamp: rehedge_time,
-                shares,
-                spot_price: spot_f64,
-                delta_before,
-                delta_after,
-                cost: hedge_config.transaction_cost_per_share * Decimal::from(shares.abs()),
-            };
-
-            position.add_hedge(action);
-        }
-
-        // Record exit spot
-        if let Some(ref mut tracker) = rv_tracker {
-            tracker.record(exit_time, exit_spot);
-        }
-
-        // Compute HV at exit and capture exit snapshot
-        let exit_hv = self.compute_hv_at_time(symbol, exit_time, hv_window).await?;
-        let exit_snapshot = snapshot_collector
-            .capture_snapshot(trade, exit_time, exit_hv, current_shares, hedge_config.contract_multiplier)
-            .await?;
-        snapshots.push(exit_snapshot);
-
-        // Finalize position
-        position.unrealized_pnl = position.calculate_pnl(exit_spot);
-
-        // Attach RV metrics if tracking is enabled
-        if let Some(tracker) = rv_tracker.take() {
-            let exit_iv = result.exit_iv().map(|iv| iv.primary);
-
-            let tracker_with_hv = RealizedVolatilityTracker {
-                spot_history: tracker.spot_history.clone(),
-                entry_hv: Some(entry_hv),
-                entry_iv: tracker.entry_iv,
-            };
-
-            position.spot_history = tracker.spot_history.clone();
-            position.realized_vol_metrics = Some(tracker_with_hv.finalize(exit_iv));
-        }
-
-        Ok((position, snapshots))
-    }
-
-    /// Hedge using Current Market IV (build IV surface at each rehedge)
-    async fn hedge_with_current_market_iv(
-        &self,
-        trade: &T,
-        result: &<T as ExecutableTrade>::Result,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-        rehedge_times: Vec<DateTime<Utc>>,
-        rv_tracker: &mut Option<RealizedVolatilityTracker>,
-    ) -> Result<cs_domain::HedgePosition, String> {
-        use crate::iv_surface_builder::build_iv_surface;
-        use cs_analytics::bs_delta;
-
-        let hedge_config = self.hedge_config.as_ref().unwrap();
-        let symbol = result.symbol();
-        let entry_spot = result.spot_at_entry();
-        let exit_spot = result.spot_at_exit();
-
-        // Initialize position tracking
-        let mut position = cs_domain::HedgePosition::new();
-        let mut current_shares = 0i32;
-
-        // Record entry spot for RV tracking
-        if let Some(ref mut tracker) = rv_tracker {
-            tracker.record(entry_time, entry_spot);
-        }
-
-        // Rehedge at specified times
-        for rehedge_time in rehedge_times {
-            if let Some(max) = hedge_config.max_rehedges {
-                if position.rehedge_count() >= max {
-                    break;
-                }
-            }
-
-            let spot = self.equity_repo
-                .get_spot_price(symbol, rehedge_time)
-                .await
-                .map_err(|e| format!("Failed to get spot at {}: {}", rehedge_time, e))?;
-
-            let spot_f64 = spot.to_f64();
-
-            // Track for RV computation
-            if let Some(ref mut tracker) = rv_tracker {
-                tracker.record(rehedge_time, spot_f64);
-            }
-
-            // Build IV surface at current time
-            let chain_df = self.options_repo
-                .get_option_bars(symbol, rehedge_time.date_naive())
-                .await
-                .map_err(|e| format!("Failed to get option chain at {}: {}", rehedge_time, e))?;
-
-            let iv_surface = build_iv_surface(&chain_df, spot_f64, rehedge_time, symbol)
-                .ok_or_else(|| format!("Failed to build IV surface at {}", rehedge_time))?;
-
-            // Compute position delta using current market IVs
-            let mut position_delta = 0.0;
-            for (leg, leg_position) in trade.legs() {
-                let tte = (leg.expiration - rehedge_time.date_naive()).num_days() as f64 / 365.0;
-                if tte <= 0.0 {
-                    continue;
-                }
-
-                let strike_f64 = leg.strike.value().to_f64().unwrap_or(0.0);
-                let is_call = leg.option_type == finq_core::OptionType::Call;
-
-                // Get IV from surface for this specific leg
-                let leg_iv = iv_surface
-                    .get_iv(leg.strike.value(), leg.expiration, is_call)
-                    .unwrap_or(0.30); // Fallback to 30% if not found
-
-                let leg_delta = bs_delta(spot_f64, strike_f64, tte, leg_iv, is_call, 0.05);
-                position_delta += leg_delta * leg_position.sign() * hedge_config.contract_multiplier as f64;
-            }
-
-            // Calculate net delta
-            let stock_delta = current_shares as f64 / hedge_config.contract_multiplier as f64;
-            let net_delta = position_delta + stock_delta;
-
-            // Check if rehedge is needed
-            if !hedge_config.should_rehedge(net_delta, spot_f64, 0.0) {
-                continue;
-            }
-
-            // Calculate shares needed
-            let shares = hedge_config.shares_to_hedge(net_delta);
-            if shares == 0 {
-                continue;
-            }
-
-            let delta_before = net_delta;
-            current_shares += shares;
-            let stock_delta_after = current_shares as f64 / hedge_config.contract_multiplier as f64;
-            let delta_after = position_delta + stock_delta_after;
-
-            let action = cs_domain::HedgeAction {
-                timestamp: rehedge_time,
-                shares,
-                spot_price: spot_f64,
-                delta_before,
-                delta_after,
-                cost: hedge_config.transaction_cost_per_share * Decimal::from(shares.abs()),
-            };
-
-            position.add_hedge(action);
-        }
-
-        // Record exit spot
-        if let Some(ref mut tracker) = rv_tracker {
-            tracker.record(exit_time, exit_spot);
-        }
-
-        // Finalize position
-        position.unrealized_pnl = position.calculate_pnl(exit_spot);
-
-        // Attach RV metrics if tracking is enabled
-        if let Some(tracker) = rv_tracker.take() {
-            let exit_iv = result.exit_iv().map(|iv| iv.primary);
-            position.spot_history = tracker.spot_history.clone();
-            position.realized_vol_metrics = Some(tracker.finalize(exit_iv));
-        }
-
-        Ok(position)
-    }
-
-    /// Hedge using Historical Average IV
-    async fn hedge_with_historical_average_iv(
-        &self,
-        trade: &T,
-        result: &<T as ExecutableTrade>::Result,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-        rehedge_times: Vec<DateTime<Utc>>,
-        lookback_days: u32,
-        rv_tracker: &mut Option<RealizedVolatilityTracker>,
-    ) -> Result<cs_domain::HedgePosition, String> {
-        use crate::iv_surface_builder::build_iv_surface;
-        use cs_analytics::bs_delta;
-
-        let hedge_config = self.hedge_config.as_ref().unwrap();
-        let symbol = result.symbol();
-        let entry_spot = result.spot_at_entry();
-        let exit_spot = result.spot_at_exit();
-
-        // Initialize position tracking
-        let mut position = cs_domain::HedgePosition::new();
-        let mut current_shares = 0i32;
-
-        // Record entry spot for RV tracking
-        if let Some(ref mut tracker) = rv_tracker {
-            tracker.record(entry_time, entry_spot);
-        }
-
-        // Rehedge at specified times
-        for rehedge_time in rehedge_times {
-            if let Some(max) = hedge_config.max_rehedges {
-                if position.rehedge_count() >= max {
-                    break;
-                }
-            }
-
-            let spot = self.equity_repo
-                .get_spot_price(symbol, rehedge_time)
-                .await
-                .map_err(|e| format!("Failed to get spot at {}: {}", rehedge_time, e))?;
-
-            let spot_f64 = spot.to_f64();
-
-            // Track for RV computation
-            if let Some(ref mut tracker) = rv_tracker {
-                tracker.record(rehedge_time, spot_f64);
-            }
-
-            // Compute historical average IV for each leg
-            let mut position_delta = 0.0;
-            for (leg, leg_position) in trade.legs() {
-                let tte = (leg.expiration - rehedge_time.date_naive()).num_days() as f64 / 365.0;
-                if tte <= 0.0 {
-                    continue;
-                }
-
-                // Compute average IV for this leg over lookback window
-                let avg_iv = self.compute_historical_average_iv_for_leg(
-                    symbol,
-                    leg.strike.value(),
-                    leg.expiration,
-                    leg.option_type == finq_core::OptionType::Call,
-                    rehedge_time.date_naive(),
-                    lookback_days,
-                )
-                .await
-                .unwrap_or(0.30); // Fallback to 30% if computation fails
-
-                let strike_f64 = leg.strike.value().to_f64().unwrap_or(0.0);
-                let is_call = leg.option_type == finq_core::OptionType::Call;
-
-                let leg_delta = bs_delta(spot_f64, strike_f64, tte, avg_iv, is_call, 0.05);
-                position_delta += leg_delta * leg_position.sign() * hedge_config.contract_multiplier as f64;
-            }
-
-            // Calculate net delta
-            let stock_delta = current_shares as f64 / hedge_config.contract_multiplier as f64;
-            let net_delta = position_delta + stock_delta;
-
-            // Check if rehedge is needed
-            if !hedge_config.should_rehedge(net_delta, spot_f64, 0.0) {
-                continue;
-            }
-
-            // Calculate shares needed
-            let shares = hedge_config.shares_to_hedge(net_delta);
-            if shares == 0 {
-                continue;
-            }
-
-            let delta_before = net_delta;
-            current_shares += shares;
-            let stock_delta_after = current_shares as f64 / hedge_config.contract_multiplier as f64;
-            let delta_after = position_delta + stock_delta_after;
-
-            let action = cs_domain::HedgeAction {
-                timestamp: rehedge_time,
-                shares,
-                spot_price: spot_f64,
-                delta_before,
-                delta_after,
-                cost: hedge_config.transaction_cost_per_share * Decimal::from(shares.abs()),
-            };
-
-            position.add_hedge(action);
-        }
-
-        // Record exit spot
-        if let Some(ref mut tracker) = rv_tracker {
-            tracker.record(exit_time, exit_spot);
-        }
-
-        // Finalize position
-        position.unrealized_pnl = position.calculate_pnl(exit_spot);
-
-        // Attach RV metrics if tracking is enabled
-        if let Some(tracker) = rv_tracker.take() {
-            let exit_iv = result.exit_iv().map(|iv| iv.primary);
-            position.spot_history = tracker.spot_history.clone();
-            position.realized_vol_metrics = Some(tracker.finalize(exit_iv));
-        }
-
-        Ok(position)
-    }
-
-    /// Compute historical average IV for a specific leg over lookback window
-    async fn compute_historical_average_iv_for_leg(
-        &self,
-        symbol: &str,
-        strike: Decimal,
-        expiration: NaiveDate,
-        is_call: bool,
-        current_date: NaiveDate,
-        lookback_days: u32,
-    ) -> Result<f64, String> {
-        use crate::iv_surface_builder::build_iv_surface;
-        use cs_domain::TradingCalendar;
-
-        let end_date = current_date;
-        let start_date = current_date - chrono::Duration::days(lookback_days as i64);
-
-        let trading_days: Vec<NaiveDate> = TradingCalendar::trading_days_between(start_date, end_date)
-            .collect();
-
-        if trading_days.is_empty() {
-            return Err("No trading days in lookback window".to_string());
-        }
-
-        let mut ivs = Vec::new();
-
-        // Sample IVs from historical days (limit to avoid performance issues)
-        let sample_size = trading_days.len().min(10); // Sample at most 10 days
-        let step = if trading_days.len() > sample_size {
-            trading_days.len() / sample_size
-        } else {
-            1
-        };
-
-        for (idx, date) in trading_days.iter().enumerate() {
-            if idx % step != 0 {
-                continue; // Skip non-sampled days
-            }
-
-            // Get option chain for this historical day
-            let chain_df = match self.options_repo.get_option_bars(symbol, *date).await {
-                Ok(df) => df,
-                Err(_) => continue, // Skip days with missing data
-            };
-
-            // Get spot price for this day (use close price from bars)
-            let bars_df = match self.equity_repo.get_bars(symbol, *date).await {
-                Ok(df) => df,
-                Err(_) => continue,
-            };
-
-            // Extract close price as spot (last bar's close)
-            let spot = if let Ok(close_series) = bars_df.column("close") {
-                if let Ok(close_values) = close_series.f64() {
-                    if let Some(last_close) = close_values.last() {
-                        last_close
-                    } else {
-                        continue;
-                    }
-                } else {
-                    continue;
-                }
-            } else {
-                continue;
-            };
-
-            // Build IV surface
-            let pricing_time = cs_domain::eastern_to_utc(
-                *date,
-                cs_domain::MarketTime::DEFAULT_ENTRY.to_naive_time(),
-            );
-            let iv_surface = match build_iv_surface(&chain_df, spot, pricing_time, symbol) {
-                Some(surface) => surface,
-                None => continue,
-            };
-
-            // Get IV for this specific leg
-            if let Some(iv) = iv_surface.get_iv(strike, expiration, is_call) {
-                ivs.push(iv);
-            }
-        }
-
-        if ivs.is_empty() {
-            return Err("Could not compute historical IV - no valid data points".to_string());
-        }
-
-        // Return average IV
-        Ok(ivs.iter().sum::<f64>() / ivs.len() as f64)
-    }
 
     /// Compute HV at a specific time using recent price history
     async fn compute_hv_at_time(

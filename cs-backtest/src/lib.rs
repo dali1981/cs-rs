@@ -3,6 +3,7 @@
 // Generic trade execution, rolling strategies, backtesting.
 
 pub mod config;
+pub mod delta_providers;  // Delta computation strategies for hedging
 pub mod execution;  // Generic execution framework
 pub mod iv_surface_builder;
 pub mod spread_pricer;
