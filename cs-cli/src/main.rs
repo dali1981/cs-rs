@@ -256,6 +256,55 @@ enum Commands {
         #[arg(long)]
         output: Option<PathBuf>,
     },
+
+    /// Run campaign-based backtest (declarative scheduling)
+    Campaign {
+        /// Symbols to trade
+        #[arg(long)]
+        symbols: Vec<String>,
+        /// Strategy (calendar-spread, straddle, iron-butterfly)
+        #[arg(long)]
+        strategy: String,
+        /// Period policy (earnings-only, inter-earnings, continuous, fixed)
+        #[arg(long)]
+        period_policy: String,
+        /// Roll policy (none, weekly, monthly)
+        #[arg(long, default_value = "none")]
+        roll_policy: String,
+        /// Start date (YYYY-MM-DD)
+        #[arg(long)]
+        start: String,
+        /// End date (YYYY-MM-DD)
+        #[arg(long)]
+        end: String,
+        /// Custom earnings file (parquet or JSON)
+        #[arg(long)]
+        earnings_file: Option<PathBuf>,
+        /// Entry time in HH:MM format (default: 09:35)
+        #[arg(long, default_value = "09:35")]
+        entry_time: String,
+        /// Exit time in HH:MM format (default: 15:55)
+        #[arg(long, default_value = "15:55")]
+        exit_time: String,
+        /// Days before earnings to enter (for pre-earnings policy)
+        #[arg(long)]
+        entry_days_before: Option<u16>,
+        /// Days after earnings to exit (for cross-earnings policy)
+        #[arg(long)]
+        exit_days_after: Option<u16>,
+        /// Days after earnings to start inter-period trading
+        #[arg(long, default_value = "2")]
+        inter_entry_days_after: u16,
+        /// Days before next earnings to stop inter-period trading
+        #[arg(long, default_value = "3")]
+        inter_exit_days_before: u16,
+        /// Roll day for weekly policy (Mon, Tue, Wed, Thu, Fri)
+        #[arg(long, default_value = "Fri")]
+        roll_day: String,
+        /// Output file path
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(Tabled)]
@@ -433,6 +482,44 @@ async fn main() -> Result<()> {
                 &start,
                 &end,
                 &format,
+                output,
+            )
+            .await?;
+        }
+
+        Commands::Campaign {
+            symbols,
+            strategy,
+            period_policy,
+            roll_policy,
+            start,
+            end,
+            earnings_file,
+            entry_time,
+            exit_time,
+            entry_days_before,
+            exit_days_after,
+            inter_entry_days_after,
+            inter_exit_days_before,
+            roll_day,
+            output,
+        } => {
+            run_campaign_command(
+                cli.data_dir.as_ref(),
+                symbols,
+                &strategy,
+                &period_policy,
+                &roll_policy,
+                &start,
+                &end,
+                earnings_file.as_ref(),
+                &entry_time,
+                &exit_time,
+                entry_days_before,
+                exit_days_after,
+                inter_entry_days_after,
+                inter_exit_days_before,
+                &roll_day,
                 output,
             )
             .await?;
@@ -1950,5 +2037,339 @@ fn save_earnings_json(
 ) -> Result<()> {
     let json = serde_json::to_string_pretty(result)?;
     std::fs::write(path, json)?;
+    Ok(())
+}
+
+/// Run campaign-based backtest
+async fn run_campaign_command(
+    data_dir: Option<&PathBuf>,
+    symbols: Vec<String>,
+    strategy: &str,
+    period_policy: &str,
+    roll_policy: &str,
+    start: &str,
+    end: &str,
+    earnings_file: Option<&PathBuf>,
+    entry_time: &str,
+    exit_time: &str,
+    entry_days_before: Option<u16>,
+    exit_days_after: Option<u16>,
+    inter_entry_days_after: u16,
+    inter_exit_days_before: u16,
+    roll_day: &str,
+    output: Option<PathBuf>,
+) -> Result<()> {
+    use cs_domain::{
+        TradingCampaign, SessionSchedule, OptionStrategy, PeriodPolicy, RollPolicy,
+        ExpirationPolicy, EarningsEvent, TradingPeriodSpec,
+        infrastructure::{FinqOptionsRepository, FinqEquityRepository},
+    };
+    use cs_backtest::{SessionExecutor, DefaultTradeFactory, ExecutionConfig};
+    use chrono::NaiveDate;
+    use std::sync::Arc;
+
+    println!("{}", style("Campaign-Based Backtest").bold().green());
+    println!("  Symbols:  {}", symbols.join(", "));
+    println!("  Strategy: {}", strategy);
+    println!("  Period:   {} to {}", start, end);
+    println!();
+
+    // Parse dates
+    let start_date = NaiveDate::parse_from_str(start, "%Y-%m-%d")
+        .with_context(|| format!("Invalid start date: {}", start))?;
+    let end_date = NaiveDate::parse_from_str(end, "%Y-%m-%d")
+        .with_context(|| format!("Invalid end date: {}", end))?;
+
+    // Parse strategy
+    let strategy = match strategy.to_lowercase().as_str() {
+        "calendar" | "calendar-spread" => OptionStrategy::CalendarSpread,
+        "straddle" => OptionStrategy::Straddle,
+        "calendar-straddle" => OptionStrategy::CalendarStraddle,
+        "iron-butterfly" | "ironfly" => OptionStrategy::IronButterfly,
+        _ => anyhow::bail!("Unknown strategy: {}. Use: calendar, straddle, calendar-straddle, iron-butterfly", strategy),
+    };
+
+    // Default times
+    use chrono::NaiveTime;
+    let entry_time = NaiveTime::from_hms_opt(9, 35, 0).unwrap();
+    let exit_time = NaiveTime::from_hms_opt(15, 55, 0).unwrap();
+
+    // Parse period policy
+    let period_policy = match period_policy.to_lowercase().as_str() {
+        "earnings-only" | "earnings" => {
+            // Use entry_days_before and exit_days_after
+            let entry_days = entry_days_before.unwrap_or(1);
+            let exit_days = exit_days_after.unwrap_or(1);
+
+            PeriodPolicy::EarningsOnly {
+                timing: TradingPeriodSpec::CrossEarnings {
+                    entry_days_before: entry_days,
+                    exit_days_after: exit_days,
+                    entry_time,
+                    exit_time,
+                },
+            }
+        }
+        "inter-earnings" | "between" => {
+            let roll_policy = parse_campaign_roll_policy(roll_policy, roll_day)?;
+            PeriodPolicy::InterEarnings {
+                entry_days_after_earnings: inter_entry_days_after,
+                exit_days_before_earnings: inter_exit_days_before,
+                roll_policy,
+            }
+        }
+        "pre-earnings" => {
+            let entry_days = entry_days_before.unwrap_or(14);
+            PeriodPolicy::pre_earnings(entry_days)
+        }
+        "post-earnings" => {
+            let holding_days = exit_days_after.unwrap_or(14);
+            PeriodPolicy::EarningsOnly {
+                timing: TradingPeriodSpec::PostEarnings {
+                    entry_offset: 0,
+                    holding_days,
+                    entry_time,
+                    exit_time,
+                },
+            }
+        }
+        "continuous" => {
+            let roll_policy = parse_campaign_roll_policy(roll_policy, roll_day)?;
+            PeriodPolicy::Continuous {
+                earnings_timing: TradingPeriodSpec::CrossEarnings {
+                    entry_days_before: entry_days_before.unwrap_or(1),
+                    exit_days_after: exit_days_after.unwrap_or(1),
+                    entry_time,
+                    exit_time,
+                },
+                inter_period_roll: roll_policy,
+            }
+        }
+        _ => anyhow::bail!("Unknown period policy: {}. Use: earnings-only, inter-earnings, pre-earnings, post-earnings, continuous", period_policy),
+    };
+
+    // Load earnings calendar
+    let earnings_calendar = if let Some(path) = earnings_file {
+        // Load from file
+        load_earnings_from_file(path)?
+    } else {
+        // Load from default location based on symbols
+        load_earnings_for_symbols(&symbols, data_dir)?
+    };
+
+    println!("Loaded {} earnings events", earnings_calendar.len());
+
+    // Create campaigns for each symbol
+    let campaigns: Vec<TradingCampaign> = symbols
+        .iter()
+        .map(|symbol| TradingCampaign {
+            symbol: symbol.clone(),
+            strategy,
+            start_date,
+            end_date,
+            period_policy: period_policy.clone(),
+            expiration_policy: ExpirationPolicy::FirstAfter {
+                min_date: start_date,
+            },
+        })
+        .collect();
+
+    // Generate sessions
+    let schedule = SessionSchedule::from_campaigns(&campaigns, &earnings_calendar);
+
+    println!("Generated {} trading sessions", schedule.session_count());
+    println!("  Symbols: {}", schedule.symbols().iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
+    println!();
+
+    // Create repositories
+    let data_dir = data_dir
+        .cloned()
+        .or_else(|| std::env::var("FINQ_DATA_DIR").ok().map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("data"));
+
+    let options_repo = FinqOptionsRepository::new(data_dir.clone());
+    let equity_repo = FinqEquityRepository::new(data_dir);
+
+    // Create trade factory
+    let options_repo_arc: Arc<dyn cs_domain::OptionsDataRepository> = Arc::new(options_repo);
+    let equity_repo_arc: Arc<dyn cs_domain::EquityDataRepository> = Arc::new(equity_repo);
+
+    let trade_factory = Arc::new(DefaultTradeFactory::new(
+        Arc::clone(&options_repo_arc),
+        Arc::clone(&equity_repo_arc),
+    ));
+
+    // Create session executor
+    // Use calendar spread config as a reasonable default for all strategies
+    let config = ExecutionConfig::for_calendar_spread(None);
+    let executor = SessionExecutor::new(
+        options_repo_arc,
+        equity_repo_arc,
+        trade_factory,
+        config,
+    );
+
+    // Collect all sessions from schedule
+    let all_sessions: Vec<_> = schedule.iter_entry_dates()
+        .flat_map(|(_, sessions)| sessions.iter().cloned())
+        .collect();
+
+    // Execute sessions
+    println!("{}", style("Executing sessions...").bold());
+    let results = executor.execute_batch(&all_sessions).await;
+
+    println!();
+    println!("{}", style("Results:").bold().green());
+    println!("  Total sessions:    {}", results.total_sessions);
+    println!("  Successful:        {}", results.successful);
+    println!("  Failed:            {}", results.failed);
+    println!("  Success rate:      {:.1}%",
+        100.0 * results.successful as f64 / results.total_sessions as f64);
+
+    // Save results if requested
+    if let Some(output_path) = output {
+        println!();
+        println!("Saving results to: {}", output_path.display());
+        save_campaign_results(&results, &output_path)?;
+    }
+
+    println!();
+    println!("{}", style("Done!").bold().green());
+
+    Ok(())
+}
+
+/// Parse roll policy from string for campaign commands
+fn parse_campaign_roll_policy(roll_policy: &str, roll_day: &str) -> Result<cs_domain::RollPolicy> {
+    use cs_domain::RollPolicy;
+    use chrono::Weekday;
+
+    match roll_policy.to_lowercase().as_str() {
+        "weekly" => {
+            // Parse roll_day as weekday
+            let weekday = match roll_day.to_lowercase().as_str() {
+                "monday" => Weekday::Mon,
+                "tuesday" => Weekday::Tue,
+                "wednesday" => Weekday::Wed,
+                "thursday" => Weekday::Thu,
+                "friday" => Weekday::Fri,
+                _ => anyhow::bail!("Invalid --roll-day: {}. Must be monday-friday", roll_day),
+            };
+            Ok(RollPolicy::Weekly { roll_day: weekday })
+        }
+        "monthly" => {
+            // Parse roll_day as offset
+            let offset = roll_day.parse::<i8>()
+                .with_context(|| format!("Invalid roll day offset: {}. Use integer weeks offset (e.g., 0 for 3rd Friday)", roll_day))?;
+
+            Ok(RollPolicy::Monthly { roll_week_offset: offset })
+        }
+        s if s.starts_with("days:") => {
+            // Parse days:N format
+            let interval_str = &s[5..];
+            let interval: u16 = interval_str.parse()
+                .with_context(|| format!("Invalid interval in '{}'. Expected days:N (e.g., days:5)", roll_policy))?;
+            Ok(RollPolicy::TradingDays { interval })
+        }
+        _ => anyhow::bail!("Unknown roll policy: {}. Use: weekly, monthly, or days:N", roll_policy),
+    }
+}
+
+/// Load earnings events from file
+fn load_earnings_from_file(path: &PathBuf) -> Result<Vec<cs_domain::EarningsEvent>> {
+    use cs_domain::{EarningsEvent, value_objects::EarningsTime};
+    use chrono::NaiveDate;
+
+    let content = std::fs::read_to_string(path)?;
+    let mut earnings = Vec::new();
+
+    for line in content.lines().skip(1) {
+        let parts: Vec<&str> = line.split(',').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+
+        let symbol = parts[0].to_string();
+        let date = NaiveDate::parse_from_str(parts[1], "%Y-%m-%d")?;
+        let time = match parts[2].to_lowercase().as_str() {
+            "bmo" | "before" => EarningsTime::BeforeMarketOpen,
+            "amc" | "after" => EarningsTime::AfterMarketClose,
+            _ => EarningsTime::Unknown,
+        };
+
+        earnings.push(EarningsEvent::new(symbol, date, time));
+    }
+
+    Ok(earnings)
+}
+
+/// Load earnings for specific symbols from data directory
+fn load_earnings_for_symbols(symbols: &[String], data_dir: Option<&PathBuf>) -> Result<Vec<cs_domain::EarningsEvent>> {
+    use cs_domain::{EarningsEvent, value_objects::EarningsTime};
+    use chrono::NaiveDate;
+
+    let data_dir = data_dir
+        .cloned()
+        .or_else(|| std::env::var("FINQ_DATA_DIR").ok().map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("data"));
+
+    let mut all_earnings = Vec::new();
+
+    for symbol in symbols {
+        let earnings_path = data_dir.join(format!("earnings/{}.csv", symbol));
+
+        if !earnings_path.exists() {
+            eprintln!("Warning: No earnings file found for {}", symbol);
+            continue;
+        }
+
+        let content = std::fs::read_to_string(&earnings_path)?;
+
+        for line in content.lines().skip(1) {
+            let parts: Vec<&str> = line.split(',').collect();
+            if parts.len() < 2 {
+                continue;
+            }
+
+            let date = NaiveDate::parse_from_str(parts[0], "%Y-%m-%d")?;
+            let time = if parts.len() >= 3 {
+                match parts[2].to_lowercase().as_str() {
+                    "bmo" | "before" => EarningsTime::BeforeMarketOpen,
+                    "amc" | "after" => EarningsTime::AfterMarketClose,
+                    _ => EarningsTime::Unknown,
+                }
+            } else {
+                EarningsTime::Unknown
+            };
+
+            all_earnings.push(EarningsEvent::new(symbol.clone(), date, time));
+        }
+    }
+
+    Ok(all_earnings)
+}
+
+/// Save campaign results to file
+fn save_campaign_results(results: &cs_backtest::BatchResult, path: &PathBuf) -> Result<()> {
+    use std::io::Write;
+
+    let mut file = std::fs::File::create(path)?;
+
+    writeln!(file, "symbol,strategy,entry_date,exit_date,action,success,error")?;
+
+    for result in &results.results {
+        writeln!(
+            file,
+            "{},{:?},{},{},{:?},{},{}",
+            result.session.symbol,
+            result.session.strategy,
+            result.session.entry_date(),
+            result.session.exit_date(),
+            result.session.action,
+            result.success,
+            result.error.as_deref().unwrap_or(""),
+        )?;
+    }
+
     Ok(())
 }
