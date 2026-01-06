@@ -31,18 +31,49 @@ pub struct SessionResult {
     /// Error message if execution failed
     pub error: Option<String>,
 
+    /// P&L metrics (extracted from trade result for easy access)
+    pub pnl: Option<SessionPnL>,
+
     /// The underlying trade result (if successful)
     /// Boxed to avoid generic parameters
     pub trade_result: Option<Box<dyn std::any::Any + Send>>,
 }
 
+/// P&L metrics extracted from trade results
+#[derive(Debug, Clone)]
+pub struct SessionPnL {
+    pub entry_cost: rust_decimal::Decimal,
+    pub exit_value: rust_decimal::Decimal,
+    pub pnl: rust_decimal::Decimal,
+    pub spot_at_entry: f64,
+    pub spot_at_exit: f64,
+    pub iv_entry: Option<f64>,
+    pub iv_exit: Option<f64>,
+}
+
 impl SessionResult {
-    /// Create a successful result
+    /// Create a successful result with P&L
+    pub fn success_with_pnl(
+        session: TradingSession,
+        pnl: SessionPnL,
+        trade_result: Box<dyn std::any::Any + Send>,
+    ) -> Self {
+        Self {
+            session,
+            success: true,
+            error: None,
+            pnl: Some(pnl),
+            trade_result: Some(trade_result),
+        }
+    }
+
+    /// Create a successful result (legacy, no P&L extraction)
     pub fn success(session: TradingSession, trade_result: Box<dyn std::any::Any + Send>) -> Self {
         Self {
             session,
             success: true,
             error: None,
+            pnl: None,
             trade_result: Some(trade_result),
         }
     }
@@ -53,6 +84,7 @@ impl SessionResult {
             session,
             success: false,
             error: Some(error),
+            pnl: None,
             trade_result: None,
         }
     }
@@ -92,6 +124,53 @@ impl BatchResult {
             self.total_sessions, self.successful, self.failed
         );
     }
+
+    /// Calculate total P&L across all successful sessions
+    pub fn total_pnl(&self) -> rust_decimal::Decimal {
+        self.results
+            .iter()
+            .filter_map(|r| r.pnl.as_ref())
+            .map(|p| p.pnl)
+            .sum()
+    }
+
+    /// Calculate average P&L per successful trade
+    pub fn avg_pnl(&self) -> Option<rust_decimal::Decimal> {
+        let pnls: Vec<_> = self.results
+            .iter()
+            .filter_map(|r| r.pnl.as_ref())
+            .map(|p| p.pnl)
+            .collect();
+
+        if pnls.is_empty() {
+            None
+        } else {
+            Some(pnls.iter().sum::<rust_decimal::Decimal>() / rust_decimal::Decimal::from(pnls.len()))
+        }
+    }
+
+    /// Calculate win rate (percentage of profitable trades)
+    pub fn win_rate(&self) -> Option<f64> {
+        let pnls: Vec<_> = self.results
+            .iter()
+            .filter_map(|r| r.pnl.as_ref())
+            .collect();
+
+        if pnls.is_empty() {
+            None
+        } else {
+            let wins = pnls.iter().filter(|p| p.pnl > rust_decimal::Decimal::ZERO).count();
+            Some(100.0 * wins as f64 / pnls.len() as f64)
+        }
+    }
+
+    /// Get all session results with P&L data
+    pub fn successful_with_pnl(&self) -> Vec<&SessionResult> {
+        self.results
+            .iter()
+            .filter(|r| r.success && r.pnl.is_some())
+            .collect()
+    }
 }
 
 /// Executor for TradingSession
@@ -106,6 +185,9 @@ pub struct SessionExecutor {
     equity_repo: Arc<dyn EquityDataRepository>,
     trade_factory: Arc<dyn TradeFactory>,
     config: ExecutionConfig,
+    // Hedging support
+    hedge_config: Option<cs_domain::HedgeConfig>,
+    timing_strategy: Option<crate::timing_strategy::TimingStrategy>,
 }
 
 impl SessionExecutor {
@@ -121,7 +203,20 @@ impl SessionExecutor {
             equity_repo,
             trade_factory,
             config,
+            hedge_config: None,
+            timing_strategy: None,
         }
+    }
+
+    /// Enable hedging (builder pattern)
+    pub fn with_hedging(
+        mut self,
+        hedge_config: cs_domain::HedgeConfig,
+        timing_strategy: crate::timing_strategy::TimingStrategy,
+    ) -> Self {
+        self.hedge_config = Some(hedge_config);
+        self.timing_strategy = Some(timing_strategy);
+        self
     }
 
     /// Execute a single session
@@ -294,15 +389,20 @@ impl SessionExecutor {
             }
         };
 
-        // Create executor
+        // Create executor with optional hedging
         let pricer = StraddlePricer::new(SpreadPricer::new());
-        let executor = TradeExecutor::new(
+        let mut executor = TradeExecutor::new(
             self.options_repo.clone(),
             self.equity_repo.clone(),
             pricer,
             self.trade_factory.clone(),
             self.config.clone(),
         );
+
+        // Apply hedging if configured
+        if let (Some(ref hedge_config), Some(ref timing)) = (&self.hedge_config, &self.timing_strategy) {
+            executor = executor.with_hedging(hedge_config.clone(), timing.clone());
+        }
 
         // Execute
         let result = executor.execute(
@@ -312,9 +412,18 @@ impl SessionExecutor {
             session.exit_datetime,
         ).await;
 
-        // Wrap result
+        // Wrap result with P&L extraction
         if result.success() {
-            SessionResult::success(session.clone(), Box::new(result))
+            let pnl = SessionPnL {
+                entry_cost: result.entry_cost(),
+                exit_value: result.exit_value(),
+                pnl: result.pnl(),
+                spot_at_entry: result.spot_at_entry(),
+                spot_at_exit: result.spot_at_exit(),
+                iv_entry: result.entry_iv().map(|iv| iv.primary),
+                iv_exit: result.exit_iv().map(|iv| iv.primary),
+            };
+            SessionResult::success_with_pnl(session.clone(), pnl, Box::new(result))
         } else {
             SessionResult::failure(
                 session.clone(),

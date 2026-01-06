@@ -38,7 +38,7 @@ pub use trade_executor::TradeExecutor;
 pub use trade_executor_factory::TradeExecutorFactory;
 
 // Session-based execution
-pub use session_executor::{SessionExecutor, SessionResult, BatchResult};
+pub use session_executor::{SessionExecutor, SessionResult, SessionPnL, BatchResult};
 
 // Pricers
 pub use spread_pricer::{SpreadPricer, SpreadPricing, LegPricing, PricingError};

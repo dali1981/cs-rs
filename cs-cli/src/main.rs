@@ -301,6 +301,15 @@ enum Commands {
         /// Roll day for weekly policy (Mon, Tue, Wed, Thu, Fri)
         #[arg(long, default_value = "Fri")]
         roll_day: String,
+        /// Enable delta hedging
+        #[arg(long)]
+        hedge: bool,
+        /// Hedging strategy: time, delta (default: time)
+        #[arg(long, default_value = "time")]
+        hedge_strategy: String,
+        /// For time-based: rehedge interval in hours (default: 24)
+        #[arg(long, default_value = "24")]
+        hedge_interval_hours: u64,
         /// Output file path
         #[arg(long)]
         output: Option<PathBuf>,
@@ -502,6 +511,9 @@ async fn main() -> Result<()> {
             inter_entry_days_after,
             inter_exit_days_before,
             roll_day,
+            hedge,
+            hedge_strategy,
+            hedge_interval_hours,
             output,
         } => {
             run_campaign_command(
@@ -520,6 +532,9 @@ async fn main() -> Result<()> {
                 inter_entry_days_after,
                 inter_exit_days_before,
                 &roll_day,
+                hedge,
+                &hedge_strategy,
+                hedge_interval_hours,
                 output,
             )
             .await?;
@@ -725,7 +740,7 @@ fn display_rolling_results(result: &cs_domain::RollingResult) {
                 },
                 net_pnl: format!("${:.2}", net_pnl),
                 spot_move: format!("{:.1}%", roll.spot_move_pct),
-                iv_change: roll.iv_change.map(|c| format!("{:+.1}%", c * 100.0)).unwrap_or_else(|| "N/A".to_string()),
+                iv_change: roll.iv_change.map(|c| format!("{:+.1}%", c)).unwrap_or_else(|| "N/A".to_string()),
                 reason: roll.roll_reason.to_string(),
             }
         }).collect();
@@ -2057,11 +2072,14 @@ async fn run_campaign_command(
     inter_entry_days_after: u16,
     inter_exit_days_before: u16,
     roll_day: &str,
+    hedge: bool,
+    hedge_strategy: &str,
+    hedge_interval_hours: u64,
     output: Option<PathBuf>,
 ) -> Result<()> {
     use cs_domain::{
         TradingCampaign, SessionSchedule, OptionStrategy, PeriodPolicy, RollPolicy,
-        ExpirationPolicy, EarningsEvent, TradingPeriodSpec,
+        ExpirationPolicy, TradingPeriodSpec,
         infrastructure::{FinqOptionsRepository, FinqEquityRepository},
     };
     use cs_backtest::{SessionExecutor, DefaultTradeFactory, ExecutionConfig};
@@ -2151,7 +2169,7 @@ async fn run_campaign_command(
     // Load earnings calendar
     let earnings_calendar = if let Some(path) = earnings_file {
         // Load from file
-        load_earnings_from_file(path)?
+        load_earnings_from_file(path).await?
     } else {
         // Load from default location based on symbols
         load_earnings_for_symbols(&symbols, data_dir)?
@@ -2209,6 +2227,14 @@ async fn run_campaign_command(
         config,
     );
 
+    // TODO: Hedging for campaign command - see TICKET-002
+    if hedge {
+        println!("{}", style("Warning:").bold().yellow());
+        println!("  Hedging not yet implemented for campaign command.");
+        println!("  Use 'cs backtest --hedge' instead.");
+        println!();
+    }
+
     // Collect all sessions from schedule
     let all_sessions: Vec<_> = schedule.iter_entry_dates()
         .flat_map(|(_, sessions)| sessions.iter().cloned())
@@ -2225,6 +2251,9 @@ async fn run_campaign_command(
     println!("  Failed:            {}", results.failed);
     println!("  Success rate:      {:.1}%",
         100.0 * results.successful as f64 / results.total_sessions as f64);
+
+    // Print P&L summary
+    print_campaign_pnl_summary(&results);
 
     // Save results if requested
     if let Some(output_path) = output {
@@ -2276,29 +2305,20 @@ fn parse_campaign_roll_policy(roll_policy: &str, roll_day: &str) -> Result<cs_do
 }
 
 /// Load earnings events from file
-fn load_earnings_from_file(path: &PathBuf) -> Result<Vec<cs_domain::EarningsEvent>> {
-    use cs_domain::{EarningsEvent, value_objects::EarningsTime};
+async fn load_earnings_from_file(path: &PathBuf) -> Result<Vec<cs_domain::EarningsEvent>> {
+    use cs_domain::infrastructure::CustomFileEarningsReader;
+    use cs_domain::EarningsRepository;
     use chrono::NaiveDate;
 
-    let content = std::fs::read_to_string(path)?;
-    let mut earnings = Vec::new();
+    let reader = CustomFileEarningsReader::from_file(path.clone())
+        .map_err(|e| anyhow::anyhow!("Failed to open earnings file: {}", e))?;
 
-    for line in content.lines().skip(1) {
-        let parts: Vec<&str> = line.split(',').collect();
-        if parts.len() < 3 {
-            continue;
-        }
+    // Load all earnings (use wide date range)
+    let start = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+    let end = NaiveDate::from_ymd_opt(2030, 12, 31).unwrap();
 
-        let symbol = parts[0].to_string();
-        let date = NaiveDate::parse_from_str(parts[1], "%Y-%m-%d")?;
-        let time = match parts[2].to_lowercase().as_str() {
-            "bmo" | "before" => EarningsTime::BeforeMarketOpen,
-            "amc" | "after" => EarningsTime::AfterMarketClose,
-            _ => EarningsTime::Unknown,
-        };
-
-        earnings.push(EarningsEvent::new(symbol, date, time));
-    }
+    let earnings = reader.load_earnings(start, end, None).await
+        .map_err(|e| anyhow::anyhow!("Failed to load earnings: {}", e))?;
 
     Ok(earnings)
 }
@@ -2372,4 +2392,63 @@ fn save_campaign_results(results: &cs_backtest::BatchResult, path: &PathBuf) -> 
     }
 
     Ok(())
+}
+
+// TODO: Should P&L computation be in main? Consider moving to a dedicated module.
+/// Print P&L summary for campaign batch results
+fn print_campaign_pnl_summary(results: &cs_backtest::BatchResult) {
+    if results.successful == 0 {
+        return;
+    }
+
+    println!();
+    println!("{}", style("P&L Summary:").bold().green());
+    println!("  Total P&L:         ${:.2}", results.total_pnl());
+    if let Some(avg) = results.avg_pnl() {
+        println!("  Avg P&L per Trade: ${:.2}", avg);
+    }
+    if let Some(win_rate) = results.win_rate() {
+        println!("  Win Rate:          {:.1}%", win_rate);
+    }
+
+    // Individual session results
+    println!();
+    println!("{}", style("Individual Trades:").bold());
+    println!();
+    println!("{:<4} {:<12} {:<12} {:>10} {:>10} {:>10} {:>8}",
+        "#", "Entry", "Exit", "Entry $", "Exit $", "P&L", "Spot Δ%");
+    println!("{}", "-".repeat(76));
+
+    for (i, result) in results.successful_with_pnl().iter().enumerate() {
+        if let Some(pnl) = &result.pnl {
+            let spot_change = (pnl.spot_at_exit - pnl.spot_at_entry) / pnl.spot_at_entry * 100.0;
+            println!("{:<4} {:<12} {:<12} {:>10.2} {:>10.2} {:>10.2} {:>7.1}%",
+                i + 1,
+                result.session.entry_date(),
+                result.session.exit_date(),
+                pnl.entry_cost,
+                pnl.exit_value,
+                pnl.pnl,
+                spot_change,
+            );
+        }
+    }
+    println!("{}", "-".repeat(76));
+
+    // Show failed sessions
+    let failed_results: Vec<_> = results.results.iter()
+        .filter(|r| !r.success)
+        .collect();
+
+    if !failed_results.is_empty() {
+        println!();
+        println!("{}", style("Failed Sessions:").bold().red());
+        for result in &failed_results {
+            println!("  {} ({}): {}",
+                result.session.symbol,
+                result.session.entry_date(),
+                result.error.as_deref().unwrap_or("Unknown error"),
+            );
+        }
+    }
 }
