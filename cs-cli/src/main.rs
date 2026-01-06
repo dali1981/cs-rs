@@ -176,6 +176,15 @@ enum Commands {
         /// Enable realized volatility tracking during hedging
         #[arg(long)]
         track_realized_vol: bool,
+        /// Enable P&L attribution (requires --hedge)
+        #[arg(long)]
+        attribution: bool,
+        /// Volatility source for attribution: current-iv, current-hv, entry-iv, entry-hv (default: current-iv)
+        #[arg(long, default_value = "current-iv")]
+        attribution_vol_source: String,
+        /// Attribution snapshot times: open-close, close-only (default: open-close)
+        #[arg(long, default_value = "open-close")]
+        attribution_snapshots: String,
         /// Rolling strategy (weekly, monthly, or days:N) - only for straddle spreads
         #[arg(long)]
         roll_strategy: Option<String>,
@@ -392,6 +401,9 @@ async fn main() -> Result<()> {
             hedge_delta_mode,
             hv_window,
             track_realized_vol,
+            attribution,
+            attribution_vol_source,
+            attribution_snapshots,
             roll_strategy,
             roll_day,
         } => {
@@ -440,6 +452,9 @@ async fn main() -> Result<()> {
                 hedge_delta_mode,
                 hv_window,
                 track_realized_vol,
+                attribution,
+                attribution_vol_source,
+                attribution_snapshots,
                 roll_strategy,
                 roll_day,
             )
@@ -946,6 +961,9 @@ fn build_cli_overrides(
     hedge_delta_mode: Option<String>,
     hv_window: Option<u32>,
     track_realized_vol: bool,
+    attribution: bool,
+    attribution_vol_source: Option<String>,
+    attribution_snapshots: Option<String>,
 ) -> Result<CliOverrides> {
     // Parse delta range if provided
     let delta_range = if let Some(ref range_str) = delta_range_str {
@@ -1031,6 +1049,15 @@ fn build_cli_overrides(
         } else {
             None
         },
+        attribution: if attribution || attribution_vol_source.is_some() || attribution_snapshots.is_some() {
+            Some(CliAttribution {
+                enabled: Some(attribution),
+                vol_source: attribution_vol_source,
+                snapshot_times: attribution_snapshots,
+            })
+        } else {
+            None
+        },
         strike_match_mode: strike_match_mode_str,
         symbols,
         min_market_cap,
@@ -1085,6 +1112,9 @@ async fn run_backtest(
     hedge_delta_mode: String,
     hv_window: u32,
     track_realized_vol: bool,
+    attribution: bool,
+    attribution_vol_source: String,
+    attribution_snapshots: String,
     roll_strategy_str: Option<String>,
     roll_day_str: Option<String>,
 ) -> Result<()> {
@@ -1305,6 +1335,9 @@ async fn run_backtest(
         Some(hedge_delta_mode),
         Some(hv_window),
         track_realized_vol,
+        attribution,
+        Some(attribution_vol_source),
+        Some(attribution_snapshots),
     )?;
 
     // Load configuration with layering

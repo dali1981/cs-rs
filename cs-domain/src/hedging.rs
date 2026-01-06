@@ -371,6 +371,9 @@ pub struct GenericHedgeState<P: DeltaProvider> {
     // RV tracking (optional)
     spot_history: Vec<(DateTime<Utc>, f64)>,
     track_rv: bool,
+
+    // Attribution tracking (optional)
+    attribution_enabled: bool,
 }
 
 impl<P: DeltaProvider> GenericHedgeState<P> {
@@ -380,7 +383,13 @@ impl<P: DeltaProvider> GenericHedgeState<P> {
     /// * `config` - Hedge configuration
     /// * `delta_provider` - Strategy for computing position delta
     /// * `initial_spot` - Spot price at entry (for RV tracking)
-    pub fn new(config: HedgeConfig, delta_provider: P, initial_spot: f64) -> Self {
+    /// * `attribution_enabled` - Whether to enable P&L attribution
+    pub fn new(
+        config: HedgeConfig,
+        delta_provider: P,
+        initial_spot: f64,
+        attribution_enabled: bool,
+    ) -> Self {
         let track_rv = config.track_realized_vol;
         Self {
             config,
@@ -391,6 +400,7 @@ impl<P: DeltaProvider> GenericHedgeState<P> {
             position: HedgePosition::new(),
             spot_history: if track_rv { vec![(Utc::now(), initial_spot)] } else { vec![] },
             track_rv,
+            attribution_enabled,
         }
     }
 
@@ -418,6 +428,18 @@ impl<P: DeltaProvider> GenericHedgeState<P> {
         } else {
             false
         }
+    }
+
+    /// Check if attribution is enabled
+    pub fn attribution_enabled(&self) -> bool {
+        self.attribution_enabled
+    }
+
+    /// Get hedge actions for attribution timeline
+    ///
+    /// Returns reference to all hedge actions executed so far
+    pub fn hedge_actions(&self) -> &[HedgeAction] {
+        &self.position.hedges
     }
 
     /// Process a new spot price observation
@@ -674,6 +696,99 @@ impl RealizedVolatilityMetrics {
             num_observations: prices.len(),
             iv_premium_at_entry,
             realized_vs_implied,
+        }
+    }
+}
+
+// =============================================================================
+// Attribution Configuration
+// =============================================================================
+
+/// Snapshot timing configuration for P&L attribution
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotTimes {
+    /// Market open (9:30 ET) and close (16:00 ET)
+    OpenClose,
+    /// Only end of day (cheaper, less accurate)
+    CloseOnly,
+    /// Custom times (hour, minute) in Eastern Time
+    Custom {
+        open_hour: u32,
+        open_minute: u32,
+        close_hour: u32,
+        close_minute: u32,
+    },
+}
+
+impl Default for SnapshotTimes {
+    fn default() -> Self {
+        SnapshotTimes::OpenClose
+    }
+}
+
+/// Volatility source for Greeks recomputation in attribution
+///
+/// Similar to DeltaComputation but specifically for P&L attribution analysis.
+/// Determines how Greeks are recomputed when collecting daily snapshots.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case", tag = "mode")]
+pub enum VolatilitySource {
+    /// Use IV at trade entry (fixed throughout holding period)
+    EntryIV,
+
+    /// Use Historical Volatility at trade entry
+    EntryHV {
+        /// Lookback window in days
+        window: u32,
+    },
+
+    /// Recompute from current market IV surface (most accurate)
+    CurrentMarketIV,
+
+    /// Recompute HV at each snapshot
+    CurrentHV {
+        /// Lookback window in days
+        window: u32,
+    },
+
+    /// Use historical average IV over lookback period
+    HistoricalAverageIV {
+        /// Lookback period in days
+        lookback_days: u32,
+    },
+}
+
+impl Default for VolatilitySource {
+    fn default() -> Self {
+        VolatilitySource::CurrentMarketIV
+    }
+}
+
+/// Configuration for P&L attribution computation
+///
+/// Controls how position snapshots are collected and Greeks are recomputed
+/// for daily P&L attribution analysis.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttributionConfig {
+    /// Whether to compute attribution (adds overhead)
+    pub enabled: bool,
+
+    /// Volatility source for Greeks recomputation
+    #[serde(default)]
+    pub vol_source: VolatilitySource,
+
+    /// Snapshot times configuration
+    #[serde(default)]
+    pub snapshot_times: SnapshotTimes,
+}
+
+impl Default for AttributionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,  // Opt-in
+            vol_source: VolatilitySource::CurrentMarketIV,
+            snapshot_times: SnapshotTimes::OpenClose,
         }
     }
 }

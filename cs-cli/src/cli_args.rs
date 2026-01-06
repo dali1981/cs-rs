@@ -23,6 +23,8 @@ pub struct CliOverrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hedging: Option<CliHedging>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<CliAttribution>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub strike_match_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub symbols: Option<Vec<String>>,
@@ -137,4 +139,18 @@ pub struct CliHedging {
     /// Enable realized volatility tracking
     #[serde(skip_serializing_if = "Option::is_none")]
     pub track_realized_vol: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(default)]
+pub struct CliAttribution {
+    /// Enable P&L attribution (requires hedging to be enabled)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Volatility source for Greeks recomputation: current-iv, current-hv, entry-iv, entry-hv
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vol_source: Option<String>,
+    /// Snapshot times: open-close or close-only
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_times: Option<String>,
 }

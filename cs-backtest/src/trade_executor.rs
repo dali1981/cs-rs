@@ -94,6 +94,9 @@ where
     // Hedging support (was missing from RollingExecutor!)
     hedge_config: Option<HedgeConfig>,
     timing_strategy: Option<TimingStrategy>,
+
+    // Attribution support (optional)
+    attribution_config: Option<cs_domain::AttributionConfig>,
 }
 
 impl<T> TradeExecutor<T>
@@ -117,6 +120,7 @@ where
             roll_policy: None,
             hedge_config: None,
             timing_strategy: None,
+            attribution_config: None,
         }
     }
 
@@ -124,6 +128,15 @@ where
     pub fn with_hedging(mut self, config: HedgeConfig, timing: TimingStrategy) -> Self {
         self.hedge_config = Some(config);
         self.timing_strategy = Some(timing);
+        self
+    }
+
+    /// Enable P&L attribution (builder pattern)
+    ///
+    /// Attribution requires hedging to be enabled. If hedging is not enabled,
+    /// attribution will have no effect.
+    pub fn with_attribution(mut self, config: cs_domain::AttributionConfig) -> Self {
+        self.attribution_config = Some(config);
         self
     }
 
@@ -279,6 +292,12 @@ where
         let entry_spot = result.spot_at_entry();
         let exit_spot = result.spot_at_exit();
 
+        // Check if attribution is enabled
+        let attribution_enabled = self.attribution_config
+            .as_ref()
+            .map(|c| c.enabled)
+            .unwrap_or(false);
+
         // Create delta provider based on mode
         use cs_domain::DeltaComputation;
         use crate::delta_providers::*;
@@ -290,6 +309,7 @@ where
                     hedge_config.clone(),
                     $provider,
                     entry_spot,
+                    attribution_enabled,
                 );
 
                 // === UNIFIED HEDGING LOOP (no more duplication!) ===
@@ -360,14 +380,75 @@ where
             }
         };
 
+        // Compute attribution if enabled
+        let attribution = if attribution_enabled && hedge_position.rehedge_count() > 0 {
+            self.compute_attribution(
+                trade,
+                &hedge_position,
+                entry_time,
+                exit_time,
+                result.pnl(),
+            )
+            .await
+            .ok() // Errors are logged, don't fail the trade
+        } else {
+            None
+        };
+
         // Apply results
-        if hedge_position.rehedge_count() > 0 {
+        if hedge_position.rehedge_count() > 0 || attribution.is_some() {
             let hedge_pnl = hedge_position.calculate_pnl(exit_spot);
             let total_pnl = result.pnl() + hedge_pnl - hedge_position.total_cost;
-            result.apply_hedge_results(hedge_position, hedge_pnl, total_pnl, None);
+            result.apply_hedge_results(hedge_position, hedge_pnl, total_pnl, attribution);
         }
 
         Ok(())
+    }
+
+    /// Compute P&L attribution from hedge history
+    ///
+    /// Collects daily snapshots and attributes P&L to Greeks components.
+    async fn compute_attribution(
+        &self,
+        trade: &T,
+        hedge_position: &cs_domain::HedgePosition,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+        actual_pnl: Decimal,
+    ) -> Result<cs_domain::PositionAttribution, String> {
+        let attr_config = self.attribution_config.as_ref()
+            .ok_or("Attribution config not set")?;
+
+        let symbol = cs_domain::CompositeTrade::symbol(trade).to_string();
+        let contract_multiplier = self.hedge_config
+            .as_ref()
+            .map(|c| c.contract_multiplier)
+            .unwrap_or(100);
+
+        // Create snapshot collector
+        let mut collector = crate::attribution::SnapshotCollector::new(
+            trade.clone(),
+            self.options_repo.clone(),
+            self.equity_repo.clone(),
+            symbol,
+            attr_config.clone(),
+            contract_multiplier,
+            0.05, // risk_free_rate
+        );
+
+        // Set hedge timeline from completed hedging
+        collector.set_hedge_timeline(&hedge_position.hedges);
+
+        // TODO: Set entry vol for EntryIV/EntryHV modes
+        // This would require passing entry IV/HV from the hedging phase
+
+        // Collect daily snapshots
+        collector.collect(entry_time, exit_time).await?;
+
+        // Build attribution
+        collector
+            .build_attribution(actual_pnl)
+            .ok_or_else(|| "No snapshots collected for attribution".to_string())
     }
 
 
