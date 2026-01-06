@@ -35,10 +35,12 @@
 mod traits;
 mod types;
 mod generic_executor;
-mod straddle_impl;
-mod calendar_spread_impl;
-mod calendar_straddle_impl;
-mod iron_butterfly_impl;
+
+// Trade implementations (ExecutableTrade impls - these don't export the types themselves)
+pub(crate) mod straddle_impl;
+pub(crate) mod calendar_spread_impl;
+pub(crate) mod calendar_straddle_impl;
+pub(crate) mod iron_butterfly_impl;
 
 pub use traits::{TradePricer, ExecutableTrade};
 pub use types::{ExecutionConfig, ExecutionContext, ExecutionError};

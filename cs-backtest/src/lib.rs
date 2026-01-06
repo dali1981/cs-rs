@@ -12,6 +12,7 @@ pub mod iron_butterfly_pricer;
 pub mod calendar_straddle_pricer;
 pub mod trade_executor;  // Unified executor with rolling + hedging support
 pub mod trade_executor_factory;  // Factory for creating trade executors
+pub mod session_executor;  // Session-based executor for campaign execution
 pub mod trade_factory_impl;
 pub mod hedging_analytics;
 pub mod timing_strategy;
@@ -35,6 +36,9 @@ pub use execution::{ExecutableTrade, TradePricer, ExecutionConfig, ExecutionCont
 pub use timing_strategy::TimingStrategy;
 pub use trade_executor::TradeExecutor;
 pub use trade_executor_factory::TradeExecutorFactory;
+
+// Session-based execution
+pub use session_executor::{SessionExecutor, SessionResult, BatchResult};
 
 // Pricers
 pub use spread_pricer::{SpreadPricer, SpreadPricing, LegPricing, PricingError};

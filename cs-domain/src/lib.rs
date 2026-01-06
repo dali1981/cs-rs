@@ -20,6 +20,7 @@ pub mod trading_period;
 pub mod roll;
 pub mod strategy;
 pub mod trade;
+pub mod campaign;
 
 // Re-exports for convenience
 pub use datetime::{TradingDate, TradingTimestamp, MarketTime};
@@ -43,3 +44,7 @@ pub use trading_period::{TradingPeriod, TradingPeriodSpec, TimingError};
 pub use roll::{RollPolicy, RollEvent};
 pub use strategy::{TradeStrategy, TradeStructureConfig, TradeFilters, TradeStructure, FailedTrade};
 pub use trade::{RollableTrade, TradeResult, TradeConstructionError};
+pub use campaign::{
+    TradingCampaign, TradingSession, SessionAction, SessionContext,
+    EarningsTimingType, SessionSchedule, PeriodPolicy
+};
