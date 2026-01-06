@@ -23,7 +23,7 @@ pub mod trade;
 pub mod campaign;
 
 // Re-exports for convenience
-pub use datetime::{TradingDate, TradingTimestamp, MarketTime};
+pub use datetime::{TradingDate, TradingTimestamp, MarketTime, eastern_to_utc};
 pub use value_objects::*;
 pub use entities::*;
 pub use strike_selection::{

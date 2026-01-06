@@ -932,9 +932,120 @@ where
         rehedge_times: Vec<DateTime<Utc>>,
         rv_tracker: &mut Option<RealizedVolatilityTracker>,
     ) -> Result<cs_domain::HedgePosition, String> {
-        // For now, return error - this requires IV surface building
-        // which needs access to PricingModel configuration
-        Err("CurrentMarketIV mode not yet implemented - requires IV surface builder integration".to_string())
+        use crate::iv_surface_builder::build_iv_surface;
+        use cs_analytics::bs_delta;
+
+        let hedge_config = self.hedge_config.as_ref().unwrap();
+        let symbol = result.symbol();
+        let entry_spot = result.spot_at_entry();
+        let exit_spot = result.spot_at_exit();
+
+        // Initialize position tracking
+        let mut position = cs_domain::HedgePosition::new();
+        let mut current_shares = 0i32;
+
+        // Record entry spot for RV tracking
+        if let Some(ref mut tracker) = rv_tracker {
+            tracker.record(entry_time, entry_spot);
+        }
+
+        // Rehedge at specified times
+        for rehedge_time in rehedge_times {
+            if let Some(max) = hedge_config.max_rehedges {
+                if position.rehedge_count() >= max {
+                    break;
+                }
+            }
+
+            let spot = self.equity_repo
+                .get_spot_price(symbol, rehedge_time)
+                .await
+                .map_err(|e| format!("Failed to get spot at {}: {}", rehedge_time, e))?;
+
+            let spot_f64 = spot.to_f64();
+
+            // Track for RV computation
+            if let Some(ref mut tracker) = rv_tracker {
+                tracker.record(rehedge_time, spot_f64);
+            }
+
+            // Build IV surface at current time
+            let chain_df = self.options_repo
+                .get_option_bars(symbol, rehedge_time.date_naive())
+                .await
+                .map_err(|e| format!("Failed to get option chain at {}: {}", rehedge_time, e))?;
+
+            let iv_surface = build_iv_surface(&chain_df, spot_f64, rehedge_time, symbol)
+                .ok_or_else(|| format!("Failed to build IV surface at {}", rehedge_time))?;
+
+            // Compute position delta using current market IVs
+            let mut position_delta = 0.0;
+            for (leg, leg_position) in trade.legs() {
+                let tte = (leg.expiration - rehedge_time.date_naive()).num_days() as f64 / 365.0;
+                if tte <= 0.0 {
+                    continue;
+                }
+
+                let strike_f64 = leg.strike.value().to_f64().unwrap_or(0.0);
+                let is_call = leg.option_type == finq_core::OptionType::Call;
+
+                // Get IV from surface for this specific leg
+                let leg_iv = iv_surface
+                    .get_iv(leg.strike.value(), leg.expiration, is_call)
+                    .unwrap_or(0.30); // Fallback to 30% if not found
+
+                let leg_delta = bs_delta(spot_f64, strike_f64, tte, leg_iv, is_call, 0.05);
+                position_delta += leg_delta * leg_position.sign() * hedge_config.contract_multiplier as f64;
+            }
+
+            // Calculate net delta
+            let stock_delta = current_shares as f64 / hedge_config.contract_multiplier as f64;
+            let net_delta = position_delta + stock_delta;
+
+            // Check if rehedge is needed
+            if !hedge_config.should_rehedge(net_delta, spot_f64, 0.0) {
+                continue;
+            }
+
+            // Calculate shares needed
+            let shares = hedge_config.shares_to_hedge(net_delta);
+            if shares == 0 {
+                continue;
+            }
+
+            let delta_before = net_delta;
+            current_shares += shares;
+            let stock_delta_after = current_shares as f64 / hedge_config.contract_multiplier as f64;
+            let delta_after = position_delta + stock_delta_after;
+
+            let action = cs_domain::HedgeAction {
+                timestamp: rehedge_time,
+                shares,
+                spot_price: spot_f64,
+                delta_before,
+                delta_after,
+                cost: hedge_config.transaction_cost_per_share * Decimal::from(shares.abs()),
+            };
+
+            position.add_hedge(action);
+        }
+
+        // Record exit spot
+        if let Some(ref mut tracker) = rv_tracker {
+            tracker.record(exit_time, exit_spot);
+        }
+
+        // Finalize position
+        position.unrealized_pnl = position.calculate_pnl(exit_spot);
+
+        // Attach RV metrics if tracking is enabled
+        if let Some(tracker) = rv_tracker.take() {
+            let exit_iv = result.exit_iv().map(|iv| iv.primary);
+            position.spot_history = tracker.spot_history.clone();
+            position.realized_vol_metrics = Some(tracker.finalize(exit_iv));
+        }
+
+        Ok(position)
     }
 
     /// Hedge using Historical Average IV
@@ -948,8 +1059,207 @@ where
         lookback_days: u32,
         rv_tracker: &mut Option<RealizedVolatilityTracker>,
     ) -> Result<cs_domain::HedgePosition, String> {
-        // For now, return error - this requires historical IV data
-        Err("HistoricalAverageIV mode not yet implemented - requires historical IV database".to_string())
+        use crate::iv_surface_builder::build_iv_surface;
+        use cs_analytics::bs_delta;
+
+        let hedge_config = self.hedge_config.as_ref().unwrap();
+        let symbol = result.symbol();
+        let entry_spot = result.spot_at_entry();
+        let exit_spot = result.spot_at_exit();
+
+        // Initialize position tracking
+        let mut position = cs_domain::HedgePosition::new();
+        let mut current_shares = 0i32;
+
+        // Record entry spot for RV tracking
+        if let Some(ref mut tracker) = rv_tracker {
+            tracker.record(entry_time, entry_spot);
+        }
+
+        // Rehedge at specified times
+        for rehedge_time in rehedge_times {
+            if let Some(max) = hedge_config.max_rehedges {
+                if position.rehedge_count() >= max {
+                    break;
+                }
+            }
+
+            let spot = self.equity_repo
+                .get_spot_price(symbol, rehedge_time)
+                .await
+                .map_err(|e| format!("Failed to get spot at {}: {}", rehedge_time, e))?;
+
+            let spot_f64 = spot.to_f64();
+
+            // Track for RV computation
+            if let Some(ref mut tracker) = rv_tracker {
+                tracker.record(rehedge_time, spot_f64);
+            }
+
+            // Compute historical average IV for each leg
+            let mut position_delta = 0.0;
+            for (leg, leg_position) in trade.legs() {
+                let tte = (leg.expiration - rehedge_time.date_naive()).num_days() as f64 / 365.0;
+                if tte <= 0.0 {
+                    continue;
+                }
+
+                // Compute average IV for this leg over lookback window
+                let avg_iv = self.compute_historical_average_iv_for_leg(
+                    symbol,
+                    leg.strike.value(),
+                    leg.expiration,
+                    leg.option_type == finq_core::OptionType::Call,
+                    rehedge_time.date_naive(),
+                    lookback_days,
+                )
+                .await
+                .unwrap_or(0.30); // Fallback to 30% if computation fails
+
+                let strike_f64 = leg.strike.value().to_f64().unwrap_or(0.0);
+                let is_call = leg.option_type == finq_core::OptionType::Call;
+
+                let leg_delta = bs_delta(spot_f64, strike_f64, tte, avg_iv, is_call, 0.05);
+                position_delta += leg_delta * leg_position.sign() * hedge_config.contract_multiplier as f64;
+            }
+
+            // Calculate net delta
+            let stock_delta = current_shares as f64 / hedge_config.contract_multiplier as f64;
+            let net_delta = position_delta + stock_delta;
+
+            // Check if rehedge is needed
+            if !hedge_config.should_rehedge(net_delta, spot_f64, 0.0) {
+                continue;
+            }
+
+            // Calculate shares needed
+            let shares = hedge_config.shares_to_hedge(net_delta);
+            if shares == 0 {
+                continue;
+            }
+
+            let delta_before = net_delta;
+            current_shares += shares;
+            let stock_delta_after = current_shares as f64 / hedge_config.contract_multiplier as f64;
+            let delta_after = position_delta + stock_delta_after;
+
+            let action = cs_domain::HedgeAction {
+                timestamp: rehedge_time,
+                shares,
+                spot_price: spot_f64,
+                delta_before,
+                delta_after,
+                cost: hedge_config.transaction_cost_per_share * Decimal::from(shares.abs()),
+            };
+
+            position.add_hedge(action);
+        }
+
+        // Record exit spot
+        if let Some(ref mut tracker) = rv_tracker {
+            tracker.record(exit_time, exit_spot);
+        }
+
+        // Finalize position
+        position.unrealized_pnl = position.calculate_pnl(exit_spot);
+
+        // Attach RV metrics if tracking is enabled
+        if let Some(tracker) = rv_tracker.take() {
+            let exit_iv = result.exit_iv().map(|iv| iv.primary);
+            position.spot_history = tracker.spot_history.clone();
+            position.realized_vol_metrics = Some(tracker.finalize(exit_iv));
+        }
+
+        Ok(position)
+    }
+
+    /// Compute historical average IV for a specific leg over lookback window
+    async fn compute_historical_average_iv_for_leg(
+        &self,
+        symbol: &str,
+        strike: Decimal,
+        expiration: NaiveDate,
+        is_call: bool,
+        current_date: NaiveDate,
+        lookback_days: u32,
+    ) -> Result<f64, String> {
+        use crate::iv_surface_builder::build_iv_surface;
+        use cs_domain::TradingCalendar;
+
+        let end_date = current_date;
+        let start_date = current_date - chrono::Duration::days(lookback_days as i64);
+
+        let trading_days: Vec<NaiveDate> = TradingCalendar::trading_days_between(start_date, end_date)
+            .collect();
+
+        if trading_days.is_empty() {
+            return Err("No trading days in lookback window".to_string());
+        }
+
+        let mut ivs = Vec::new();
+
+        // Sample IVs from historical days (limit to avoid performance issues)
+        let sample_size = trading_days.len().min(10); // Sample at most 10 days
+        let step = if trading_days.len() > sample_size {
+            trading_days.len() / sample_size
+        } else {
+            1
+        };
+
+        for (idx, date) in trading_days.iter().enumerate() {
+            if idx % step != 0 {
+                continue; // Skip non-sampled days
+            }
+
+            // Get option chain for this historical day
+            let chain_df = match self.options_repo.get_option_bars(symbol, *date).await {
+                Ok(df) => df,
+                Err(_) => continue, // Skip days with missing data
+            };
+
+            // Get spot price for this day (use close price from bars)
+            let bars_df = match self.equity_repo.get_bars(symbol, *date).await {
+                Ok(df) => df,
+                Err(_) => continue,
+            };
+
+            // Extract close price as spot (last bar's close)
+            let spot = if let Ok(close_series) = bars_df.column("close") {
+                if let Ok(close_values) = close_series.f64() {
+                    if let Some(last_close) = close_values.last() {
+                        last_close
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            } else {
+                continue;
+            };
+
+            // Build IV surface
+            let pricing_time = cs_domain::eastern_to_utc(
+                *date,
+                cs_domain::MarketTime::DEFAULT_ENTRY.to_naive_time(),
+            );
+            let iv_surface = match build_iv_surface(&chain_df, spot, pricing_time, symbol) {
+                Some(surface) => surface,
+                None => continue,
+            };
+
+            // Get IV for this specific leg
+            if let Some(iv) = iv_surface.get_iv(strike, expiration, is_call) {
+                ivs.push(iv);
+            }
+        }
+
+        if ivs.is_empty() {
+            return Err("Could not compute historical IV - no valid data points".to_string());
+        }
+
+        // Return average IV
+        Ok(ivs.iter().sum::<f64>() / ivs.len() as f64)
     }
 
     /// Compute HV at a specific time using recent price history
