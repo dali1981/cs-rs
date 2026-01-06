@@ -318,6 +318,8 @@ impl AppConfig {
             min_hedge_size: 1,
             transaction_cost_per_share: Decimal::try_from(self.hedging.cost_per_share).unwrap_or(Decimal::ZERO),
             contract_multiplier: 100,
+            delta_computation: cs_domain::DeltaComputation::default(),
+            track_realized_vol: false,
         }
     }
 }

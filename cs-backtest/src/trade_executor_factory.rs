@@ -85,7 +85,7 @@ impl TradeExecutorFactory {
 
     fn build_executor<T>(&self, pricer: T::Pricer) -> TradeExecutor<T>
     where
-        T: RollableTrade + ExecutableTrade,
+        T: RollableTrade + ExecutableTrade + cs_domain::CompositeTrade,
     {
         let mut executor = TradeExecutor::<T>::new(
             self.options_repo.clone(),

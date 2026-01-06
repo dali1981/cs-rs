@@ -43,7 +43,7 @@ pub use expiration::{ExpirationCycle, ExpirationPolicy};
 pub use trading_period::{TradingPeriod, TradingPeriodSpec, TimingError};
 pub use roll::{RollPolicy, RollEvent};
 pub use strategy::{TradeStrategy, TradeStructureConfig, TradeFilters, TradeStructure, FailedTrade};
-pub use trade::{RollableTrade, TradeResult, TradeConstructionError};
+pub use trade::{RollableTrade, TradeResult, TradeConstructionError, CompositeTrade, LegPosition};
 pub use campaign::{
     TradingCampaign, TradingSession, SessionAction, SessionContext,
     EarningsTimingType, SessionSchedule, PeriodPolicy

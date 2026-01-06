@@ -42,6 +42,8 @@ pub fn pre_earnings_straddle_hedged() -> TradeStrategy {
         min_hedge_size: 10,
         transaction_cost_per_share: rust_decimal::Decimal::new(1, 2), // $0.01
         contract_multiplier: CONTRACT_MULTIPLIER,
+        delta_computation: crate::hedging::DeltaComputation::default(),
+        track_realized_vol: false,
     };
     strategy
 }

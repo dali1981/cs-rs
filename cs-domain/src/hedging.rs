@@ -22,6 +22,14 @@ pub struct HedgePosition {
     pub realized_pnl: Decimal,    // P&L from closed hedge portions
     pub unrealized_pnl: Decimal,  // P&L from open hedge position
     pub total_cost: Decimal,      // Sum of transaction costs
+
+    /// Spot observations during hedging (for RV computation)
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub spot_history: Vec<(DateTime<Utc>, f64)>,
+
+    /// Realized volatility metrics (computed at finalize)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub realized_vol_metrics: Option<RealizedVolatilityMetrics>,
 }
 
 impl HedgePosition {
@@ -99,6 +107,14 @@ pub struct HedgeConfig {
     pub min_hedge_size: i32,          // Minimum shares to trade
     pub transaction_cost_per_share: Decimal, // Cost per share traded
     pub contract_multiplier: i32,     // Usually 100 for options
+
+    /// How to compute delta for rehedge decisions (default: GammaApproximation)
+    #[serde(default)]
+    pub delta_computation: DeltaComputation,
+
+    /// Whether to compute and report realized volatility metrics
+    #[serde(default)]
+    pub track_realized_vol: bool,
 }
 
 impl Default for HedgeConfig {
@@ -109,6 +125,8 @@ impl Default for HedgeConfig {
             min_hedge_size: 1,
             transaction_cost_per_share: Decimal::ZERO,
             contract_multiplier: CONTRACT_MULTIPLIER,
+            delta_computation: DeltaComputation::default(),
+            track_realized_vol: false,
         }
     }
 }
@@ -275,5 +293,184 @@ impl HedgeState {
         // Calculate unrealized P&L
         self.position.unrealized_pnl = self.position.calculate_pnl(exit_spot);
         self.position
+    }
+}
+
+// =============================================================================
+// Delta Computation Modes
+// =============================================================================
+
+/// How to compute delta for hedging decisions
+///
+/// This determines the method used to calculate the position delta when deciding
+/// whether to rehedge and how many shares to trade.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case", tag = "mode")]
+pub enum DeltaComputation {
+    /// Use gamma × ΔS approximation (fast, current behavior)
+    ///
+    /// Delta evolves incrementally: δ' = δ + γ × (S' - S)
+    /// This is the fastest method but assumes constant gamma.
+    GammaApproximation,
+
+    /// Recompute from IV at trade entry
+    ///
+    /// Uses Black-Scholes with entry IV, current spot, and remaining DTE.
+    /// More accurate than gamma approximation but still uses stale IV.
+    EntryIV {
+        /// IV interpolation model (not stored in enum for simplicity - will be passed separately)
+        /// We mark this field as skipped and use PricingModel from analytics
+        #[serde(skip)]
+        _marker: (),
+    },
+
+    /// Recompute from current market IV surface
+    ///
+    /// Most accurate method - builds fresh IV surface at each rehedge.
+    /// Expensive as it requires market data lookups.
+    CurrentMarketIV {
+        #[serde(skip)]
+        _marker: (),
+    },
+
+    /// Use Historical Volatility at trade entry for delta computation
+    ///
+    /// HV is computed from underlying price history, not options market.
+    EntryHV {
+        /// Lookback window in days (e.g., 20 for 20-day HV)
+        window: u32,
+    },
+
+    /// Recompute HV at each rehedge from recent underlying prices
+    ///
+    /// Tracks actual underlying volatility evolution.
+    CurrentHV {
+        /// Lookback window in days
+        window: u32,
+    },
+
+    /// Use historical average IV over lookback period
+    ///
+    /// Smooths out IV noise by averaging recent market IV values.
+    HistoricalAverageIV {
+        /// Lookback period in days
+        lookback_days: u32,
+        #[serde(skip)]
+        _marker: (),
+    },
+}
+
+impl Default for DeltaComputation {
+    fn default() -> Self {
+        // Match current behavior: gamma approximation
+        DeltaComputation::GammaApproximation
+    }
+}
+
+// =============================================================================
+// Realized Volatility Metrics
+// =============================================================================
+
+/// Realized volatility metrics computed during hedging
+///
+/// Provides comprehensive volatility analysis comparing implied vs realized volatility
+/// over the hedging period.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RealizedVolatilityMetrics {
+    /// Entry HV (Historical Volatility at trade entry)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_hv: Option<f64>,
+
+    /// Realized volatility during holding period
+    ///
+    /// Computed from actual spot price moves during hedging.
+    /// This is the "actual" volatility that occurred.
+    pub realized_vol: f64,
+
+    /// IV at entry (for comparison)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_iv: Option<f64>,
+
+    /// IV at exit
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_iv: Option<f64>,
+
+    /// Volatility of volatility (optional advanced metric)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vol_of_vol: Option<f64>,
+
+    /// Number of observations used for computation
+    pub num_observations: usize,
+
+    /// IV premium/discount at entry: (entry_iv - entry_hv) / entry_hv × 100
+    ///
+    /// Positive = IV was rich (premium), Negative = IV was cheap (discount)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iv_premium_at_entry: Option<f64>,
+
+    /// Realized vs Entry IV: (realized_vol - entry_iv) / entry_iv × 100
+    ///
+    /// Positive = actual moves exceeded implied, Negative = actual moves less than implied
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub realized_vs_implied: Option<f64>,
+}
+
+impl RealizedVolatilityMetrics {
+    /// Create metrics from spot observations
+    ///
+    /// Uses the realized_volatility function from cs-analytics to compute
+    /// the actual volatility from the spot history.
+    pub fn from_spot_history(
+        spots: &[(DateTime<Utc>, f64)],
+        entry_hv: Option<f64>,
+        entry_iv: Option<f64>,
+        exit_iv: Option<f64>,
+    ) -> Self {
+        // Extract prices in chronological order
+        let prices: Vec<f64> = spots.iter().map(|(_, price)| *price).collect();
+
+        // Compute realized vol over the full period
+        // Note: We'll need to import realized_volatility from cs-analytics
+        // For now, stub with 0.0 - this will be implemented in Phase 2
+        let realized_vol = if prices.len() >= 2 {
+            // Simple std dev calculation as placeholder
+            let returns: Vec<f64> = prices
+                .windows(2)
+                .map(|w| (w[1] / w[0]).ln())
+                .collect();
+
+            if returns.is_empty() {
+                0.0
+            } else {
+                let mean = returns.iter().sum::<f64>() / returns.len() as f64;
+                let variance = returns.iter()
+                    .map(|r| (r - mean).powi(2))
+                    .sum::<f64>() / returns.len() as f64;
+                variance.sqrt() * 252.0_f64.sqrt() // Annualize
+            }
+        } else {
+            0.0
+        };
+
+        let iv_premium_at_entry = match (entry_iv, entry_hv) {
+            (Some(iv), Some(hv)) if hv > 0.0 => Some((iv - hv) / hv * 100.0),
+            _ => None,
+        };
+
+        let realized_vs_implied = match entry_iv {
+            Some(iv) if iv > 0.0 => Some((realized_vol - iv) / iv * 100.0),
+            _ => None,
+        };
+
+        Self {
+            entry_hv,
+            realized_vol,
+            entry_iv,
+            exit_iv,
+            vol_of_vol: None, // Can be computed if needed
+            num_observations: prices.len(),
+            iv_premium_at_entry,
+            realized_vs_implied,
+        }
     }
 }
