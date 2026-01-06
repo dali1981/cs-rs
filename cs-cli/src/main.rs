@@ -167,6 +167,15 @@ enum Commands {
         /// Transaction cost per share (default: 0.01)
         #[arg(long, default_value = "0.01")]
         hedge_cost_per_share: f64,
+        /// Delta computation mode: gamma, entry-hv, entry-iv, current-hv, current-iv, historical-iv (default: gamma)
+        #[arg(long, default_value = "gamma")]
+        hedge_delta_mode: String,
+        /// HV window for HV-based delta modes (default: 20 days)
+        #[arg(long, default_value = "20")]
+        hv_window: u32,
+        /// Enable realized volatility tracking during hedging
+        #[arg(long)]
+        track_realized_vol: bool,
         /// Rolling strategy (weekly, monthly, or days:N) - only for straddle spreads
         #[arg(long)]
         roll_strategy: Option<String>,
@@ -380,6 +389,9 @@ async fn main() -> Result<()> {
             delta_threshold,
             max_rehedges,
             hedge_cost_per_share,
+            hedge_delta_mode,
+            hv_window,
+            track_realized_vol,
             roll_strategy,
             roll_day,
         } => {
@@ -425,6 +437,9 @@ async fn main() -> Result<()> {
                 delta_threshold,
                 max_rehedges,
                 hedge_cost_per_share,
+                hedge_delta_mode,
+                hv_window,
+                track_realized_vol,
                 roll_strategy,
                 roll_day,
             )
@@ -928,6 +943,9 @@ fn build_cli_overrides(
     delta_threshold: Option<f64>,
     max_rehedges: Option<usize>,
     hedge_cost_per_share: Option<f64>,
+    hedge_delta_mode: Option<String>,
+    hv_window: Option<u32>,
+    track_realized_vol: bool,
 ) -> Result<CliOverrides> {
     // Parse delta range if provided
     let delta_range = if let Some(ref range_str) = delta_range_str {
@@ -998,7 +1016,7 @@ fn build_cli_overrides(
         } else {
             None
         },
-        hedging: if hedge || hedge_strategy.is_some() || hedge_interval_hours.is_some() || delta_threshold.is_some() || max_rehedges.is_some() || hedge_cost_per_share.is_some() {
+        hedging: if hedge || hedge_strategy.is_some() || hedge_interval_hours.is_some() || delta_threshold.is_some() || max_rehedges.is_some() || hedge_cost_per_share.is_some() || hedge_delta_mode.is_some() || hv_window.is_some() || track_realized_vol {
             Some(CliHedging {
                 enabled: Some(hedge),
                 strategy: hedge_strategy,
@@ -1006,9 +1024,9 @@ fn build_cli_overrides(
                 delta_threshold,
                 max_rehedges,
                 cost_per_share: hedge_cost_per_share,
-                delta_mode: None,  // TODO: Add CLI flag
-                hv_window: None,  // TODO: Add CLI flag
-                track_realized_vol: None,  // TODO: Add CLI flag
+                delta_mode: hedge_delta_mode,
+                hv_window,
+                track_realized_vol: if track_realized_vol { Some(true) } else { None },
             })
         } else {
             None
@@ -1064,6 +1082,9 @@ async fn run_backtest(
     delta_threshold: f64,
     max_rehedges: Option<usize>,
     hedge_cost_per_share: f64,
+    hedge_delta_mode: String,
+    hv_window: u32,
+    track_realized_vol: bool,
     roll_strategy_str: Option<String>,
     roll_day_str: Option<String>,
 ) -> Result<()> {
@@ -1281,6 +1302,9 @@ async fn run_backtest(
         Some(delta_threshold),
         max_rehedges,
         Some(hedge_cost_per_share),
+        Some(hedge_delta_mode),
+        Some(hv_window),
+        track_realized_vol,
     )?;
 
     // Load configuration with layering
