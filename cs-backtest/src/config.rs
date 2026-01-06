@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 use cs_analytics::{PricingModel, InterpolationMode};
-use cs_domain::{TimingConfig, TradeSelectionCriteria, StrikeMatchMode, HedgeConfig};
+use cs_domain::{TimingConfig, TradeSelectionCriteria, StrikeMatchMode, HedgeConfig, AttributionConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestConfig {
@@ -65,6 +65,9 @@ pub struct BacktestConfig {
     /// Delta hedging configuration
     #[serde(default)]
     pub hedge_config: HedgeConfig,
+    /// P&L attribution configuration (optional)
+    #[serde(default)]
+    pub attribution_config: Option<AttributionConfig>,
 }
 
 fn default_wing_width() -> f64 {
@@ -178,6 +181,7 @@ impl Default for BacktestConfig {
             max_entry_price: None, // No filtering by default
             post_earnings_holding_days: default_post_earnings_holding_days(),
             hedge_config: HedgeConfig::default(), // No hedging by default
+            attribution_config: None, // No attribution by default
         }
     }
 }

@@ -560,6 +560,22 @@ where
 
             roll_reason,
             position_attribution: None,
+
+            // Extract realized vol metrics from hedge position (Phase 1c)
+            realized_vol_metrics: result.hedge_position()
+                .and_then(|hp| hp.realized_vol_metrics.clone()),
+
+            // Extract capital metrics from hedge position (Phase 2b)
+            hedge_capital: result.hedge_position().map(|hp| {
+                use cs_domain::entities::rolling_result::HedgeCapitalMetrics;
+                HedgeCapitalMetrics {
+                    peak_long_shares: hp.peak_long_shares,
+                    peak_short_shares: hp.peak_short_shares,
+                    avg_hedge_price: hp.avg_hedge_price,
+                    long_capital: hp.long_hedge_capital(),
+                    short_margin: hp.short_hedge_margin(0.5),  // 50% margin
+                }
+            }),
         }
     }
 

@@ -13,7 +13,7 @@ use anyhow::Result;
 
 use cs_backtest::{SpreadType, SelectionType};
 use cs_analytics::{PricingModel, InterpolationMode};
-use cs_domain::StrikeMatchMode;
+use cs_domain::{StrikeMatchMode, AttributionConfig};
 use crate::cli_args::CliOverrides;
 
 /// Full layered configuration
@@ -26,6 +26,7 @@ pub struct AppConfig {
     pub strategy: StrategyConfig,
     pub pricing: PricingConfig,
     pub hedging: HedgingConfig,
+    pub attribution: AttributionConfig,
     #[serde(default)]
     pub strike_match_mode: StrikeMatchMode,
     pub symbols: Option<Vec<String>>,
@@ -113,6 +114,7 @@ impl Default for AppConfig {
             strategy: StrategyConfig::default(),
             pricing: PricingConfig::default(),
             hedging: HedgingConfig::default(),
+            attribution: AttributionConfig::default(),
             strike_match_mode: StrikeMatchMode::default(),
             symbols: None,
             min_market_cap: None,
@@ -292,6 +294,11 @@ impl AppConfig {
             max_entry_price: self.strategy.max_entry_price,
             post_earnings_holding_days: self.strategy.post_earnings_holding_days,
             hedge_config: self.hedging_to_domain_config(),
+            attribution_config: if self.attribution.enabled {
+                Some(self.attribution.clone())
+            } else {
+                None
+            },
         }
     }
 
@@ -346,7 +353,8 @@ impl AppConfig {
             transaction_cost_per_share: Decimal::try_from(self.hedging.cost_per_share).unwrap_or(Decimal::ZERO),
             contract_multiplier: 100,
             delta_computation,
-            track_realized_vol: self.hedging.track_realized_vol,
+            // Auto-enable RV tracking when attribution is enabled (attribution needs vol data)
+            track_realized_vol: self.hedging.track_realized_vol || self.attribution.enabled,
         }
     }
 }

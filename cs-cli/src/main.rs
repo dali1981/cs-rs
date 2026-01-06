@@ -645,6 +645,11 @@ async fn run_rolling_straddle(
             backtest_config.hedge_config.clone(),
             timing_strategy,
         );
+
+        // Apply attribution if enabled (requires hedging)
+        if let Some(ref attr_config) = backtest_config.attribution_config {
+            rolling_executor = rolling_executor.with_attribution(attr_config.clone());
+        }
     }
 
     // Define entry and exit times
@@ -703,6 +708,48 @@ fn display_rolling_results(result: &cs_domain::RollingResult) {
     println!("  Win Rate:             {:.1}%", result.win_rate * 100.0);
     println!("  Avg P&L per Roll:     ${:.2}", result.avg_roll_pnl);
     println!("  Max Drawdown:         ${:.2}", result.max_drawdown);
+
+    // Volatility Summary (Phase 1e)
+    if let Some(ref vol) = result.volatility_summary {
+        println!();
+        println!("{}", style("Volatility Summary:").bold());
+        if let Some(iv) = vol.avg_entry_iv {
+            println!("  Avg Entry IV:         {:.1}%", iv * 100.0);
+        }
+        if let Some(hv) = vol.avg_entry_hv {
+            println!("  Avg Entry HV:         {:.1}%", hv * 100.0);
+        }
+        if let Some(rv) = vol.avg_realized_vol {
+            println!("  Avg Realized Vol:     {:.1}%", rv * 100.0);
+        }
+        if let Some(prem) = vol.avg_iv_premium {
+            let sign = if prem >= 0.0 { "+" } else { "" };
+            println!("  IV Premium (avg):     {}{:.0}% (IV vs HV)", sign, prem * 100.0);
+        }
+        if let Some(diff) = vol.avg_realized_vs_implied {
+            let sign = if diff >= 0.0 { "+" } else { "" };
+            println!("  RV vs IV (avg):       {}{:.0}%", sign, diff * 100.0);
+        }
+        println!("  Rolls with vol data:  {}/{}", vol.rolls_with_vol_data, result.num_rolls);
+    }
+
+    // Capital Metrics (Phase 2e)
+    if let Some(ref cap) = result.capital_summary {
+        println!();
+        println!("{}", style("Capital Metrics:").bold());
+        println!("  Option Premium:       ${:.2}", cap.total_option_premium);
+        if cap.peak_hedge_capital > rust_decimal::Decimal::ZERO {
+            println!("  Peak Hedge Capital:   ${:.2}", cap.peak_hedge_capital);
+        }
+        if cap.peak_hedge_margin > rust_decimal::Decimal::ZERO {
+            println!("  Peak Hedge Margin:    ${:.2}", cap.peak_hedge_margin);
+        }
+        println!("  Total Capital Req:    ${:.2}", cap.total_capital_required);
+        println!();
+        println!("  Return on Capital:    {:.1}%", cap.return_on_capital);
+        println!("  Annualized Return:    {:.1}%", cap.annualized_return);
+        println!("  Holding Period:       {} days", cap.holding_days);
+    }
     println!();
 
     // Show individual rolls
@@ -851,6 +898,22 @@ fn display_rolling_results(result: &cs_domain::RollingResult) {
             println!("  {}", style("Hedge Δ P&L: Stock hedge P&L").dim());
             println!("  {}", style("Net Δ P&L: Combined delta P&L (Gross + Hedge)").dim());
             println!("  {}", style("Hedge Eff.: |Hedge Δ| / |Gross Δ| × 100%").dim());
+
+            // Attribution Summary (Phase 3c)
+            if let Some(ref attr) = result.attribution_summary {
+                println!();
+                println!("{}", style("Attribution Summary:").bold());
+                println!("  Gross Delta P&L:  ${:.2}", attr.total_gross_delta_pnl);
+                println!("  Hedge Delta P&L:  ${:.2}", attr.total_hedge_delta_pnl);
+                println!("  Net Delta P&L:    ${:.2}", attr.total_net_delta_pnl);
+                println!("  Gamma P&L:        ${:.2}", attr.total_gamma_pnl);
+                println!("  Theta P&L:        ${:.2}", attr.total_theta_pnl);
+                println!("  Vega P&L:         ${:.2}", attr.total_vega_pnl);
+                println!("  Unexplained:      ${:.2}", attr.total_unexplained);
+                println!();
+                println!("  Avg Hedge Eff:    {:.1}%", attr.avg_hedge_efficiency);
+                println!("  Rolls with attr:  {}/{}", attr.rolls_with_attribution, result.num_rolls);
+            }
         } else if has_legacy_attribution {
             // Display legacy attribution (non-hedged)
             println!();

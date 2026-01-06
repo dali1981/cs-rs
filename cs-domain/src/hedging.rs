@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use crate::CONTRACT_MULTIPLIER;
 
 /// A single hedge transaction
@@ -31,6 +32,17 @@ pub struct HedgePosition {
     /// Realized volatility metrics (computed at finalize)
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub realized_vol_metrics: Option<RealizedVolatilityMetrics>,
+
+    // Capital tracking (Phase 2a)
+    /// Peak long shares held during hedging
+    #[serde(default)]
+    pub peak_long_shares: i32,
+    /// Peak short shares held during hedging (absolute value)
+    #[serde(default)]
+    pub peak_short_shares: i32,
+    /// Average hedge price (for capital computation)
+    #[serde(default)]
+    pub avg_hedge_price: f64,
 }
 
 impl HedgePosition {
@@ -42,6 +54,15 @@ impl HedgePosition {
     pub fn add_hedge(&mut self, action: HedgeAction) {
         self.cumulative_shares += action.shares;
         self.total_cost += action.cost;
+
+        // Track peak shares (Phase 2a)
+        if self.cumulative_shares > self.peak_long_shares {
+            self.peak_long_shares = self.cumulative_shares;
+        }
+        if self.cumulative_shares < 0 && self.cumulative_shares.abs() > self.peak_short_shares {
+            self.peak_short_shares = self.cumulative_shares.abs();
+        }
+
         self.hedges.push(action);
     }
 
@@ -74,6 +95,26 @@ impl HedgePosition {
         } else {
             Some(total_value / total_shares as f64)
         }
+    }
+
+    /// Compute average hedge price and store it (Phase 2a)
+    pub fn compute_avg_hedge_price(&mut self) {
+        if let Some(avg) = self.average_hedge_price() {
+            self.avg_hedge_price = avg;
+        }
+    }
+
+    /// Compute capital required for long hedge position (Phase 2a)
+    pub fn long_hedge_capital(&self) -> Decimal {
+        Decimal::from(self.peak_long_shares) * Decimal::try_from(self.avg_hedge_price).unwrap_or_default()
+    }
+
+    /// Compute margin required for short hedge position (Phase 2a)
+    /// Default margin rate is 0.5 (50%)
+    pub fn short_hedge_margin(&self, margin_rate: f64) -> Decimal {
+        Decimal::from(self.peak_short_shares)
+            * Decimal::try_from(self.avg_hedge_price).unwrap_or_default()
+            * Decimal::try_from(margin_rate).unwrap_or(Decimal::from_str("0.5").unwrap())
     }
 }
 
@@ -503,6 +544,9 @@ impl<P: DeltaProvider> GenericHedgeState<P> {
     /// Finalize and compute P&L
     pub fn finalize(mut self, exit_spot: f64, entry_iv: Option<f64>, exit_iv: Option<f64>) -> HedgePosition {
         self.position.unrealized_pnl = self.position.calculate_pnl(exit_spot);
+
+        // Compute average hedge price for capital metrics
+        self.position.compute_avg_hedge_price();
 
         // Compute RV metrics if tracking was enabled
         if self.track_rv && !self.spot_history.is_empty() {
