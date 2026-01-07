@@ -179,11 +179,11 @@ enum Commands {
         /// Enable P&L attribution (requires --hedge)
         #[arg(long)]
         attribution: bool,
-        /// Volatility source for attribution: current-iv, current-hv, entry-iv, entry-hv (default: current-iv)
-        #[arg(long, default_value = "current-iv")]
+        /// Volatility source for attribution: current_market_iv, current_hv, entry_iv, entry_hv, historical_average_iv (default: current_market_iv)
+        #[arg(long, default_value = "current_market_iv")]
         attribution_vol_source: String,
-        /// Attribution snapshot times: open-close, close-only (default: open-close)
-        #[arg(long, default_value = "open-close")]
+        /// Attribution snapshot times: open_close, close_only (default: open_close)
+        #[arg(long, default_value = "open_close")]
         attribution_snapshots: String,
         /// Rolling strategy (weekly, monthly, or days:N) - only for straddle spreads
         #[arg(long)]

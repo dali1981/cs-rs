@@ -147,10 +147,10 @@ pub struct CliAttribution {
     /// Enable P&L attribution (requires hedging to be enabled)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    /// Volatility source for Greeks recomputation: current-iv, current-hv, entry-iv, entry-hv
+    /// Volatility source for Greeks recomputation: current_market_iv, current_hv, entry_iv, entry_hv, historical_average_iv
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vol_source: Option<String>,
-    /// Snapshot times: open-close or close-only
+    /// Snapshot times: open_close or close_only
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot_times: Option<String>,
 }

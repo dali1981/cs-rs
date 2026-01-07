@@ -13,7 +13,7 @@ use anyhow::Result;
 
 use cs_backtest::{SpreadType, SelectionType};
 use cs_analytics::{PricingModel, InterpolationMode};
-use cs_domain::{StrikeMatchMode, AttributionConfig};
+use cs_domain::{StrikeMatchMode, AttributionConfig, VolatilitySource, SnapshotTimes};
 use crate::cli_args::CliOverrides;
 
 /// Full layered configuration
@@ -207,11 +207,14 @@ impl Default for HedgingConfig {
 /// Load configuration with full layering
 pub fn load_config(
     conf_files: &[PathBuf],
-    cli_overrides: CliOverrides,
+    mut cli_overrides: CliOverrides,
 ) -> Result<AppConfig> {
     let system_config = dirs::config_dir()
         .map(|p| p.join("cs/system.toml"))
         .unwrap_or_else(|| PathBuf::from("~/.config/cs/system.toml"));
+
+    // Extract and store attribution CLI overrides before removing them from figment merge
+    let cli_attribution = cli_overrides.attribution.take();
 
     let mut figment = Figment::new()
         // 1. Code defaults (lowest priority)
@@ -227,17 +230,70 @@ pub fn load_config(
         figment = figment.merge(Toml::file(conf_path));
     }
 
-    // 4. CLI overrides (highest priority)
+    // 4. CLI overrides (highest priority) - without attribution to avoid deserialization issues
     figment = figment.merge(Serialized::defaults(cli_overrides));
 
     // Extract and post-process
     let mut config: AppConfig = figment.extract()?;
+
+    // 5. Apply attribution CLI overrides manually (converting strings to enums)
+    if let Some(cli_attr) = cli_attribution {
+        if let Some(enabled) = cli_attr.enabled {
+            config.attribution.enabled = enabled;
+        }
+        if let Some(vol_source_str) = cli_attr.vol_source {
+            config.attribution.vol_source = parse_volatility_source(&vol_source_str)?;
+        }
+        if let Some(snapshot_times_str) = cli_attr.snapshot_times {
+            config.attribution.snapshot_times = parse_snapshot_times(&snapshot_times_str)?;
+        }
+    }
 
     // Expand tilde in paths
     config.paths.data_dir = expand_tilde(&config.paths.data_dir);
     config.paths.earnings_dir = expand_tilde(&config.paths.earnings_dir);
 
     Ok(config)
+}
+
+/// Parse volatility source from CLI string
+fn parse_volatility_source(s: &str) -> Result<VolatilitySource> {
+    match s.to_lowercase().as_str() {
+        "entry_iv" | "entry-iv" => Ok(VolatilitySource::EntryIV),
+        "entry_hv" | "entry-hv" => Ok(VolatilitySource::EntryHV { window: 20 }),
+        "current_market_iv" | "current-market-iv" | "current_iv" | "current-iv" => {
+            Ok(VolatilitySource::CurrentMarketIV)
+        }
+        "current_hv" | "current-hv" => Ok(VolatilitySource::CurrentHV { window: 20 }),
+        "historical_average_iv" | "historical-average-iv" => {
+            Ok(VolatilitySource::HistoricalAverageIV { lookback_days: 30 })
+        }
+        _ => Err(anyhow::anyhow!(
+            "Invalid volatility source: '{}'. Expected one of: entry_iv, entry_hv, current_market_iv, current_hv, historical_average_iv",
+            s
+        )),
+    }
+}
+
+/// Parse snapshot times from CLI string
+fn parse_snapshot_times(s: &str) -> Result<SnapshotTimes> {
+    match s.to_lowercase().as_str() {
+        "open_close" | "open-close" => Ok(SnapshotTimes::OpenClose),
+        "close_only" | "close-only" => Ok(SnapshotTimes::CloseOnly),
+        "custom" => {
+            // Custom would need additional parameters, use default for now
+            Ok(SnapshotTimes::Custom {
+                open_hour: 9,
+                open_minute: 30,
+                close_hour: 16,
+                close_minute: 0,
+            })
+        }
+        _ => Err(anyhow::anyhow!(
+            "Invalid snapshot times: '{}'. Expected one of: open_close, close_only, custom",
+            s
+        )),
+    }
 }
 
 fn expand_tilde(path: &PathBuf) -> PathBuf {
