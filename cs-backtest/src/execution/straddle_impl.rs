@@ -3,17 +3,16 @@
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use cs_domain::{
-    Straddle, StraddleResult, FailureReason, PricingSource, CONTRACT_MULTIPLIER,
+    Straddle, StraddleResult, PricingSource, CONTRACT_MULTIPLIER,
 };
-use crate::straddle_pricer::{StraddlePricer, StraddlePricing};
-use crate::greeks_helpers::{compute_straddle_greeks, compute_iv_change, average_iv};
+use crate::composite_pricer::{CompositePricer, CompositePricing};
 use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
 use super::types::{ExecutionConfig, ExecutionContext};
 
 impl ExecutableTrade for Straddle {
-    type Pricer = StraddlePricer;
-    type Pricing = StraddlePricing;
+    type Pricer = CompositePricer;
+    type Pricing = CompositePricing;
     type Result = StraddleResult;
 
     fn symbol(&self) -> &str {
@@ -21,27 +20,25 @@ impl ExecutableTrade for Straddle {
     }
 
     fn validate_entry(
-        pricing: &StraddlePricing,
+        pricing: &CompositePricing,
         config: &ExecutionConfig,
     ) -> Result<(), ExecutionError> {
-        // Validate minimum straddle price
-        if pricing.total_price < config.min_entry_cost {
+        // Validate minimum straddle price (net_cost is positive for debit)
+        if pricing.net_cost < config.min_entry_cost {
             return Err(ExecutionError::InvalidSpread(format!(
                 "Straddle price too small: {} < {}",
-                pricing.total_price, config.min_entry_cost
+                pricing.net_cost, config.min_entry_cost
             )));
         }
 
-        // Validate entry IV
+        // Validate entry IV (use average across legs)
         if let Some(max_iv) = config.max_entry_iv {
-            if let Some(iv) = pricing.call.iv {
-                if iv > max_iv {
-                    return Err(ExecutionError::InvalidSpread(format!(
-                        "IV too high: {:.1}% > {:.1}%",
-                        iv * 100.0,
-                        max_iv * 100.0
-                    )));
-                }
+            if pricing.avg_iv > max_iv {
+                return Err(ExecutionError::InvalidSpread(format!(
+                    "IV too high: {:.1}% > {:.1}%",
+                    pricing.avg_iv * 100.0,
+                    max_iv * 100.0
+                )));
             }
         }
 
@@ -50,32 +47,42 @@ impl ExecutableTrade for Straddle {
 
     fn to_result(
         &self,
-        entry_pricing: StraddlePricing,
-        exit_pricing: StraddlePricing,
+        entry_pricing: CompositePricing,
+        exit_pricing: CompositePricing,
         ctx: &ExecutionContext,
     ) -> StraddleResult {
+        // Straddle legs: [0] = call (long), [1] = put (long)
+        let call_entry = &entry_pricing.legs[0].0;
+        let put_entry = &entry_pricing.legs[1].0;
+        let call_exit = &exit_pricing.legs[0].0;
+        let put_exit = &exit_pricing.legs[1].0;
+
         // P&L = Exit value - Entry cost (profit when straddle appreciated)
-        // Calculate per-share first, then multiply by contract multiplier
-        let pnl_per_share = exit_pricing.total_price - entry_pricing.total_price;
+        let pnl_per_share = exit_pricing.net_cost - entry_pricing.net_cost;
         let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
-        let pnl_pct = if entry_pricing.total_price != Decimal::ZERO {
-            (pnl_per_share / entry_pricing.total_price) * Decimal::from(100)
+        let pnl_pct = if entry_pricing.net_cost != Decimal::ZERO {
+            (pnl_per_share / entry_pricing.net_cost) * Decimal::from(100)
         } else {
             Decimal::ZERO
         };
 
-        // Net Greeks (long call + long put) - keep per-share for hedging
-        let (net_delta, net_gamma, net_theta, net_vega) =
-            compute_straddle_greeks(entry_pricing.call.greeks, entry_pricing.put.greeks);
+        // Net Greeks from CompositePricing (already computed)
+        let net_delta = Some(entry_pricing.net_delta * CONTRACT_MULTIPLIER as f64);
+        let net_gamma = Some(entry_pricing.net_gamma * CONTRACT_MULTIPLIER as f64);
+        let net_theta = Some(entry_pricing.net_theta * CONTRACT_MULTIPLIER as f64);
+        let net_vega = Some(entry_pricing.net_vega * CONTRACT_MULTIPLIER as f64);
 
-        // IV change (positive = good for long straddle)
-        let iv_entry = average_iv(entry_pricing.call.iv, entry_pricing.put.iv);
-        let iv_exit = average_iv(exit_pricing.call.iv, exit_pricing.put.iv);
-        let (_, _, iv_change) = compute_iv_change(iv_entry, iv_exit);
+        // IV
+        let iv_entry = if entry_pricing.avg_iv > 0.0 { Some(entry_pricing.avg_iv) } else { None };
+        let iv_exit = if exit_pricing.avg_iv > 0.0 { Some(exit_pricing.avg_iv) } else { None };
+        let iv_change = match (iv_entry, iv_exit) {
+            (Some(entry), Some(exit)) => Some(((exit - entry) / entry) * 100.0),
+            _ => None,
+        };
 
         // Expected move at entry
         let expected_move_pct = if ctx.entry_spot > 0.0 {
-            Some((entry_pricing.total_price.to_f64().unwrap_or(0.0) / ctx.entry_spot) * 100.0)
+            Some((entry_pricing.net_cost.to_f64().unwrap_or(0.0) / ctx.entry_spot) * 100.0)
         } else {
             None
         };
@@ -88,7 +95,7 @@ impl ExecutableTrade for Straddle {
             0.0
         };
 
-        // P&L attribution (pass total pnl, get results in dollars)
+        // P&L attribution using leg-by-leg approach
         let (delta_pnl, gamma_pnl, theta_pnl, vega_pnl, unexplained_pnl) =
             calculate_pnl_attribution(
                 &entry_pricing,
@@ -107,16 +114,16 @@ impl ExecutableTrade for Straddle {
             strike: self.strike(),
             expiration: self.expiration(),
             entry_time: ctx.entry_time,
-            call_entry_price: entry_pricing.call.price * Decimal::from(CONTRACT_MULTIPLIER),
-            put_entry_price: entry_pricing.put.price * Decimal::from(CONTRACT_MULTIPLIER),
-            entry_debit: entry_pricing.total_price * Decimal::from(CONTRACT_MULTIPLIER),
+            call_entry_price: call_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
+            put_entry_price: put_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
+            entry_debit: entry_pricing.net_cost * Decimal::from(CONTRACT_MULTIPLIER),
             exit_time: ctx.exit_time,
-            call_exit_price: exit_pricing.call.price * Decimal::from(CONTRACT_MULTIPLIER),
-            put_exit_price: exit_pricing.put.price * Decimal::from(CONTRACT_MULTIPLIER),
-            exit_credit: exit_pricing.total_price * Decimal::from(CONTRACT_MULTIPLIER),
+            call_exit_price: call_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
+            put_exit_price: put_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
+            exit_credit: exit_pricing.net_cost * Decimal::from(CONTRACT_MULTIPLIER),
             entry_surface_time: ctx.entry_surface_time,
             exit_surface_time: Some(ctx.exit_surface_time),
-            exit_pricing_method: exit_pricing.source,
+            exit_pricing_method: PricingSource::Market,
             pnl,
             pnl_pct,
             net_delta,
@@ -198,10 +205,10 @@ impl ExecutableTrade for Straddle {
     }
 }
 
-/// Calculate P&L attribution using leg-by-leg approach
+/// Calculate P&L attribution using CompositePricing leg data
 fn calculate_pnl_attribution(
-    entry_pricing: &StraddlePricing,
-    exit_pricing: &StraddlePricing,
+    entry_pricing: &CompositePricing,
+    exit_pricing: &CompositePricing,
     entry_spot: f64,
     exit_spot: f64,
     entry_time: chrono::DateTime<chrono::Utc>,
@@ -217,32 +224,34 @@ fn calculate_pnl_attribution(
     let spot_change = exit_spot - entry_spot;
     let days_held = (exit_time - entry_time).num_hours() as f64 / 24.0;
 
-    // Calculate P&L for call leg (long position, sign = +1.0)
-    let call_pnl = cs_domain::calculate_option_leg_pnl(
-        entry_pricing.call.greeks.as_ref(),
-        entry_pricing.call.iv,
-        exit_pricing.call.iv,
-        spot_change,
-        days_held,
-        1.0, // Long call
-    );
+    // Calculate P&L for each leg using position sign from CompositePricing
+    let mut delta_sum = 0.0;
+    let mut gamma_sum = 0.0;
+    let mut theta_sum = 0.0;
+    let mut vega_sum = 0.0;
 
-    // Calculate P&L for put leg (long position, sign = +1.0)
-    let put_pnl = cs_domain::calculate_option_leg_pnl(
-        entry_pricing.put.greeks.as_ref(),
-        entry_pricing.put.iv,
-        exit_pricing.put.iv,
-        spot_change,
-        days_held,
-        1.0, // Long put
-    );
+    for ((entry_leg, position), (exit_leg, _)) in entry_pricing.legs.iter().zip(exit_pricing.legs.iter()) {
+        let sign = position.sign();
+        let leg_pnl = cs_domain::calculate_option_leg_pnl(
+            entry_leg.greeks.as_ref(),
+            entry_leg.iv,
+            exit_leg.iv,
+            spot_change,
+            days_held,
+            sign,
+        );
+        delta_sum += leg_pnl.delta;
+        gamma_sum += leg_pnl.gamma;
+        theta_sum += leg_pnl.theta;
+        vega_sum += leg_pnl.vega;
+    }
 
-    // Sum the legs and scale to position level
+    // Scale to position level
     let multiplier = CONTRACT_MULTIPLIER as f64;
-    let delta_pnl = (call_pnl.delta + put_pnl.delta) * multiplier;
-    let gamma_pnl = (call_pnl.gamma + put_pnl.gamma) * multiplier;
-    let theta_pnl = (call_pnl.theta + put_pnl.theta) * multiplier;
-    let vega_pnl = (call_pnl.vega + put_pnl.vega) * multiplier;
+    let delta_pnl = delta_sum * multiplier;
+    let gamma_pnl = gamma_sum * multiplier;
+    let theta_pnl = theta_sum * multiplier;
+    let vega_pnl = vega_sum * multiplier;
 
     let explained = delta_pnl + gamma_pnl + theta_pnl + vega_pnl;
     let unexplained = total_pnl.to_f64().unwrap_or(0.0) - explained;

@@ -3,16 +3,16 @@
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use cs_domain::{
-    CalendarSpread, CalendarSpreadResult, FailureReason, CONTRACT_MULTIPLIER,
+    CalendarSpread, CalendarSpreadResult, CONTRACT_MULTIPLIER,
 };
-use crate::spread_pricer::{SpreadPricer, SpreadPricing};
+use crate::composite_pricer::{CalendarSpreadPricer, CompositePricing};
 use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
 use super::types::{ExecutionConfig, ExecutionContext};
 
 impl ExecutableTrade for CalendarSpread {
-    type Pricer = SpreadPricer;
-    type Pricing = SpreadPricing;
+    type Pricer = CalendarSpreadPricer;
+    type Pricing = CompositePricing;
     type Result = CalendarSpreadResult;
 
     fn symbol(&self) -> &str {
@@ -20,12 +20,16 @@ impl ExecutableTrade for CalendarSpread {
     }
 
     fn validate_entry(
-        pricing: &SpreadPricing,
+        pricing: &CompositePricing,
         config: &ExecutionConfig,
     ) -> Result<(), ExecutionError> {
+        // CalendarSpread legs: [0]=short_leg, [1]=long_leg
+        let short_leg = &pricing.legs[0].0;
+        let long_leg = &pricing.legs[1].0;
+
         // Validate max IV at entry
         if let Some(max_iv) = config.max_entry_iv {
-            if let Some(short_iv) = pricing.short_leg.iv {
+            if let Some(short_iv) = short_leg.iv {
                 if short_iv > max_iv {
                     return Err(ExecutionError::InvalidSpread(format!(
                         "Short leg IV too high: {:.1}% > {:.1}% (unreliable pricing)",
@@ -34,7 +38,7 @@ impl ExecutableTrade for CalendarSpread {
                     )));
                 }
             }
-            if let Some(long_iv) = pricing.long_leg.iv {
+            if let Some(long_iv) = long_leg.iv {
                 if long_iv > max_iv {
                     return Err(ExecutionError::InvalidSpread(format!(
                         "Long leg IV too high: {:.1}% > {:.1}% (unreliable pricing)",
@@ -49,7 +53,7 @@ impl ExecutableTrade for CalendarSpread {
         if pricing.net_cost <= Decimal::ZERO {
             return Err(ExecutionError::InvalidSpread(format!(
                 "Negative entry cost: {} (short={}, long={})",
-                pricing.net_cost, pricing.short_leg.price, pricing.long_leg.price,
+                pricing.net_cost, short_leg.price, long_leg.price,
             )));
         }
 
@@ -59,8 +63,8 @@ impl ExecutableTrade for CalendarSpread {
                 "Entry cost too small: {} < {} (short={}, long={})",
                 pricing.net_cost,
                 config.min_entry_cost,
-                pricing.short_leg.price,
-                pricing.long_leg.price,
+                short_leg.price,
+                long_leg.price,
             )));
         }
 
@@ -69,10 +73,16 @@ impl ExecutableTrade for CalendarSpread {
 
     fn to_result(
         &self,
-        entry_pricing: SpreadPricing,
-        exit_pricing: SpreadPricing,
+        entry_pricing: CompositePricing,
+        exit_pricing: CompositePricing,
         ctx: &ExecutionContext,
     ) -> CalendarSpreadResult {
+        // CalendarSpread legs: [0]=short_leg, [1]=long_leg
+        let short_entry = &entry_pricing.legs[0].0;
+        let long_entry = &entry_pricing.legs[1].0;
+        let short_exit = &exit_pricing.legs[0].0;
+        let long_exit = &exit_pricing.legs[1].0;
+
         // Calculate P&L (per-share first, then multiply by contract multiplier)
         let pnl_per_share = exit_pricing.net_cost - entry_pricing.net_cost;
         let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
@@ -83,48 +93,16 @@ impl ExecutableTrade for CalendarSpread {
         };
 
         // P&L attribution using leg-by-leg approach
-        let (delta_pnl, gamma_pnl, theta_pnl, vega_pnl, unexplained_pnl) = {
-            let spot_change = ctx.exit_spot - ctx.entry_spot;
-            let days_held = (ctx.exit_time - ctx.entry_time).num_hours() as f64 / 24.0;
-
-            // Calculate P&L for short leg (negative sign because we're short)
-            let short_pnl = cs_domain::calculate_option_leg_pnl(
-                entry_pricing.short_leg.greeks.as_ref(),
-                entry_pricing.short_leg.iv,
-                exit_pricing.short_leg.iv,
-                spot_change,
-                days_held,
-                -1.0, // Short position
+        let (delta_pnl, gamma_pnl, theta_pnl, vega_pnl, unexplained_pnl) =
+            calculate_pnl_attribution(
+                &entry_pricing,
+                &exit_pricing,
+                ctx.entry_spot,
+                ctx.exit_spot,
+                ctx.entry_time,
+                ctx.exit_time,
+                pnl,
             );
-
-            // Calculate P&L for long leg (positive sign because we're long)
-            let long_pnl = cs_domain::calculate_option_leg_pnl(
-                entry_pricing.long_leg.greeks.as_ref(),
-                entry_pricing.long_leg.iv,
-                exit_pricing.long_leg.iv,
-                spot_change,
-                days_held,
-                1.0, // Long position
-            );
-
-            // Sum the legs and scale to position level
-            let multiplier = Decimal::from(CONTRACT_MULTIPLIER).to_f64().unwrap();
-            let delta = (short_pnl.delta + long_pnl.delta) * multiplier;
-            let gamma = (short_pnl.gamma + long_pnl.gamma) * multiplier;
-            let theta = (short_pnl.theta + long_pnl.theta) * multiplier;
-            let vega = (short_pnl.vega + long_pnl.vega) * multiplier;
-
-            let explained = delta + gamma + theta + vega;
-            let unexplained = pnl.to_f64().unwrap_or(0.0) - explained;
-
-            (
-                Some(Decimal::try_from(delta).unwrap_or_default()),
-                Some(Decimal::try_from(gamma).unwrap_or_default()),
-                Some(Decimal::try_from(theta).unwrap_or_default()),
-                Some(Decimal::try_from(vega).unwrap_or_default()),
-                Some(Decimal::try_from(unexplained).unwrap_or_default()),
-            )
-        };
 
         CalendarSpreadResult {
             symbol: self.symbol().to_string(),
@@ -140,31 +118,31 @@ impl ExecutableTrade for CalendarSpread {
             short_expiry: self.short_expiry(),
             long_expiry: self.long_expiry(),
             entry_time: ctx.entry_time,
-            short_entry_price: entry_pricing.short_leg.price * Decimal::from(CONTRACT_MULTIPLIER),
-            long_entry_price: entry_pricing.long_leg.price * Decimal::from(CONTRACT_MULTIPLIER),
+            short_entry_price: short_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
+            long_entry_price: long_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             entry_cost: entry_pricing.net_cost * Decimal::from(CONTRACT_MULTIPLIER),
             exit_time: ctx.exit_time,
-            short_exit_price: exit_pricing.short_leg.price * Decimal::from(CONTRACT_MULTIPLIER),
-            long_exit_price: exit_pricing.long_leg.price * Decimal::from(CONTRACT_MULTIPLIER),
+            short_exit_price: short_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
+            long_exit_price: long_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             exit_value: exit_pricing.net_cost * Decimal::from(CONTRACT_MULTIPLIER),
             entry_surface_time: ctx.entry_surface_time,
             exit_surface_time: Some(ctx.exit_surface_time),
             pnl,
             pnl_per_contract: pnl,
             pnl_pct,
-            short_delta: entry_pricing.short_leg.greeks.map(|g| g.delta),
-            short_gamma: entry_pricing.short_leg.greeks.map(|g| g.gamma),
-            short_theta: entry_pricing.short_leg.greeks.map(|g| g.theta),
-            short_vega: entry_pricing.short_leg.greeks.map(|g| g.vega),
-            long_delta: entry_pricing.long_leg.greeks.map(|g| g.delta),
-            long_gamma: entry_pricing.long_leg.greeks.map(|g| g.gamma),
-            long_theta: entry_pricing.long_leg.greeks.map(|g| g.theta),
-            long_vega: entry_pricing.long_leg.greeks.map(|g| g.vega),
-            iv_short_entry: entry_pricing.short_leg.iv,
-            iv_long_entry: entry_pricing.long_leg.iv,
-            iv_short_exit: exit_pricing.short_leg.iv,
-            iv_long_exit: exit_pricing.long_leg.iv,
-            iv_ratio_entry: match (entry_pricing.short_leg.iv, entry_pricing.long_leg.iv) {
+            short_delta: short_entry.greeks.map(|g| g.delta),
+            short_gamma: short_entry.greeks.map(|g| g.gamma),
+            short_theta: short_entry.greeks.map(|g| g.theta),
+            short_vega: short_entry.greeks.map(|g| g.vega),
+            long_delta: long_entry.greeks.map(|g| g.delta),
+            long_gamma: long_entry.greeks.map(|g| g.gamma),
+            long_theta: long_entry.greeks.map(|g| g.theta),
+            long_vega: long_entry.greeks.map(|g| g.vega),
+            iv_short_entry: short_entry.iv,
+            iv_long_entry: long_entry.iv,
+            iv_short_exit: short_exit.iv,
+            iv_long_exit: long_exit.iv,
+            iv_ratio_entry: match (short_entry.iv, long_entry.iv) {
                 (Some(short_iv), Some(long_iv)) if long_iv > 0.0 => Some(short_iv / long_iv),
                 _ => None,
             },
@@ -245,4 +223,64 @@ impl ExecutableTrade for CalendarSpread {
             position_attribution: None,
         }
     }
+}
+
+/// Calculate P&L attribution using CompositePricing leg data
+fn calculate_pnl_attribution(
+    entry_pricing: &CompositePricing,
+    exit_pricing: &CompositePricing,
+    entry_spot: f64,
+    exit_spot: f64,
+    entry_time: chrono::DateTime<chrono::Utc>,
+    exit_time: chrono::DateTime<chrono::Utc>,
+    total_pnl: Decimal,
+) -> (
+    Option<Decimal>,
+    Option<Decimal>,
+    Option<Decimal>,
+    Option<Decimal>,
+    Option<Decimal>,
+) {
+    let spot_change = exit_spot - entry_spot;
+    let days_held = (exit_time - entry_time).num_hours() as f64 / 24.0;
+
+    // Calculate P&L for each leg using position sign from CompositePricing
+    let mut delta_sum = 0.0;
+    let mut gamma_sum = 0.0;
+    let mut theta_sum = 0.0;
+    let mut vega_sum = 0.0;
+
+    for ((entry_leg, position), (exit_leg, _)) in entry_pricing.legs.iter().zip(exit_pricing.legs.iter()) {
+        let sign = position.sign();
+        let leg_pnl = cs_domain::calculate_option_leg_pnl(
+            entry_leg.greeks.as_ref(),
+            entry_leg.iv,
+            exit_leg.iv,
+            spot_change,
+            days_held,
+            sign,
+        );
+        delta_sum += leg_pnl.delta;
+        gamma_sum += leg_pnl.gamma;
+        theta_sum += leg_pnl.theta;
+        vega_sum += leg_pnl.vega;
+    }
+
+    // Scale to position level
+    let multiplier = CONTRACT_MULTIPLIER as f64;
+    let delta_pnl = delta_sum * multiplier;
+    let gamma_pnl = gamma_sum * multiplier;
+    let theta_pnl = theta_sum * multiplier;
+    let vega_pnl = vega_sum * multiplier;
+
+    let explained = delta_pnl + gamma_pnl + theta_pnl + vega_pnl;
+    let unexplained = total_pnl.to_f64().unwrap_or(0.0) - explained;
+
+    (
+        Some(Decimal::try_from(delta_pnl).unwrap_or_default()),
+        Some(Decimal::try_from(gamma_pnl).unwrap_or_default()),
+        Some(Decimal::try_from(theta_pnl).unwrap_or_default()),
+        Some(Decimal::try_from(vega_pnl).unwrap_or_default()),
+        Some(Decimal::try_from(unexplained).unwrap_or_default()),
+    )
 }

@@ -30,12 +30,18 @@
 use std::future::Future;
 use std::pin::Pin;
 use chrono::{DateTime, NaiveDate, Utc};
+use rust_decimal::Decimal;
 use cs_domain::*;
 use cs_domain::strike_selection::{StrikeSelector, ExpirationCriteria};
 use crate::config::BacktestConfig;
 use crate::execution::ExecutionConfig;
 use crate::timing_strategy::TimingStrategy;
 use crate::backtest_use_case::{TradeResultMethods, TradeGenerationError};
+use crate::backtest_use_case_helpers::TradeExecutionContext;
+use crate::composite_pricer::{
+    CompositePricer, CalendarSpreadPricer, IronButterflyCompositePricer,
+    CalendarStraddleCompositePricer,
+};
 
 /// Core trait for trade execution strategies
 ///
@@ -155,17 +161,14 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = Option<CalendarSpreadResult>> + Send + 'a>> {
+        let option_type = self.option_type;
         Box::pin(async move {
-            crate::backtest_use_case_helpers::execute_calendar_spread(
-                options_repo,
-                equity_repo,
-                selector,
-                criteria,
-                event,
-                entry_time,
-                exit_time,
-                self.option_type,
-                &self.exec_config,
+            let ctx = TradeExecutionContext::new(
+                options_repo, equity_repo, event, entry_time, exit_time, &self.exec_config,
+            );
+            ctx.execute(
+                |data| selector.select_calendar_spread(&data.spot, &data.surface, option_type, criteria).ok(),
+                CalendarSpreadPricer::new(),
             ).await
         })
     }
@@ -194,6 +197,7 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
 pub struct IronButterflyStrategy {
     timing: TimingStrategy,
     exec_config: ExecutionConfig,
+    wing_width: Decimal,
 }
 
 impl IronButterflyStrategy {
@@ -202,7 +206,16 @@ impl IronButterflyStrategy {
             EarningsTradeTiming::new(config.timing)
         );
         let exec_config = ExecutionConfig::for_iron_butterfly(config.max_entry_iv);
-        Self { timing, exec_config }
+        Self {
+            timing,
+            exec_config,
+            wing_width: Decimal::new(5, 0), // Default wing width
+        }
+    }
+
+    pub fn with_wing_width(mut self, wing_width: Decimal) -> Self {
+        self.wing_width = wing_width;
+        self
     }
 }
 
@@ -225,16 +238,22 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = Option<IronButterflyResult>> + Send + 'a>> {
+        let wing_width = self.wing_width;
+        let min_short_dte = criteria.min_short_dte;
+        let max_short_dte = criteria.max_short_dte;
         Box::pin(async move {
-            crate::backtest_use_case_helpers::execute_iron_butterfly(
-                options_repo,
-                equity_repo,
-                selector,
-                criteria,
-                event,
-                entry_time,
-                exit_time,
-                &self.exec_config,
+            let ctx = TradeExecutionContext::new(
+                options_repo, equity_repo, event, entry_time, exit_time, &self.exec_config,
+            );
+            ctx.execute(
+                |data| selector.select_iron_butterfly(
+                    &data.spot,
+                    &data.surface,
+                    wing_width,
+                    min_short_dte,
+                    max_short_dte,
+                ).ok(),
+                IronButterflyCompositePricer::new(),
             ).await
         })
     }
@@ -276,16 +295,17 @@ impl TradeStrategy<StraddleResult> for StraddleStrategy {
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = Option<StraddleResult>> + Send + 'a>> {
+        let min_short_dte = criteria.min_short_dte;
         Box::pin(async move {
-            crate::backtest_use_case_helpers::execute_straddle(
-                options_repo,
-                equity_repo,
-                selector,
-                criteria,
-                event,
-                entry_time,
-                exit_time,
-                &self.exec_config,
+            let ctx = TradeExecutionContext::new(
+                options_repo, equity_repo, event, entry_time, exit_time, &self.exec_config,
+            );
+            let entry_date = entry_time.date_naive();
+            let min_expiration = (entry_date + chrono::Duration::days(min_short_dte as i64))
+                .max(entry_date);
+            ctx.execute(
+                |data| selector.select_straddle(&data.spot, &data.surface, min_expiration).ok(),
+                CompositePricer::default(),
             ).await
         })
     }
@@ -326,16 +346,17 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = Option<StraddleResult>> + Send + 'a>> {
+        let min_short_dte = criteria.min_short_dte;
         Box::pin(async move {
-            crate::backtest_use_case_helpers::execute_straddle(
-                options_repo,
-                equity_repo,
-                selector,
-                criteria,
-                event,
-                entry_time,
-                exit_time,
-                &self.exec_config,
+            let ctx = TradeExecutionContext::new(
+                options_repo, equity_repo, event, entry_time, exit_time, &self.exec_config,
+            );
+            let entry_date = entry_time.date_naive();
+            let min_expiration = (entry_date + chrono::Duration::days(min_short_dte as i64))
+                .max(entry_date);
+            ctx.execute(
+                |data| selector.select_straddle(&data.spot, &data.surface, min_expiration).ok(),
+                CompositePricer::default(),
             ).await
         })
     }
@@ -382,15 +403,12 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
         exit_time: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = Option<CalendarStraddleResult>> + Send + 'a>> {
         Box::pin(async move {
-            crate::backtest_use_case_helpers::execute_calendar_straddle(
-                options_repo,
-                equity_repo,
-                selector,
-                criteria,
-                event,
-                entry_time,
-                exit_time,
-                &self.exec_config,
+            let ctx = TradeExecutionContext::new(
+                options_repo, equity_repo, event, entry_time, exit_time, &self.exec_config,
+            );
+            ctx.execute(
+                |data| selector.select_calendar_straddle(&data.spot, &data.surface, criteria).ok(),
+                CalendarStraddleCompositePricer::new(),
             ).await
         })
     }

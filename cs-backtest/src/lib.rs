@@ -57,16 +57,21 @@ pub use session_executor::{SessionExecutor, SessionResult, SessionPnL, BatchResu
 
 // Pricers
 pub use spread_pricer::{SpreadPricer, SpreadPricing, LegPricing, PricingError};
-pub use composite_pricer::{CompositePricer, CompositePricing};
-pub use straddle_pricer::{StraddlePricer, StraddlePricing};
-pub use iron_butterfly_pricer::{IronButterflyPricer, IronButterflyPricing};
-pub use calendar_straddle_pricer::{CalendarStraddlePricer, CalendarStraddlePricing};
+pub use composite_pricer::{
+    CompositePricer, CompositePricing,
+    CalendarSpreadPricer, IronButterflyCompositePricer, CalendarStraddleCompositePricer,
+};
 pub use multi_leg_pricer::{
     StranglePricer, StranglePricing,
     ButterflyPricer, ButterflyPricing,
     CondorPricer, CondorPricing,
     IronCondorPricer, IronCondorPricing,
 };
+
+// Legacy pricers (deprecated - use CompositePricer instead)
+pub use straddle_pricer::{StraddlePricer, StraddlePricing};
+pub use iron_butterfly_pricer::{IronButterflyPricer, IronButterflyPricing};
+pub use calendar_straddle_pricer::{CalendarStraddlePricer, CalendarStraddlePricing};
 
 // Utilities
 pub use trade_factory_impl::DefaultTradeFactory;

@@ -452,7 +452,7 @@ impl SessionExecutor {
         session: &TradingSession,
         earnings_event: &EarningsEvent,
     ) -> SessionResult {
-        use crate::spread_pricer::SpreadPricer;
+        use crate::composite_pricer::CalendarSpreadPricer;
 
         // Create trade
         let trade = match CalendarSpread::create(
@@ -471,7 +471,7 @@ impl SessionExecutor {
         };
 
         // Create executor with optional hedging
-        let pricer = SpreadPricer::new();
+        let pricer = CalendarSpreadPricer::new();
         let mut executor = TradeExecutor::new(
             self.options_repo.clone(),
             self.equity_repo.clone(),
@@ -543,8 +543,7 @@ impl SessionExecutor {
         session: &TradingSession,
         earnings_event: &EarningsEvent,
     ) -> SessionResult {
-        use crate::straddle_pricer::StraddlePricer;
-        use crate::spread_pricer::SpreadPricer;
+        use crate::composite_pricer::CompositePricer;
 
         // Create trade
         let trade = match Straddle::create(
@@ -563,7 +562,7 @@ impl SessionExecutor {
         };
 
         // Create executor with optional hedging
-        let pricer = StraddlePricer::new(SpreadPricer::new());
+        let pricer = CompositePricer::default();
         let mut executor = TradeExecutor::new(
             self.options_repo.clone(),
             self.equity_repo.clone(),
@@ -636,9 +635,7 @@ impl SessionExecutor {
         session: &TradingSession,
         earnings_event: &EarningsEvent,
     ) -> SessionResult {
-        use crate::iron_butterfly_pricer::IronButterflyPricer;
-        use crate::spread_pricer::SpreadPricer;
-        use cs_domain::value_objects::IronButterflyConfig;
+        use crate::composite_pricer::IronButterflyCompositePricer;
 
         // Create trade - use advanced method if config available, otherwise default
         let trade = if let Some(ref config) = session.iron_butterfly_config {
@@ -677,7 +674,7 @@ impl SessionExecutor {
         };
 
         // Create executor with optional hedging
-        let pricer = IronButterflyPricer::new(SpreadPricer::new());
+        let pricer = IronButterflyCompositePricer::new();
         let mut executor = TradeExecutor::new(
             self.options_repo.clone(),
             self.equity_repo.clone(),

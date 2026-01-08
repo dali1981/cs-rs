@@ -9,8 +9,7 @@ use cs_analytics::PricingModel;
 use crate::execution::{ExecutableTrade, ExecutionConfig};
 use crate::trade_executor::TradeExecutor;
 use crate::spread_pricer::SpreadPricer;
-use crate::straddle_pricer::StraddlePricer;
-use crate::iron_butterfly_pricer::IronButterflyPricer;
+use crate::composite_pricer::{CompositePricer, CalendarSpreadPricer, IronButterflyCompositePricer};
 use crate::timing_strategy::TimingStrategy;
 
 /// Factory for creating type-specific TradeExecutors
@@ -65,21 +64,23 @@ impl TradeExecutorFactory {
     }
 
     pub fn create_straddle_executor(&self) -> TradeExecutor<Straddle> {
-        let pricer = StraddlePricer::new(
+        let pricer = CompositePricer::new(
             SpreadPricer::new().with_pricing_model(self.pricing_model.clone())
         );
         self.build_executor(pricer)
     }
 
     pub fn create_calendar_spread_executor(&self) -> TradeExecutor<CalendarSpread> {
-        let pricer = SpreadPricer::new().with_pricing_model(self.pricing_model.clone());
+        let pricer = CalendarSpreadPricer(CompositePricer::new(
+            SpreadPricer::new().with_pricing_model(self.pricing_model.clone())
+        ));
         self.build_executor(pricer)
     }
 
     pub fn create_iron_butterfly_executor(&self) -> TradeExecutor<IronButterfly> {
-        let pricer = IronButterflyPricer::new(
+        let pricer = IronButterflyCompositePricer(CompositePricer::new(
             SpreadPricer::new().with_pricing_model(self.pricing_model.clone())
-        );
+        ));
         self.build_executor(pricer)
     }
 

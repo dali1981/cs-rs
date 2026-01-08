@@ -204,6 +204,123 @@ impl Default for CompositePricer {
     }
 }
 
+// ============================================================================
+// TradePricer implementations for each CompositeTrade type
+// These enable CompositePricer to be used with the generic execute_trade()
+// ============================================================================
+
+use crate::execution::TradePricer;
+use cs_domain::{Straddle, CalendarSpread, CalendarStraddle, IronButterfly};
+
+impl TradePricer for CompositePricer {
+    type Trade = Straddle;
+    type Pricing = CompositePricing;
+
+    fn price_with_surface(
+        &self,
+        trade: &Straddle,
+        chain_df: &DataFrame,
+        spot: f64,
+        timestamp: DateTime<Utc>,
+        iv_surface: Option<&IVSurface>,
+    ) -> Result<CompositePricing, PricingError> {
+        self.price(trade, chain_df, spot, timestamp, iv_surface)
+    }
+}
+
+/// Newtype wrapper to enable TradePricer impl for CalendarSpread
+pub struct CalendarSpreadPricer(pub CompositePricer);
+
+impl CalendarSpreadPricer {
+    pub fn new() -> Self {
+        Self(CompositePricer::default())
+    }
+}
+
+impl Default for CalendarSpreadPricer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TradePricer for CalendarSpreadPricer {
+    type Trade = CalendarSpread;
+    type Pricing = CompositePricing;
+
+    fn price_with_surface(
+        &self,
+        trade: &CalendarSpread,
+        chain_df: &DataFrame,
+        spot: f64,
+        timestamp: DateTime<Utc>,
+        iv_surface: Option<&IVSurface>,
+    ) -> Result<CompositePricing, PricingError> {
+        self.0.price(trade, chain_df, spot, timestamp, iv_surface)
+    }
+}
+
+/// Newtype wrapper to enable TradePricer impl for IronButterfly
+pub struct IronButterflyCompositePricer(pub CompositePricer);
+
+impl IronButterflyCompositePricer {
+    pub fn new() -> Self {
+        Self(CompositePricer::default())
+    }
+}
+
+impl Default for IronButterflyCompositePricer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TradePricer for IronButterflyCompositePricer {
+    type Trade = IronButterfly;
+    type Pricing = CompositePricing;
+
+    fn price_with_surface(
+        &self,
+        trade: &IronButterfly,
+        chain_df: &DataFrame,
+        spot: f64,
+        timestamp: DateTime<Utc>,
+        iv_surface: Option<&IVSurface>,
+    ) -> Result<CompositePricing, PricingError> {
+        self.0.price(trade, chain_df, spot, timestamp, iv_surface)
+    }
+}
+
+/// Newtype wrapper to enable TradePricer impl for CalendarStraddle
+pub struct CalendarStraddleCompositePricer(pub CompositePricer);
+
+impl CalendarStraddleCompositePricer {
+    pub fn new() -> Self {
+        Self(CompositePricer::default())
+    }
+}
+
+impl Default for CalendarStraddleCompositePricer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TradePricer for CalendarStraddleCompositePricer {
+    type Trade = CalendarStraddle;
+    type Pricing = CompositePricing;
+
+    fn price_with_surface(
+        &self,
+        trade: &CalendarStraddle,
+        chain_df: &DataFrame,
+        spot: f64,
+        timestamp: DateTime<Utc>,
+        iv_surface: Option<&IVSurface>,
+    ) -> Result<CompositePricing, PricingError> {
+        self.0.price(trade, chain_df, spot, timestamp, iv_surface)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
