@@ -1,5 +1,5 @@
-use crate::entities::{Straddle, CalendarSpread, IronButterfly};
-use crate::value_objects::{IronButterflyConfig, TradeDirection};
+use crate::entities::{Straddle, CalendarSpread, IronButterfly, Strangle, Butterfly, Condor, IronCondor};
+use crate::value_objects::{IronButterflyConfig, TradeDirection, MultiLegStrategyConfig};
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use thiserror::Error;
@@ -125,6 +125,57 @@ pub trait TradeFactory: Send + Sync {
         config: &IronButterflyConfig,
         direction: TradeDirection,
     ) -> Result<IronButterfly, TradeFactoryError>;
+
+    /// Create a Strangle (OTM call + OTM put) with unified configuration
+    ///
+    /// Creates a strangle by:
+    /// 1. Using the SymmetricMultiLegSelector to find wing strikes
+    /// 2. Supporting both delta-based and moneyness-based selection
+    /// 3. Enforcing symmetric wing constraints
+    /// 4. Supporting both long and short directions
+    ///
+    /// # Arguments
+    /// * `symbol` - Ticker symbol
+    /// * `as_of` - Date/time to query market data
+    /// * `min_expiration` - Minimum required expiration date
+    /// * `config` - Multi-leg strategy configuration (wings, direction)
+    ///
+    /// # Returns
+    /// A Strangle trade with configured wings and direction
+    async fn create_strangle(
+        &self,
+        symbol: &str,
+        as_of: DateTime<Utc>,
+        min_expiration: NaiveDate,
+        config: &MultiLegStrategyConfig,
+    ) -> Result<Strangle, TradeFactoryError>;
+
+    /// Create a Butterfly (2x ATM ± OTM wings) with unified configuration
+    async fn create_butterfly(
+        &self,
+        symbol: &str,
+        as_of: DateTime<Utc>,
+        min_expiration: NaiveDate,
+        config: &MultiLegStrategyConfig,
+    ) -> Result<Butterfly, TradeFactoryError>;
+
+    /// Create a Condor (near ATM ± far wings) with unified configuration
+    async fn create_condor(
+        &self,
+        symbol: &str,
+        as_of: DateTime<Utc>,
+        min_expiration: NaiveDate,
+        config: &MultiLegStrategyConfig,
+    ) -> Result<Condor, TradeFactoryError>;
+
+    /// Create an IronCondor (near spread ± far wings) with unified configuration
+    async fn create_iron_condor(
+        &self,
+        symbol: &str,
+        as_of: DateTime<Utc>,
+        min_expiration: NaiveDate,
+        config: &MultiLegStrategyConfig,
+    ) -> Result<IronCondor, TradeFactoryError>;
 
     /// Query available expiration dates for a symbol at a given time
     ///

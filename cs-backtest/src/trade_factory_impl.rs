@@ -241,4 +241,107 @@ impl TradeFactory for DefaultTradeFactory {
         // Return sorted list of expirations from the IV surface
         Ok(surface.expirations())
     }
+
+    async fn create_strangle(
+        &self,
+        symbol: &str,
+        as_of: DateTime<Utc>,
+        min_expiration: NaiveDate,
+        config: &cs_domain::value_objects::MultiLegStrategyConfig,
+    ) -> Result<cs_domain::entities::Strangle, TradeFactoryError> {
+        // 1. Get option chain
+        let chain = self.options_repo
+            .get_option_bars_at_time(symbol, as_of)
+            .await
+            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+
+        // 2. Build IV surface
+        let surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
+            &chain,
+            &*self.equity_repo,
+            symbol,
+        )
+        .await
+        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+
+        // 3. Extract spot price
+        let spot_price = SpotPrice::new(
+            Decimal::try_from(surface.spot_price())
+                .map_err(|_| TradeFactoryError::DataError("Invalid spot price".to_string()))?,
+            as_of,
+        );
+
+        // 4. Compute DTE range from min_expiration
+        let as_of_date = as_of.naive_utc().date();
+        let min_dte = (min_expiration - as_of_date).num_days() as i32;
+        let max_dte = min_dte + 15;
+
+        // 5. Use selector to build strangle
+        let selection = self.selector.select_multi_leg(&spot_price, &surface, config, min_dte, max_dte)
+            .map_err(|e| TradeFactoryError::SelectionError(format!("Strangle selection failed: {}", e)))?;
+
+        // 6. Extract strikes
+        let far_strikes = selection.far_strikes.ok_or_else(||
+            TradeFactoryError::SelectionError("No far strikes available for strangle".to_string()))?;
+        if far_strikes.len() < 2 {
+            return Err(TradeFactoryError::SelectionError("Strangle requires 2 wing strikes".to_string()));
+        }
+
+        let put_strike = far_strikes[0];
+        let call_strike = far_strikes[1];
+
+        // 7. Create option legs
+        let call_leg = cs_domain::entities::OptionLeg::new(
+            symbol.to_string(),
+            call_strike,
+            selection.expiration,
+            finq_core::OptionType::Call,
+        );
+
+        let put_leg = cs_domain::entities::OptionLeg::new(
+            symbol.to_string(),
+            put_strike,
+            selection.expiration,
+            finq_core::OptionType::Put,
+        );
+
+        // 8. Construct and validate strangle
+        // Note: Direction is handled at the trade execution level (which legs are bought vs sold)
+        cs_domain::entities::Strangle::new(call_leg, put_leg)
+            .map_err(|e| TradeFactoryError::SelectionError(format!("Strangle construction failed: {}", e)))
+    }
+
+    async fn create_butterfly(
+        &self,
+        _symbol: &str,
+        _as_of: DateTime<Utc>,
+        _min_expiration: NaiveDate,
+        _config: &cs_domain::value_objects::MultiLegStrategyConfig,
+    ) -> Result<cs_domain::entities::Butterfly, TradeFactoryError> {
+        // Similar to iron butterfly but with butterfly-specific wing structure
+        // For now, return unsupported error - will implement after establishing pattern
+        Err(TradeFactoryError::SelectionError("Butterfly not yet implemented".to_string()))
+    }
+
+    async fn create_condor(
+        &self,
+        _symbol: &str,
+        _as_of: DateTime<Utc>,
+        _min_expiration: NaiveDate,
+        _config: &cs_domain::value_objects::MultiLegStrategyConfig,
+    ) -> Result<cs_domain::entities::Condor, TradeFactoryError> {
+        // For now, return unsupported error - will implement after establishing pattern
+        Err(TradeFactoryError::SelectionError("Condor not yet implemented".to_string()))
+    }
+
+    async fn create_iron_condor(
+        &self,
+        _symbol: &str,
+        _as_of: DateTime<Utc>,
+        _min_expiration: NaiveDate,
+        _config: &cs_domain::value_objects::MultiLegStrategyConfig,
+    ) -> Result<cs_domain::entities::IronCondor, TradeFactoryError> {
+        // For now, return unsupported error - will implement after establishing pattern
+        Err(TradeFactoryError::SelectionError("IronCondor not yet implemented".to_string()))
+    }
 }
