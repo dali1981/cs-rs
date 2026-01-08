@@ -11,6 +11,7 @@ use rust_decimal::Decimal;
 use cs_analytics::IVSurface;
 use cs_domain::{Strangle, Butterfly, Condor, IronCondor};
 use crate::spread_pricer::{SpreadPricer, LegPricing, PricingError};
+use crate::execution::TradePricer;
 
 // ============================================================================
 // Strangle Pricer (2 legs: OTM call + OTM put)
@@ -413,5 +414,73 @@ impl IronCondorPricer {
             far_lower_put,
             net_credit,
         })
+    }
+}
+
+// ============================================================================
+// TradePricer implementations
+// ============================================================================
+
+impl TradePricer for StranglePricer {
+    type Trade = Strangle;
+    type Pricing = StranglePricing;
+
+    fn price_with_surface(
+        &self,
+        trade: &Strangle,
+        chain_df: &DataFrame,
+        spot: f64,
+        timestamp: DateTime<Utc>,
+        iv_surface: Option<&IVSurface>,
+    ) -> Result<StranglePricing, PricingError> {
+        Self::price_with_surface(self, trade, chain_df, spot, timestamp, iv_surface)
+    }
+}
+
+impl TradePricer for ButterflyPricer {
+    type Trade = Butterfly;
+    type Pricing = ButterflyPricing;
+
+    fn price_with_surface(
+        &self,
+        trade: &Butterfly,
+        chain_df: &DataFrame,
+        spot: f64,
+        timestamp: DateTime<Utc>,
+        iv_surface: Option<&IVSurface>,
+    ) -> Result<ButterflyPricing, PricingError> {
+        Self::price_with_surface(self, trade, chain_df, spot, timestamp, iv_surface)
+    }
+}
+
+impl TradePricer for CondorPricer {
+    type Trade = Condor;
+    type Pricing = CondorPricing;
+
+    fn price_with_surface(
+        &self,
+        trade: &Condor,
+        chain_df: &DataFrame,
+        spot: f64,
+        timestamp: DateTime<Utc>,
+        iv_surface: Option<&IVSurface>,
+    ) -> Result<CondorPricing, PricingError> {
+        Self::price_with_surface(self, trade, chain_df, spot, timestamp, iv_surface)
+    }
+}
+
+impl TradePricer for IronCondorPricer {
+    type Trade = IronCondor;
+    type Pricing = IronCondorPricing;
+
+    fn price_with_surface(
+        &self,
+        trade: &IronCondor,
+        chain_df: &DataFrame,
+        spot: f64,
+        timestamp: DateTime<Utc>,
+        iv_surface: Option<&IVSurface>,
+    ) -> Result<IronCondorPricing, PricingError> {
+        Self::price_with_surface(self, trade, chain_df, spot, timestamp, iv_surface)
     }
 }
