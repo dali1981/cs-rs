@@ -439,6 +439,322 @@ impl CalendarStraddle {
     }
 }
 
+/// Strangle = 2-leg strategy (sell or buy OTM call + OTM put at same expiration)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Strangle {
+    pub call_leg: OptionLeg,
+    pub put_leg: OptionLeg,
+}
+
+impl Strangle {
+    pub fn new(call_leg: OptionLeg, put_leg: OptionLeg) -> Result<Self, ValidationError> {
+        // Validate same symbol
+        if call_leg.symbol != put_leg.symbol {
+            return Err(ValidationError::SymbolMismatch(
+                call_leg.symbol.clone(),
+                put_leg.symbol.clone(),
+            ));
+        }
+
+        // Validate same expiration
+        if call_leg.expiration != put_leg.expiration {
+            return Err(ValidationError::ExpirationMismatch {
+                short: call_leg.expiration,
+                long: put_leg.expiration,
+            });
+        }
+
+        // Validate different strikes (call should be higher than put)
+        if call_leg.strike <= put_leg.strike {
+            return Err(ValidationError::InvalidStrikeOrder(
+                "Strangle call strike must be higher than put strike".to_string(),
+            ));
+        }
+
+        Ok(Self { call_leg, put_leg })
+    }
+
+    pub fn expiration(&self) -> NaiveDate {
+        self.call_leg.expiration
+    }
+
+    pub fn symbol(&self) -> &str {
+        &self.call_leg.symbol
+    }
+
+    pub fn dte(&self, from: NaiveDate) -> i32 {
+        (self.call_leg.expiration - from).num_days() as i32
+    }
+}
+
+/// Butterfly = 4-leg strategy (2x ATM straddle ± OTM wings, same expiration)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Butterfly {
+    pub short_call: OptionLeg,
+    pub short_put: OptionLeg,
+    pub long_upper_call: OptionLeg,
+    pub long_lower_put: OptionLeg,
+}
+
+impl Butterfly {
+    pub fn new(
+        short_call: OptionLeg,
+        short_put: OptionLeg,
+        long_upper_call: OptionLeg,
+        long_lower_put: OptionLeg,
+    ) -> Result<Self, ValidationError> {
+        // Validate all symbols match
+        if short_call.symbol != short_put.symbol
+            || short_call.symbol != long_upper_call.symbol
+            || short_call.symbol != long_lower_put.symbol
+        {
+            return Err(ValidationError::SymbolMismatch(
+                short_call.symbol.clone(),
+                short_put.symbol.clone(),
+            ));
+        }
+
+        // Validate all expirations match
+        if short_call.expiration != short_put.expiration
+            || short_call.expiration != long_upper_call.expiration
+            || short_call.expiration != long_lower_put.expiration
+        {
+            return Err(ValidationError::ExpirationMismatch {
+                short: short_call.expiration,
+                long: long_upper_call.expiration,
+            });
+        }
+
+        // Validate short strikes match (ATM straddle)
+        if short_call.strike != short_put.strike {
+            return Err(ValidationError::StrikeMismatch {
+                call: short_call.strike,
+                put: short_put.strike,
+            });
+        }
+
+        // Validate wing strikes: call wing should be higher, put wing should be lower
+        if long_upper_call.strike <= short_call.strike {
+            return Err(ValidationError::InvalidStrikeOrder(
+                "Butterfly upper wing strike must be higher than center".to_string(),
+            ));
+        }
+
+        if long_lower_put.strike >= short_put.strike {
+            return Err(ValidationError::InvalidStrikeOrder(
+                "Butterfly lower wing strike must be lower than center".to_string(),
+            ));
+        }
+
+        // Validate symmetric wings
+        let center_val: f64 = short_call.strike.value().try_into().unwrap_or(0.0);
+        let upper_val: f64 = long_upper_call.strike.value().try_into().unwrap_or(0.0);
+        let lower_val: f64 = long_lower_put.strike.value().try_into().unwrap_or(0.0);
+
+        let upper_dist = upper_val - center_val;
+        let lower_dist = center_val - lower_val;
+
+        // Allow 5% tolerance
+        if (upper_dist - lower_dist).abs() > center_val * 0.05 {
+            return Err(ValidationError::InvalidStrikeOrder(
+                "Butterfly wings must be symmetric".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            short_call,
+            short_put,
+            long_upper_call,
+            long_lower_put,
+        })
+    }
+
+    pub fn expiration(&self) -> NaiveDate {
+        self.short_call.expiration
+    }
+
+    pub fn symbol(&self) -> &str {
+        &self.short_call.symbol
+    }
+
+    pub fn center_strike(&self) -> Strike {
+        self.short_call.strike
+    }
+
+    pub fn dte(&self, from: NaiveDate) -> i32 {
+        (self.short_call.expiration - from).num_days() as i32
+    }
+}
+
+/// Condor = 4-leg strategy (1x near ATM straddle ± far wings, same expiration)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Condor {
+    pub near_call: OptionLeg,
+    pub near_put: OptionLeg,
+    pub far_upper_call: OptionLeg,
+    pub far_lower_put: OptionLeg,
+}
+
+impl Condor {
+    pub fn new(
+        near_call: OptionLeg,
+        near_put: OptionLeg,
+        far_upper_call: OptionLeg,
+        far_lower_put: OptionLeg,
+    ) -> Result<Self, ValidationError> {
+        // Validate all symbols match
+        if near_call.symbol != near_put.symbol
+            || near_call.symbol != far_upper_call.symbol
+            || near_call.symbol != far_lower_put.symbol
+        {
+            return Err(ValidationError::SymbolMismatch(
+                near_call.symbol.clone(),
+                near_put.symbol.clone(),
+            ));
+        }
+
+        // Validate all expirations match
+        if near_call.expiration != near_put.expiration
+            || near_call.expiration != far_upper_call.expiration
+            || near_call.expiration != far_lower_put.expiration
+        {
+            return Err(ValidationError::ExpirationMismatch {
+                short: near_call.expiration,
+                long: far_upper_call.expiration,
+            });
+        }
+
+        // Validate near strikes match (ATM straddle)
+        if near_call.strike != near_put.strike {
+            return Err(ValidationError::StrikeMismatch {
+                call: near_call.strike,
+                put: near_put.strike,
+            });
+        }
+
+        // Validate strike ordering: far wings further from center than near
+        let center_val: f64 = near_call.strike.value().try_into().unwrap_or(0.0);
+        let near_call_val: f64 = near_call.strike.value().try_into().unwrap_or(0.0);
+        let far_call_val: f64 = far_upper_call.strike.value().try_into().unwrap_or(0.0);
+        let far_put_val: f64 = far_lower_put.strike.value().try_into().unwrap_or(0.0);
+        let near_put_val: f64 = near_put.strike.value().try_into().unwrap_or(0.0);
+
+        if far_call_val <= near_call_val {
+            return Err(ValidationError::InvalidStrikeOrder(
+                "Condor far call wing must be further from center than near".to_string(),
+            ));
+        }
+
+        if far_put_val >= near_put_val {
+            return Err(ValidationError::InvalidStrikeOrder(
+                "Condor far put wing must be further from center than near".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            near_call,
+            near_put,
+            far_upper_call,
+            far_lower_put,
+        })
+    }
+
+    pub fn expiration(&self) -> NaiveDate {
+        self.near_call.expiration
+    }
+
+    pub fn symbol(&self) -> &str {
+        &self.near_call.symbol
+    }
+
+    pub fn center_strike(&self) -> Strike {
+        self.near_call.strike
+    }
+
+    pub fn dte(&self, from: NaiveDate) -> i32 {
+        (self.near_call.expiration - from).num_days() as i32
+    }
+}
+
+/// IronCondor = 4-leg strategy (2-leg near spread ± 2-leg far wings, same expiration)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IronCondor {
+    pub near_call: OptionLeg,
+    pub near_put: OptionLeg,
+    pub far_upper_call: OptionLeg,
+    pub far_lower_put: OptionLeg,
+}
+
+impl IronCondor {
+    pub fn new(
+        near_call: OptionLeg,
+        near_put: OptionLeg,
+        far_upper_call: OptionLeg,
+        far_lower_put: OptionLeg,
+    ) -> Result<Self, ValidationError> {
+        // Validate all symbols match
+        if near_call.symbol != near_put.symbol
+            || near_call.symbol != far_upper_call.symbol
+            || near_call.symbol != far_lower_put.symbol
+        {
+            return Err(ValidationError::SymbolMismatch(
+                near_call.symbol.clone(),
+                near_put.symbol.clone(),
+            ));
+        }
+
+        // Validate all expirations match
+        if near_call.expiration != near_put.expiration
+            || near_call.expiration != far_upper_call.expiration
+            || near_call.expiration != far_lower_put.expiration
+        {
+            return Err(ValidationError::ExpirationMismatch {
+                short: near_call.expiration,
+                long: far_upper_call.expiration,
+            });
+        }
+
+        // Validate strike ordering: near call < far call, far put < near put
+        if near_call.strike >= far_upper_call.strike {
+            return Err(ValidationError::InvalidStrikeOrder(
+                "IronCondor near call must be lower than far call".to_string(),
+            ));
+        }
+
+        if far_lower_put.strike >= near_put.strike {
+            return Err(ValidationError::InvalidStrikeOrder(
+                "IronCondor far put must be lower than near put".to_string(),
+            ));
+        }
+
+        // Validate spreads are reasonable (far puts lower than near calls)
+        if far_lower_put.strike >= near_call.strike {
+            return Err(ValidationError::InvalidStrikeOrder(
+                "IronCondor far put must be lower than near call".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            near_call,
+            near_put,
+            far_upper_call,
+            far_lower_put,
+        })
+    }
+
+    pub fn expiration(&self) -> NaiveDate {
+        self.near_call.expiration
+    }
+
+    pub fn symbol(&self) -> &str {
+        &self.near_call.symbol
+    }
+
+    pub fn dte(&self, from: NaiveDate) -> i32 {
+        (self.near_call.expiration - from).num_days() as i32
+    }
+}
+
 /// Trade opportunity generated by strategy
 #[derive(Debug, Clone)]
 pub struct TradeOpportunity {
