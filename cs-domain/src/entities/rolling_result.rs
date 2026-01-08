@@ -377,6 +377,10 @@ pub struct RollPeriod {
     // Capital metrics (Phase 2b)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hedge_capital: Option<HedgeCapitalMetrics>,
+
+    // Detailed hedge trades with per-trade metrics (RV, gamma P&L)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_trade_details: Option<Vec<crate::hedging::HedgeTradeDetail>>,
 }
 
 /// Reason why a position was rolled

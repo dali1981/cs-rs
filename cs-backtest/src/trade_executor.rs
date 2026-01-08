@@ -342,7 +342,32 @@ where
             }
             DeltaComputation::EntryHV { window } => {
                 let entry_hv = self.compute_hv_at_time(symbol, entry_time, *window).await?;
-                hedge_with_provider!(EntryVolatilityProvider::new_entry_hv((*trade).clone(), entry_hv, 0.05))
+                let provider = EntryVolatilityProvider::new_entry_hv((*trade).clone(), entry_hv, 0.05);
+
+                // Manually expand hedge_with_provider to call set_entry_hv
+                let mut hedge_state = cs_domain::GenericHedgeState::new(
+                    hedge_config.clone(),
+                    provider,
+                    entry_spot,
+                    attribution_enabled,
+                );
+                hedge_state.set_entry_hv(entry_hv);  // Store for RV metrics
+
+                for rehedge_time in &rehedge_times {
+                    if hedge_state.at_max_rehedges() {
+                        break;
+                    }
+                    let spot = self.equity_repo
+                        .get_spot_price(symbol, *rehedge_time)
+                        .await
+                        .map_err(|e| e.to_string())?
+                        .to_f64();
+                    hedge_state.update(*rehedge_time, spot).await?;
+                }
+
+                let entry_iv = result.entry_iv().map(|iv| iv.primary);
+                let exit_iv = result.exit_iv().map(|iv| iv.primary);
+                hedge_state.finalize(exit_spot, entry_iv, exit_iv)
             }
             DeltaComputation::EntryIV { .. } => {
                 let entry_iv = result.entry_iv()
@@ -382,7 +407,7 @@ where
 
         // Compute attribution if enabled
         let attribution = if attribution_enabled && hedge_position.rehedge_count() > 0 {
-            self.compute_attribution(
+            match self.compute_attribution(
                 trade,
                 &hedge_position,
                 entry_time,
@@ -390,7 +415,13 @@ where
                 result.pnl(),
             )
             .await
-            .ok() // Errors are logged, don't fail the trade
+            {
+                Ok(attr) => Some(attr),
+                Err(e) => {
+                    tracing::warn!("Attribution failed for {}: {}", symbol, e);
+                    None
+                }
+            }
         } else {
             None
         };
@@ -575,6 +606,15 @@ where
                     long_capital: hp.long_hedge_capital(),
                     short_margin: hp.short_hedge_margin(0.5),  // 50% margin
                 }
+            }),
+
+            // Detailed hedge trades with per-trade metrics (includes unwind at exit)
+            hedge_trade_details: result.hedge_position().map(|hp| {
+                let gamma = result.net_gamma();
+                let entry_spot = result.spot_at_entry();
+                let exit_spot = result.spot_at_exit();
+                let exit_time = result.exit_time();
+                hp.build_trade_details(gamma, entry_spot, exit_spot, exit_time)
             }),
         }
     }

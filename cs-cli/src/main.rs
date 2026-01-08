@@ -8,8 +8,8 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tabled::{Table, Tabled};
-use tracing::{info, Level};
-use tracing_subscriber;
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 
 use cs_backtest::{BacktestUseCase, EarningsAnalysisUseCase, GenerateIvTimeSeriesUseCase, MinuteAlignedIvUseCase};
 use cs_domain::{
@@ -346,10 +346,12 @@ struct ResultRow {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Setup logging
-    let log_level = if cli.verbose { Level::DEBUG } else { Level::INFO };
+    // Setup logging - supports RUST_LOG env var with --verbose as fallback
+    let default_level = if cli.verbose { "debug" } else { "info" };
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(default_level));
     tracing_subscriber::fmt()
-        .with_max_level(log_level)
+        .with_env_filter(filter)
         .with_target(false)
         .init();
 

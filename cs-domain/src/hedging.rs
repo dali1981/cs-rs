@@ -16,6 +16,102 @@ pub struct HedgeAction {
     pub cost: Decimal,        // Transaction cost
 }
 
+/// Enriched hedge trade with attribution metrics
+///
+/// Contains all fields from HedgeAction plus computed metrics:
+/// - Realized volatility up to this trade
+/// - Gamma P&L contribution for this rehedge period
+/// - Cumulative hedge P&L
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HedgeTradeDetail {
+    // Core trade data (from HedgeAction)
+    pub timestamp: DateTime<Utc>,
+    pub shares: i32,
+    pub spot_price: f64,
+    pub delta_before: f64,
+    pub delta_after: f64,
+    pub cost: Decimal,
+
+    // Expanded metrics
+    /// Realized volatility from entry to this trade (annualized)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rv_to_date: Option<f64>,
+    /// Gamma P&L for this rehedge period
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gamma_pnl: Option<f64>,
+    /// Running total hedge P&L at this point
+    pub cumulative_hedge_pnl: Decimal,
+    /// Total shares held after this trade
+    pub cumulative_shares: i32,
+}
+
+impl HedgeTradeDetail {
+    /// Create from a HedgeAction with additional computed metrics
+    pub fn from_action(
+        action: &HedgeAction,
+        spot_history: &[(DateTime<Utc>, f64)],
+        cumulative_pnl: Decimal,
+        cumulative_shares: i32,
+        prev_spot: Option<f64>,
+        gamma: Option<f64>,
+    ) -> Self {
+        // Compute RV up to this point
+        let rv_to_date = Self::compute_rv_to_date(spot_history, action.timestamp);
+
+        // Compute gamma P&L: 0.5 * gamma * (spot_move)^2
+        let gamma_pnl = match (prev_spot, gamma) {
+            (Some(prev), Some(g)) => {
+                let spot_move = action.spot_price - prev;
+                Some(0.5 * g * spot_move.powi(2) * 100.0) // per contract (100 multiplier)
+            }
+            _ => None,
+        };
+
+        Self {
+            timestamp: action.timestamp,
+            shares: action.shares,
+            spot_price: action.spot_price,
+            delta_before: action.delta_before,
+            delta_after: action.delta_after,
+            cost: action.cost,
+            rv_to_date,
+            gamma_pnl,
+            cumulative_hedge_pnl: cumulative_pnl,
+            cumulative_shares,
+        }
+    }
+
+    /// Compute realized volatility from spot history up to a given time
+    pub fn compute_rv_to_date(history: &[(DateTime<Utc>, f64)], up_to: DateTime<Utc>) -> Option<f64> {
+        let prices: Vec<f64> = history
+            .iter()
+            .filter(|(t, _)| *t <= up_to)
+            .map(|(_, p)| *p)
+            .collect();
+
+        if prices.len() < 2 {
+            return None;
+        }
+
+        let returns: Vec<f64> = prices
+            .windows(2)
+            .map(|w| (w[1] / w[0]).ln())
+            .collect();
+
+        if returns.is_empty() {
+            return None;
+        }
+
+        let mean = returns.iter().sum::<f64>() / returns.len() as f64;
+        let variance = returns
+            .iter()
+            .map(|r| (r - mean).powi(2))
+            .sum::<f64>() / returns.len() as f64;
+
+        Some(variance.sqrt() * 252.0_f64.sqrt())
+    }
+}
+
 /// Cumulative hedge position state
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HedgePosition {
@@ -115,6 +211,86 @@ impl HedgePosition {
         Decimal::from(self.peak_short_shares)
             * Decimal::try_from(self.avg_hedge_price).unwrap_or_default()
             * Decimal::try_from(margin_rate).unwrap_or(Decimal::from_str("0.5").unwrap())
+    }
+
+    /// Build enriched trade details with RV and gamma P&L per trade
+    ///
+    /// # Arguments
+    /// * `gamma` - Position gamma at entry (for gamma P&L calculation)
+    /// * `entry_spot` - Entry spot price (for cumulative P&L)
+    /// * `exit_spot` - Exit spot price (for unwind trade)
+    /// * `exit_time` - Exit timestamp (for unwind trade)
+    ///
+    /// # Returns
+    /// Vec of HedgeTradeDetail with computed metrics for each trade, including final unwind
+    pub fn build_trade_details(
+        &self,
+        gamma: Option<f64>,
+        entry_spot: f64,
+        exit_spot: f64,
+        exit_time: DateTime<Utc>,
+    ) -> Vec<HedgeTradeDetail> {
+        let mut details = Vec::with_capacity(self.hedges.len() + 1); // +1 for unwind
+        let mut cumulative_shares = 0i32;
+        let mut prev_spot = Some(entry_spot);
+
+        for action in &self.hedges {
+            cumulative_shares += action.shares;
+
+            // Compute cumulative P&L up to and including this trade
+            // For each prior trade: (current_spot - trade_spot) * shares
+            let cumulative_pnl: Decimal = self.hedges
+                .iter()
+                .take(details.len() + 1)
+                .map(|h| {
+                    let pnl_per_share = action.spot_price - h.spot_price;
+                    Decimal::try_from(h.shares as f64 * pnl_per_share).unwrap_or_default()
+                })
+                .sum();
+
+            let detail = HedgeTradeDetail::from_action(
+                action,
+                &self.spot_history,
+                cumulative_pnl,
+                cumulative_shares,
+                prev_spot,
+                gamma,
+            );
+
+            prev_spot = Some(action.spot_price);
+            details.push(detail);
+        }
+
+        // Add explicit unwind trade at exit if there are shares to close
+        if cumulative_shares != 0 {
+            let final_pnl = self.calculate_pnl(exit_spot);
+            let rv_to_date = HedgeTradeDetail::compute_rv_to_date(&self.spot_history, exit_time);
+
+            // Gamma P&L for the final period
+            let gamma_pnl = match (prev_spot, gamma) {
+                (Some(prev), Some(g)) => {
+                    let spot_move = exit_spot - prev;
+                    Some(0.5 * g * spot_move.powi(2) * 100.0)
+                }
+                _ => None,
+            };
+
+            let unwind_trade = HedgeTradeDetail {
+                timestamp: exit_time,
+                shares: -cumulative_shares, // Sell all remaining shares
+                spot_price: exit_spot,
+                delta_before: 0.0, // Delta at exit (option position closing)
+                delta_after: 0.0,  // Zero after unwind
+                cost: Decimal::ZERO, // No transaction cost for unwind (already accounted)
+                rv_to_date,
+                gamma_pnl,
+                cumulative_hedge_pnl: final_pnl,
+                cumulative_shares: 0, // Position fully closed
+            };
+            details.push(unwind_trade);
+        }
+
+        details
     }
 }
 
@@ -415,6 +591,9 @@ pub struct GenericHedgeState<P: DeltaProvider> {
 
     // Attribution tracking (optional)
     attribution_enabled: bool,
+
+    // Entry HV for RV metrics (set when using EntryHV mode)
+    entry_hv: Option<f64>,
 }
 
 impl<P: DeltaProvider> GenericHedgeState<P> {
@@ -442,6 +621,7 @@ impl<P: DeltaProvider> GenericHedgeState<P> {
             spot_history: if track_rv { vec![(Utc::now(), initial_spot)] } else { vec![] },
             track_rv,
             attribution_enabled,
+            entry_hv: None,
         }
     }
 
@@ -481,6 +661,14 @@ impl<P: DeltaProvider> GenericHedgeState<P> {
     /// Returns reference to all hedge actions executed so far
     pub fn hedge_actions(&self) -> &[HedgeAction] {
         &self.position.hedges
+    }
+
+    /// Set entry HV for RV metrics computation
+    ///
+    /// Call this when using EntryHV delta mode to ensure entry_hv is
+    /// included in the realized volatility metrics at finalize.
+    pub fn set_entry_hv(&mut self, hv: f64) {
+        self.entry_hv = Some(hv);
     }
 
     /// Process a new spot price observation
@@ -553,7 +741,7 @@ impl<P: DeltaProvider> GenericHedgeState<P> {
             self.position.realized_vol_metrics = Some(
                 RealizedVolatilityMetrics::from_spot_history(
                     &self.spot_history,
-                    None,  // entry_hv - could be passed if available
+                    self.entry_hv,  // Use stored entry_hv from set_entry_hv()
                     entry_iv,
                     exit_iv,
                 )
