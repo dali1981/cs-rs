@@ -8,7 +8,7 @@ use super::HedgingArgs;
 #[derive(Debug, Clone, Args)]
 pub struct CampaignArgs {
     /// Symbols to trade
-    #[arg(long)]
+    #[arg(long, num_args = 1.., required = true)]
     pub symbols: Vec<String>,
 
     /// Strategy (calendar-spread, straddle, iron-butterfly)
@@ -86,10 +86,6 @@ pub struct CampaignArgs {
     /// Enable P&L attribution
     #[arg(long)]
     pub attribution: bool,
-
-    /// Track realized volatility during hedging
-    #[arg(long)]
-    pub track_realized_vol: bool,
 
     /// Flattened argument groups
     #[command(flatten)]
