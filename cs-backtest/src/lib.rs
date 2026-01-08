@@ -5,6 +5,7 @@
 pub mod config;
 pub mod delta_providers;  // Delta computation strategies for hedging
 pub mod execution;  // Generic execution framework
+pub mod greeks_helpers;  // Greeks computation helpers
 pub mod iv_validation;  // IV validation and bounds checking
 pub mod iv_surface_builder;
 pub mod spread_pricer;
@@ -53,6 +54,10 @@ pub use calendar_straddle_pricer::{CalendarStraddlePricer, CalendarStraddlePrici
 // Utilities
 pub use trade_factory_impl::DefaultTradeFactory;
 pub use hedging_analytics::{HedgingComparison, HedgingStats};
+pub use greeks_helpers::{
+    compute_straddle_greeks, compute_spread_net_greeks, compute_iron_butterfly_net_greeks,
+    compute_calendar_straddle_net_greeks, compute_iv_change, average_iv,
+};
 pub use iv_validation::{IVValidator, IVValidationError, validate_iv_for_surface, validate_entry_iv};
 pub use iv_surface_builder::{build_iv_surface, build_iv_surface_minute_aligned};
 

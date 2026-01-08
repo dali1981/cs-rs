@@ -6,6 +6,7 @@ use cs_domain::{
     Straddle, StraddleResult, FailureReason, PricingSource, CONTRACT_MULTIPLIER,
 };
 use crate::straddle_pricer::{StraddlePricer, StraddlePricing};
+use crate::greeks_helpers::{compute_straddle_greeks, compute_iv_change, average_iv};
 use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
 use super::types::{ExecutionConfig, ExecutionContext};
@@ -64,10 +65,13 @@ impl ExecutableTrade for Straddle {
         };
 
         // Net Greeks (long call + long put) - keep per-share for hedging
-        let (net_delta, net_gamma, net_theta, net_vega) = compute_net_greeks(&entry_pricing);
+        let (net_delta, net_gamma, net_theta, net_vega) =
+            compute_straddle_greeks(entry_pricing.call.greeks, entry_pricing.put.greeks);
 
         // IV change (positive = good for long straddle)
-        let (iv_entry, iv_exit, iv_change) = compute_iv_change(&entry_pricing, &exit_pricing);
+        let iv_entry = average_iv(entry_pricing.call.iv, entry_pricing.put.iv);
+        let iv_exit = average_iv(exit_pricing.call.iv, exit_pricing.put.iv);
+        let (_, _, iv_change) = compute_iv_change(iv_entry, iv_exit);
 
         // Expected move at entry
         let expected_move_pct = if ctx.entry_spot > 0.0 {
@@ -192,57 +196,6 @@ impl ExecutableTrade for Straddle {
             position_attribution: None,
         }
     }
-}
-
-/// Compute net Greeks for long straddle (long call + long put)
-fn compute_net_greeks(
-    pricing: &StraddlePricing,
-) -> (Option<f64>, Option<f64>, Option<f64>, Option<f64>) {
-    match (pricing.call.greeks, pricing.put.greeks) {
-        (Some(call_g), Some(put_g)) => {
-            // Long both legs: add greeks
-            let net_delta = call_g.delta + put_g.delta; // ~0 for ATM straddle
-            let net_gamma = call_g.gamma + put_g.gamma; // Positive (long gamma)
-            let net_theta = call_g.theta + put_g.theta; // Negative (time decay)
-            let net_vega = call_g.vega + put_g.vega; // Positive (want IV expansion)
-
-            (
-                Some(net_delta),
-                Some(net_gamma),
-                Some(net_theta),
-                Some(net_vega),
-            )
-        }
-        _ => (None, None, None, None),
-    }
-}
-
-/// Compute IV change between entry and exit
-fn compute_iv_change(
-    entry_pricing: &StraddlePricing,
-    exit_pricing: &StraddlePricing,
-) -> (Option<f64>, Option<f64>, Option<f64>) {
-    // Use average of call and put IV
-    let iv_entry = match (entry_pricing.call.iv, entry_pricing.put.iv) {
-        (Some(c), Some(p)) => Some((c + p) / 2.0),
-        (Some(c), None) => Some(c),
-        (None, Some(p)) => Some(p),
-        _ => None,
-    };
-
-    let iv_exit = match (exit_pricing.call.iv, exit_pricing.put.iv) {
-        (Some(c), Some(p)) => Some((c + p) / 2.0),
-        (Some(c), None) => Some(c),
-        (None, Some(p)) => Some(p),
-        _ => None,
-    };
-
-    let iv_change = match (iv_entry, iv_exit) {
-        (Some(entry), Some(exit)) => Some(exit - entry),
-        _ => None,
-    };
-
-    (iv_entry, iv_exit, iv_change)
 }
 
 /// Calculate P&L attribution using leg-by-leg approach
