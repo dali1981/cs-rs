@@ -129,6 +129,8 @@ impl TradingCampaign {
                         event: (*event).clone(),
                         timing_type,
                     },
+                    iron_butterfly_config: self.iron_butterfly_config.clone(),
+                    trade_direction: self.trade_direction,
                 });
             }
         }
@@ -226,6 +228,8 @@ impl TradingCampaign {
                     earnings_before,
                     earnings_after,
                 },
+                iron_butterfly_config: self.iron_butterfly_config.clone(),
+                trade_direction: self.trade_direction,
             });
 
             // Move to next period
@@ -269,6 +273,8 @@ impl TradingCampaign {
                 exit_datetime: exit_dt,
                 action,
                 context: SessionContext::Standalone { note: None },
+                iron_butterfly_config: self.iron_butterfly_config.clone(),
+                trade_direction: self.trade_direction,
             });
 
             current_date = TradingCalendar::next_trading_day(next_roll);

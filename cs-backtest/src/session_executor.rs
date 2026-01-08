@@ -626,20 +626,41 @@ impl SessionExecutor {
     ) -> SessionResult {
         use crate::iron_butterfly_pricer::IronButterflyPricer;
         use crate::spread_pricer::SpreadPricer;
+        use cs_domain::value_objects::IronButterflyConfig;
 
-        // Create trade
-        let trade = match IronButterfly::create(
-            self.trade_factory.as_ref(),
-            &session.symbol,
-            session.entry_datetime,
-            session.exit_date(),
-        ).await {
-            Ok(t) => t,
-            Err(e) => {
-                return SessionResult::failure(
-                    session.clone(),
-                    format!("Failed to create iron butterfly: {}", e),
-                );
+        // Create trade - use advanced method if config available, otherwise default
+        let trade = if let Some(ref config) = session.iron_butterfly_config {
+            // Use advanced factory method with config and direction
+            match self.trade_factory.create_iron_butterfly_advanced(
+                &session.symbol,
+                session.entry_datetime,
+                session.exit_date(),
+                config,
+                session.trade_direction,
+            ).await {
+                Ok(t) => t,
+                Err(e) => {
+                    return SessionResult::failure(
+                        session.clone(),
+                        format!("Failed to create iron butterfly with advanced config: {}", e),
+                    );
+                }
+            }
+        } else {
+            // Fall back to default creation
+            match IronButterfly::create(
+                self.trade_factory.as_ref(),
+                &session.symbol,
+                session.entry_datetime,
+                session.exit_date(),
+            ).await {
+                Ok(t) => t,
+                Err(e) => {
+                    return SessionResult::failure(
+                        session.clone(),
+                        format!("Failed to create iron butterfly: {}", e),
+                    );
+                }
             }
         };
 

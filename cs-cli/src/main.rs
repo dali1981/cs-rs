@@ -359,6 +359,12 @@ enum Commands {
         /// Track realized volatility during hedging
         #[arg(long)]
         track_realized_vol: bool,
+        /// Wing selection mode for iron butterfly (delta:0.25 or moneyness:0.10)
+        #[arg(long)]
+        wing_mode: Option<String>,
+        /// Trade direction (short or long) - applies to all strategies
+        #[arg(long, default_value = "short")]
+        direction: String,
         /// Output file path (CSV format)
         #[arg(long)]
         output: Option<PathBuf>,
@@ -579,6 +585,8 @@ async fn main() -> Result<()> {
             hv_window,
             attribution,
             track_realized_vol,
+            wing_mode,
+            direction,
             output,
             output_dir,
         } => {
@@ -608,6 +616,8 @@ async fn main() -> Result<()> {
                 hv_window,
                 attribution,
                 track_realized_vol,
+                wing_mode.as_deref(),
+                &direction,
                 output,
                 output_dir,
             )
@@ -2085,6 +2095,8 @@ async fn run_campaign_command(
     hv_window: u16,
     attribution: bool,
     track_realized_vol: bool,
+    wing_mode: Option<&str>,
+    direction: &str,
     output: Option<PathBuf>,
     output_dir: Option<PathBuf>,
 ) -> Result<()> {
@@ -2092,6 +2104,7 @@ async fn run_campaign_command(
         TradingCampaign, SessionSchedule, OptionStrategy, PeriodPolicy, RollPolicy,
         ExpirationPolicy, TradingPeriodSpec,
         infrastructure::{FinqOptionsRepository, FinqEquityRepository},
+        value_objects::{IronButterflyConfig, TradeDirection},
     };
     use cs_backtest::{SessionExecutor, DefaultTradeFactory, ExecutionConfig};
     use chrono::NaiveDate;
@@ -2246,6 +2259,24 @@ async fn run_campaign_command(
 
     println!("Loaded {} earnings events", earnings_calendar.len());
 
+    // Parse wing mode and trade direction
+    let iron_butterfly_config = if strategy == OptionStrategy::IronButterfly {
+        if let Some(mode_str) = wing_mode {
+            Some(IronButterflyConfig::from_cli_arg(mode_str)
+                .map_err(|e| anyhow::anyhow!("Failed to parse wing-mode '{}': {}", mode_str, e))?)
+        } else {
+            Some(IronButterflyConfig::default())
+        }
+    } else {
+        None
+    };
+
+    let trade_direction = match direction.to_lowercase().as_str() {
+        "long" => TradeDirection::Long,
+        "short" => TradeDirection::Short,
+        _ => anyhow::bail!("Invalid direction: {}. Use 'short' or 'long'", direction),
+    };
+
     // Create campaigns for each discovered symbol
     let campaigns: Vec<TradingCampaign> = discovered_symbols
         .iter()
@@ -2258,6 +2289,8 @@ async fn run_campaign_command(
             expiration_policy: ExpirationPolicy::FirstAfter {
                 min_date: start_date,
             },
+            iron_butterfly_config: iron_butterfly_config.clone(),
+            trade_direction,
         })
         .collect();
 
