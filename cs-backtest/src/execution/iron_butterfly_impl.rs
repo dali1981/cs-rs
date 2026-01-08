@@ -178,10 +178,65 @@ impl ExecutableTrade for IronButterfly {
             _ => None,
         };
 
-        // P&L attribution (simplified for now)
+        // P&L attribution using leg-by-leg approach
         let (delta_pnl, gamma_pnl, theta_pnl, vega_pnl, unexplained_pnl) = {
-            // TODO: Implement proper 4-leg attribution
-            (None, None, None, None, None)
+            let spot_change = ctx.exit_spot - ctx.entry_spot;
+            let days_held = (ctx.exit_time - ctx.entry_time).num_hours() as f64 / 24.0;
+
+            // Calculate P&L for all 4 legs
+            let short_call_pnl = cs_domain::calculate_option_leg_pnl(
+                entry_pricing.short_call.greeks.as_ref(),
+                entry_pricing.short_call.iv,
+                exit_pricing.short_call.iv,
+                spot_change,
+                days_held,
+                -1.0, // Short position
+            );
+
+            let short_put_pnl = cs_domain::calculate_option_leg_pnl(
+                entry_pricing.short_put.greeks.as_ref(),
+                entry_pricing.short_put.iv,
+                exit_pricing.short_put.iv,
+                spot_change,
+                days_held,
+                -1.0, // Short position
+            );
+
+            let long_call_pnl = cs_domain::calculate_option_leg_pnl(
+                entry_pricing.long_call.greeks.as_ref(),
+                entry_pricing.long_call.iv,
+                exit_pricing.long_call.iv,
+                spot_change,
+                days_held,
+                1.0, // Long position
+            );
+
+            let long_put_pnl = cs_domain::calculate_option_leg_pnl(
+                entry_pricing.long_put.greeks.as_ref(),
+                entry_pricing.long_put.iv,
+                exit_pricing.long_put.iv,
+                spot_change,
+                days_held,
+                1.0, // Long position
+            );
+
+            // Sum all legs and scale to position level
+            let multiplier = Decimal::from(CONTRACT_MULTIPLIER).to_f64().unwrap();
+            let delta = (short_call_pnl.delta + short_put_pnl.delta + long_call_pnl.delta + long_put_pnl.delta) * multiplier;
+            let gamma = (short_call_pnl.gamma + short_put_pnl.gamma + long_call_pnl.gamma + long_put_pnl.gamma) * multiplier;
+            let theta = (short_call_pnl.theta + short_put_pnl.theta + long_call_pnl.theta + long_put_pnl.theta) * multiplier;
+            let vega = (short_call_pnl.vega + short_put_pnl.vega + long_call_pnl.vega + long_put_pnl.vega) * multiplier;
+
+            let explained = delta + gamma + theta + vega;
+            let unexplained = pnl.to_f64().unwrap_or(0.0) - explained;
+
+            (
+                Some(Decimal::try_from(delta).unwrap_or_default()),
+                Some(Decimal::try_from(gamma).unwrap_or_default()),
+                Some(Decimal::try_from(theta).unwrap_or_default()),
+                Some(Decimal::try_from(vega).unwrap_or_default()),
+                Some(Decimal::try_from(unexplained).unwrap_or_default()),
+            )
         };
 
         // Breakeven calculation
