@@ -6,6 +6,7 @@ use rust_decimal::Decimal;
 use cs_domain::*;
 use cs_domain::strike_selection::{StrikeSelector, ATMStrategy, DeltaStrategy, ExpirationCriteria};
 use crate::config::{BacktestConfig, SelectionType};
+use crate::execution::ExecutionConfig;
 use crate::trade_strategy::{
     TradeStrategy, StrategyDispatch,
     CalendarSpreadStrategy, IronButterflyStrategy, StraddleStrategy,
@@ -384,6 +385,7 @@ where
 
         let selector = self.create_selector();
         let criteria = self.build_expiration_criteria();
+        let exec_config = self.create_execution_config();
 
         let start_date = self.config.start_date;
         let end_date = self.config.end_date;
@@ -426,14 +428,16 @@ where
                 strategy,
                 &*selector,
                 &criteria,
+                &exec_config,
             ).await;
 
             // Collect and filter results
             let mut session_entries = 0;
+            let min_iv_ratio = self.config.selection.min_iv_ratio;
             for (result_opt, event) in session_results.into_iter().zip(to_enter.iter()) {
                 total_opportunities += 1;
                 if let Some(result) = result_opt {
-                    if strategy.apply_filter(&result) {
+                    if strategy.apply_filter(&result, min_iv_ratio) {
                         all_results.push(result);
                         session_entries += 1;
                     } else if let Some(error) = strategy.create_filter_error(&result, event) {
@@ -471,6 +475,7 @@ where
         strategy: &S,
         selector: &dyn StrikeSelector,
         criteria: &ExpirationCriteria,
+        exec_config: &ExecutionConfig,
     ) -> Vec<Option<R>>
     where
         S: TradeStrategy<R> + Sync,
@@ -484,6 +489,7 @@ where
                 self.equity_repo.as_ref(),
                 selector,
                 criteria,
+                exec_config,
                 event,
                 entry_time,
                 exit_time,
@@ -578,6 +584,18 @@ where
             self.config.selection.min_long_dte,
             self.config.selection.max_long_dte,
         )
+    }
+
+    /// Create execution config based on spread type
+    fn create_execution_config(&self) -> ExecutionConfig {
+        use crate::config::SpreadType;
+        match self.config.spread {
+            SpreadType::Calendar => ExecutionConfig::for_calendar_spread(self.config.max_entry_iv),
+            SpreadType::IronButterfly => ExecutionConfig::for_iron_butterfly(self.config.max_entry_iv),
+            SpreadType::Straddle => ExecutionConfig::for_straddle(self.config.max_entry_iv),
+            SpreadType::CalendarStraddle => ExecutionConfig::for_calendar_straddle(self.config.max_entry_iv),
+            SpreadType::PostEarningsStraddle => ExecutionConfig::for_straddle(self.config.max_entry_iv),
+        }
     }
 
     fn passes_market_cap_filter(&self, event: &EarningsEvent) -> bool {

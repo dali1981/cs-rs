@@ -47,15 +47,13 @@ use crate::composite_pricer::{
 ///
 /// Each strategy encapsulates:
 /// - Timing logic (when to enter/exit)
-/// - Execution configuration (validation thresholds)
 /// - Trade execution logic (how to execute the specific trade type)
 /// - Result filtering (IV ratio filters, etc.)
+///
+/// Validation config (ExecutionConfig) is passed to execute_trade, not owned by strategy.
 pub trait TradeStrategy<R: TradeResultMethods + Send>: Send + Sync {
     /// Get the timing strategy for this trade type
     fn timing(&self) -> &TimingStrategy;
-
-    /// Get the execution configuration
-    fn execution_config(&self) -> &ExecutionConfig;
 
     /// Execute a single trade
     ///
@@ -66,6 +64,7 @@ pub trait TradeStrategy<R: TradeResultMethods + Send>: Send + Sync {
         equity_repo: &'a dyn EquityDataRepository,
         selector: &'a dyn StrikeSelector,
         criteria: &'a ExpirationCriteria,
+        exec_config: &'a ExecutionConfig,
         event: &'a EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
@@ -75,7 +74,10 @@ pub trait TradeStrategy<R: TradeResultMethods + Send>: Send + Sync {
     ///
     /// Returns `true` if the result passes all filters, `false` if it should be dropped.
     /// Default implementation passes all results.
-    fn apply_filter(&self, _result: &R) -> bool {
+    ///
+    /// `min_iv_ratio` is passed from config to enable IV ratio filtering without
+    /// storing filter config in strategy structs.
+    fn apply_filter(&self, _result: &R, _min_iv_ratio: Option<f64>) -> bool {
         true
     }
 
@@ -117,20 +119,15 @@ pub trait TradeStrategy<R: TradeResultMethods + Send>: Send + Sync {
 /// Calendar Spread Strategy
 pub struct CalendarSpreadStrategy {
     timing: TimingStrategy,
-    exec_config: ExecutionConfig,
     option_type: finq_core::OptionType,
-    min_iv_ratio: Option<f64>,
 }
 
 impl CalendarSpreadStrategy {
     pub fn new(config: &BacktestConfig) -> Self {
         let timing = TimingStrategy::for_earnings(config.timing);
-        let exec_config = ExecutionConfig::for_calendar_spread(config.max_entry_iv);
         Self {
             timing,
-            exec_config,
             option_type: finq_core::OptionType::Call, // Default to calls
-            min_iv_ratio: config.selection.min_iv_ratio,
         }
     }
 
@@ -145,16 +142,13 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
         &self.timing
     }
 
-    fn execution_config(&self) -> &ExecutionConfig {
-        &self.exec_config
-    }
-
     fn execute_trade<'a>(
         &'a self,
         options_repo: &'a dyn OptionsDataRepository,
         equity_repo: &'a dyn EquityDataRepository,
         selector: &'a dyn StrikeSelector,
         criteria: &'a ExpirationCriteria,
+        exec_config: &'a ExecutionConfig,
         event: &'a EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
@@ -162,7 +156,7 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
         let option_type = self.option_type;
         Box::pin(async move {
             let simulator = TradeSimulator::new(
-                options_repo, equity_repo, &event.symbol, entry_time, exit_time, &self.exec_config,
+                options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
             );
 
             // 1. Prepare market data
@@ -182,8 +176,8 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
         })
     }
 
-    fn apply_filter(&self, result: &CalendarSpreadResult) -> bool {
-        match (self.min_iv_ratio, result.iv_ratio()) {
+    fn apply_filter(&self, result: &CalendarSpreadResult, min_iv_ratio: Option<f64>) -> bool {
+        match (min_iv_ratio, result.iv_ratio()) {
             (Some(min), Some(ratio)) => ratio >= min,
             (Some(_), None) => false,
             (None, _) => true,
@@ -205,17 +199,14 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
 /// Iron Butterfly Strategy
 pub struct IronButterflyStrategy {
     timing: TimingStrategy,
-    exec_config: ExecutionConfig,
     wing_width: Decimal,
 }
 
 impl IronButterflyStrategy {
     pub fn new(config: &BacktestConfig) -> Self {
         let timing = TimingStrategy::for_earnings(config.timing);
-        let exec_config = ExecutionConfig::for_iron_butterfly(config.max_entry_iv);
         Self {
             timing,
-            exec_config,
             wing_width: Decimal::new(5, 0), // Default wing width
         }
     }
@@ -231,16 +222,13 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
         &self.timing
     }
 
-    fn execution_config(&self) -> &ExecutionConfig {
-        &self.exec_config
-    }
-
     fn execute_trade<'a>(
         &'a self,
         options_repo: &'a dyn OptionsDataRepository,
         equity_repo: &'a dyn EquityDataRepository,
         selector: &'a dyn StrikeSelector,
         criteria: &'a ExpirationCriteria,
+        exec_config: &'a ExecutionConfig,
         event: &'a EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
@@ -250,7 +238,7 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
         let max_short_dte = criteria.max_short_dte;
         Box::pin(async move {
             let simulator = TradeSimulator::new(
-                options_repo, equity_repo, &event.symbol, entry_time, exit_time, &self.exec_config,
+                options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
             );
 
             // 1. Prepare market data
@@ -280,7 +268,6 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
 /// Straddle Strategy (pre-earnings)
 pub struct StraddleStrategy {
     timing: TimingStrategy,
-    exec_config: ExecutionConfig,
 }
 
 impl StraddleStrategy {
@@ -290,8 +277,7 @@ impl StraddleStrategy {
             config.straddle_entry_days,
             config.straddle_exit_days,
         );
-        let exec_config = ExecutionConfig::for_straddle(config.max_entry_iv);
-        Self { timing, exec_config }
+        Self { timing }
     }
 }
 
@@ -300,16 +286,13 @@ impl TradeStrategy<StraddleResult> for StraddleStrategy {
         &self.timing
     }
 
-    fn execution_config(&self) -> &ExecutionConfig {
-        &self.exec_config
-    }
-
     fn execute_trade<'a>(
         &'a self,
         options_repo: &'a dyn OptionsDataRepository,
         equity_repo: &'a dyn EquityDataRepository,
         selector: &'a dyn StrikeSelector,
         criteria: &'a ExpirationCriteria,
+        exec_config: &'a ExecutionConfig,
         event: &'a EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
@@ -317,7 +300,7 @@ impl TradeStrategy<StraddleResult> for StraddleStrategy {
         let min_short_dte = criteria.min_short_dte;
         Box::pin(async move {
             let simulator = TradeSimulator::new(
-                options_repo, equity_repo, &event.symbol, entry_time, exit_time, &self.exec_config,
+                options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
             );
 
             // 1. Prepare market data
@@ -344,7 +327,6 @@ impl TradeStrategy<StraddleResult> for StraddleStrategy {
 /// Post-Earnings Straddle Strategy
 pub struct PostEarningsStraddleStrategy {
     timing: TimingStrategy,
-    exec_config: ExecutionConfig,
 }
 
 impl PostEarningsStraddleStrategy {
@@ -353,8 +335,7 @@ impl PostEarningsStraddleStrategy {
             config.timing,
             config.post_earnings_holding_days,
         );
-        let exec_config = ExecutionConfig::for_straddle(config.max_entry_iv);
-        Self { timing, exec_config }
+        Self { timing }
     }
 }
 
@@ -363,16 +344,13 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
         &self.timing
     }
 
-    fn execution_config(&self) -> &ExecutionConfig {
-        &self.exec_config
-    }
-
     fn execute_trade<'a>(
         &'a self,
         options_repo: &'a dyn OptionsDataRepository,
         equity_repo: &'a dyn EquityDataRepository,
         selector: &'a dyn StrikeSelector,
         criteria: &'a ExpirationCriteria,
+        exec_config: &'a ExecutionConfig,
         event: &'a EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
@@ -380,7 +358,7 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
         let min_short_dte = criteria.min_short_dte;
         Box::pin(async move {
             let simulator = TradeSimulator::new(
-                options_repo, equity_repo, &event.symbol, entry_time, exit_time, &self.exec_config,
+                options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
             );
 
             // 1. Prepare market data
@@ -407,19 +385,12 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
 /// Calendar Straddle Strategy
 pub struct CalendarStraddleStrategy {
     timing: TimingStrategy,
-    exec_config: ExecutionConfig,
-    min_iv_ratio: Option<f64>,
 }
 
 impl CalendarStraddleStrategy {
     pub fn new(config: &BacktestConfig) -> Self {
         let timing = TimingStrategy::for_earnings(config.timing);
-        let exec_config = ExecutionConfig::for_calendar_straddle(config.max_entry_iv);
-        Self {
-            timing,
-            exec_config,
-            min_iv_ratio: config.selection.min_iv_ratio,
-        }
+        Self { timing }
     }
 }
 
@@ -428,23 +399,20 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
         &self.timing
     }
 
-    fn execution_config(&self) -> &ExecutionConfig {
-        &self.exec_config
-    }
-
     fn execute_trade<'a>(
         &'a self,
         options_repo: &'a dyn OptionsDataRepository,
         equity_repo: &'a dyn EquityDataRepository,
         selector: &'a dyn StrikeSelector,
         criteria: &'a ExpirationCriteria,
+        exec_config: &'a ExecutionConfig,
         event: &'a EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = Option<CalendarStraddleResult>> + Send + 'a>> {
         Box::pin(async move {
             let simulator = TradeSimulator::new(
-                options_repo, equity_repo, &event.symbol, entry_time, exit_time, &self.exec_config,
+                options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
             );
 
             // 1. Prepare market data
@@ -464,8 +432,8 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
         })
     }
 
-    fn apply_filter(&self, result: &CalendarStraddleResult) -> bool {
-        match (self.min_iv_ratio, result.iv_ratio()) {
+    fn apply_filter(&self, result: &CalendarStraddleResult, min_iv_ratio: Option<f64>) -> bool {
+        match (min_iv_ratio, result.iv_ratio()) {
             (Some(min), Some(ratio)) => ratio >= min,
             (Some(_), None) => false,
             (None, _) => true,
