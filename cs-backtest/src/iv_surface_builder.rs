@@ -10,6 +10,7 @@ use rust_decimal::Decimal;
 use cs_analytics::{bs_implied_volatility, BSConfig, IVPoint, IVSurface};
 use cs_domain::{MarketTime, TradingDate, TradingTimestamp};
 use cs_domain::repositories::EquityDataRepository;
+use crate::iv_validation::validate_iv_for_surface;
 
 /// Build an IV surface from option chain DataFrame
 ///
@@ -73,7 +74,7 @@ pub fn build_iv_surface(
         };
 
         // Skip unreasonable IVs
-        if iv < 0.01 || iv > 5.0 {
+        if !validate_iv_for_surface(iv) {
             continue;
         }
 
@@ -204,7 +205,7 @@ pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository + ?Sized>(
         };
 
         // Skip unreasonable IVs
-        if iv < 0.01 || iv > 5.0 {
+        if !validate_iv_for_surface(iv) {
             continue;
         }
 
