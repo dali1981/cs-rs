@@ -313,35 +313,274 @@ impl TradeFactory for DefaultTradeFactory {
 
     async fn create_butterfly(
         &self,
-        _symbol: &str,
-        _as_of: DateTime<Utc>,
-        _min_expiration: NaiveDate,
-        _config: &cs_domain::value_objects::MultiLegStrategyConfig,
+        symbol: &str,
+        as_of: DateTime<Utc>,
+        min_expiration: NaiveDate,
+        config: &cs_domain::value_objects::MultiLegStrategyConfig,
     ) -> Result<cs_domain::entities::Butterfly, TradeFactoryError> {
-        // Similar to iron butterfly but with butterfly-specific wing structure
-        // For now, return unsupported error - will implement after establishing pattern
-        Err(TradeFactoryError::SelectionError("Butterfly not yet implemented".to_string()))
+        // 1. Get option chain
+        let chain = self.options_repo
+            .get_option_bars_at_time(symbol, as_of)
+            .await
+            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+
+        // 2. Build IV surface
+        let surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
+            &chain,
+            &*self.equity_repo,
+            symbol,
+        )
+        .await
+        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+
+        // 3. Extract spot price
+        let spot_price = SpotPrice::new(
+            Decimal::try_from(surface.spot_price())
+                .map_err(|_| TradeFactoryError::DataError("Invalid spot price".to_string()))?,
+            as_of,
+        );
+
+        // 4. Compute DTE range
+        let as_of_date = as_of.naive_utc().date();
+        let min_dte = (min_expiration - as_of_date).num_days() as i32;
+        let max_dte = min_dte + 15;
+
+        // 5. Use selector to build butterfly (2x ATM + wings)
+        let selection = self.selector.select_multi_leg(&spot_price, &surface, config, min_dte, max_dte)
+            .map_err(|e| TradeFactoryError::SelectionError(format!("Butterfly selection failed: {}", e)))?;
+
+        // 6. Extract center strikes (should be 2 for butterfly)
+        if selection.center_strikes.len() < 2 {
+            return Err(TradeFactoryError::SelectionError("Butterfly requires 2 center strikes".to_string()));
+        }
+
+        let center_strike = selection.center_strikes[0];
+
+        // 7. Extract wing strikes
+        let far_strikes = selection.far_strikes.ok_or_else(||
+            TradeFactoryError::SelectionError("No far strikes available for butterfly".to_string()))?;
+        if far_strikes.len() < 2 {
+            return Err(TradeFactoryError::SelectionError("Butterfly requires 2 wing strikes".to_string()));
+        }
+
+        let lower_wing_strike = far_strikes[0];
+        let upper_wing_strike = far_strikes[1];
+
+        // 8. Create 4 option legs (short call, short put, long upper call, long lower put)
+        let short_call = cs_domain::entities::OptionLeg::new(
+            symbol.to_string(),
+            center_strike,
+            selection.expiration,
+            finq_core::OptionType::Call,
+        );
+
+        let short_put = cs_domain::entities::OptionLeg::new(
+            symbol.to_string(),
+            center_strike,
+            selection.expiration,
+            finq_core::OptionType::Put,
+        );
+
+        let long_upper_call = cs_domain::entities::OptionLeg::new(
+            symbol.to_string(),
+            upper_wing_strike,
+            selection.expiration,
+            finq_core::OptionType::Call,
+        );
+
+        let long_lower_put = cs_domain::entities::OptionLeg::new(
+            symbol.to_string(),
+            lower_wing_strike,
+            selection.expiration,
+            finq_core::OptionType::Put,
+        );
+
+        // 9. Construct and validate butterfly
+        cs_domain::entities::Butterfly::new(short_call, short_put, long_upper_call, long_lower_put)
+            .map_err(|e| TradeFactoryError::SelectionError(format!("Butterfly construction failed: {}", e)))
     }
 
     async fn create_condor(
         &self,
-        _symbol: &str,
-        _as_of: DateTime<Utc>,
-        _min_expiration: NaiveDate,
-        _config: &cs_domain::value_objects::MultiLegStrategyConfig,
+        symbol: &str,
+        as_of: DateTime<Utc>,
+        min_expiration: NaiveDate,
+        config: &cs_domain::value_objects::MultiLegStrategyConfig,
     ) -> Result<cs_domain::entities::Condor, TradeFactoryError> {
-        // For now, return unsupported error - will implement after establishing pattern
-        Err(TradeFactoryError::SelectionError("Condor not yet implemented".to_string()))
+        // 1. Get option chain
+        let chain = self.options_repo
+            .get_option_bars_at_time(symbol, as_of)
+            .await
+            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+
+        // 2. Build IV surface
+        let surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
+            &chain,
+            &*self.equity_repo,
+            symbol,
+        )
+        .await
+        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+
+        // 3. Extract spot price
+        let spot_price = SpotPrice::new(
+            Decimal::try_from(surface.spot_price())
+                .map_err(|_| TradeFactoryError::DataError("Invalid spot price".to_string()))?,
+            as_of,
+        );
+
+        // 4. Compute DTE range
+        let as_of_date = as_of.naive_utc().date();
+        let min_dte = (min_expiration - as_of_date).num_days() as i32;
+        let max_dte = min_dte + 15;
+
+        // 5. Use selector to build condor (near straddle + far wings)
+        let selection = self.selector.select_multi_leg(&spot_price, &surface, config, min_dte, max_dte)
+            .map_err(|e| TradeFactoryError::SelectionError(format!("Condor selection failed: {}", e)))?;
+
+        // 6. Extract center strike (should be 1 for condor)
+        let center_strike = selection.center_strikes.first().cloned()
+            .ok_or_else(|| TradeFactoryError::SelectionError("No center strike available".to_string()))?;
+
+        // 7. Extract near and far wing strikes
+        let near_strikes = selection.near_strikes.ok_or_else(||
+            TradeFactoryError::SelectionError("No near strikes available for condor".to_string()))?;
+        if near_strikes.len() < 2 {
+            return Err(TradeFactoryError::SelectionError("Condor requires 2 near wing strikes".to_string()));
+        }
+
+        let far_strikes = selection.far_strikes.ok_or_else(||
+            TradeFactoryError::SelectionError("No far strikes available for condor".to_string()))?;
+        if far_strikes.len() < 2 {
+            return Err(TradeFactoryError::SelectionError("Condor requires 2 far wing strikes".to_string()));
+        }
+
+        let near_put_strike = near_strikes[0];
+        let near_call_strike = near_strikes[1];
+        let far_lower_put_strike = far_strikes[0];
+        let far_upper_call_strike = far_strikes[1];
+
+        // 8. Create 4 option legs (near call, near put, far upper call, far lower put)
+        let near_call = cs_domain::entities::OptionLeg::new(
+            symbol.to_string(),
+            near_call_strike,
+            selection.expiration,
+            finq_core::OptionType::Call,
+        );
+
+        let near_put = cs_domain::entities::OptionLeg::new(
+            symbol.to_string(),
+            near_put_strike,
+            selection.expiration,
+            finq_core::OptionType::Put,
+        );
+
+        let far_upper_call = cs_domain::entities::OptionLeg::new(
+            symbol.to_string(),
+            far_upper_call_strike,
+            selection.expiration,
+            finq_core::OptionType::Call,
+        );
+
+        let far_lower_put = cs_domain::entities::OptionLeg::new(
+            symbol.to_string(),
+            far_lower_put_strike,
+            selection.expiration,
+            finq_core::OptionType::Put,
+        );
+
+        // 9. Construct and validate condor
+        cs_domain::entities::Condor::new(near_call, near_put, far_upper_call, far_lower_put)
+            .map_err(|e| TradeFactoryError::SelectionError(format!("Condor construction failed: {}", e)))
     }
 
     async fn create_iron_condor(
         &self,
-        _symbol: &str,
-        _as_of: DateTime<Utc>,
-        _min_expiration: NaiveDate,
-        _config: &cs_domain::value_objects::MultiLegStrategyConfig,
+        symbol: &str,
+        as_of: DateTime<Utc>,
+        min_expiration: NaiveDate,
+        config: &cs_domain::value_objects::MultiLegStrategyConfig,
     ) -> Result<cs_domain::entities::IronCondor, TradeFactoryError> {
-        // For now, return unsupported error - will implement after establishing pattern
-        Err(TradeFactoryError::SelectionError("IronCondor not yet implemented".to_string()))
+        // 1. Get option chain
+        let chain = self.options_repo
+            .get_option_bars_at_time(symbol, as_of)
+            .await
+            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+
+        // 2. Build IV surface
+        let surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
+            &chain,
+            &*self.equity_repo,
+            symbol,
+        )
+        .await
+        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+
+        // 3. Extract spot price
+        let spot_price = SpotPrice::new(
+            Decimal::try_from(surface.spot_price())
+                .map_err(|_| TradeFactoryError::DataError("Invalid spot price".to_string()))?,
+            as_of,
+        );
+
+        // 4. Compute DTE range
+        let as_of_date = as_of.naive_utc().date();
+        let min_dte = (min_expiration - as_of_date).num_days() as i32;
+        let max_dte = min_dte + 15;
+
+        // 5. Use selector to build iron condor (near spread + far wings)
+        let selection = self.selector.select_multi_leg(&spot_price, &surface, config, min_dte, max_dte)
+            .map_err(|e| TradeFactoryError::SelectionError(format!("IronCondor selection failed: {}", e)))?;
+
+        // 6. Extract near and far wing strikes
+        let near_strikes = selection.near_strikes.ok_or_else(||
+            TradeFactoryError::SelectionError("No near strikes available for iron condor".to_string()))?;
+        if near_strikes.len() < 2 {
+            return Err(TradeFactoryError::SelectionError("IronCondor requires 2 near strikes".to_string()));
+        }
+
+        let far_strikes = selection.far_strikes.ok_or_else(||
+            TradeFactoryError::SelectionError("No far strikes available for iron condor".to_string()))?;
+        if far_strikes.len() < 2 {
+            return Err(TradeFactoryError::SelectionError("IronCondor requires 2 far strikes".to_string()));
+        }
+
+        let near_put_strike = near_strikes[0];
+        let near_call_strike = near_strikes[1];
+        let far_lower_put_strike = far_strikes[0];
+        let far_upper_call_strike = far_strikes[1];
+
+        // 7. Create 4 option legs (near call, near put, far upper call, far lower put)
+        let near_call = cs_domain::entities::OptionLeg::new(
+            symbol.to_string(),
+            near_call_strike,
+            selection.expiration,
+            finq_core::OptionType::Call,
+        );
+
+        let near_put = cs_domain::entities::OptionLeg::new(
+            symbol.to_string(),
+            near_put_strike,
+            selection.expiration,
+            finq_core::OptionType::Put,
+        );
+
+        let far_upper_call = cs_domain::entities::OptionLeg::new(
+            symbol.to_string(),
+            far_upper_call_strike,
+            selection.expiration,
+            finq_core::OptionType::Call,
+        );
+
+        let far_lower_put = cs_domain::entities::OptionLeg::new(
+            symbol.to_string(),
+            far_lower_put_strike,
+            selection.expiration,
+            finq_core::OptionType::Put,
+        );
+
+        // 8. Construct and validate iron condor
+        cs_domain::entities::IronCondor::new(near_call, near_put, far_upper_call, far_lower_put)
+            .map_err(|e| TradeFactoryError::SelectionError(format!("IronCondor construction failed: {}", e)))
     }
 }
