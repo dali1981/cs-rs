@@ -1,0 +1,217 @@
+{
+  "end_date": "2025-11-03",
+  "num_trades": 1,
+  "start_date": "2025-11-03",
+  "successful_trades": 1,
+  "symbol": "TGTX",
+  "total_hedge_pnl": "246.515999999999359",
+  "total_option_pnl": "27.449493736628900",
+  "total_pnl": "264.765493736628259",
+  "total_transaction_cost": "9.20",
+  "trade_type": "straddle",
+  "trades": [
+    {
+      "call_entry_price": "277.826475991917800",
+      "call_exit_price": "350.0",
+      "delta_pnl": "5.40223027064284",
+      "earnings_date": "2025-11-03",
+      "earnings_time": "BeforeMarketOpen",
+      "entry_debit": "522.550506263371100",
+      "entry_surface_time": "2025-10-14T19:57:00Z",
+      "entry_time": "2025-10-14T13:35:00Z",
+      "exit_credit": "550.0",
+      "exit_pricing_method": "Market",
+      "exit_surface_time": "2025-10-31T19:55:00Z",
+      "exit_time": "2025-10-31T19:55:00Z",
+      "expected_move_pct": 15.439518577732933,
+      "expiration": "2025-11-07",
+      "failure_reason": null,
+      "gamma_pnl": "3.42690391697681",
+      "hedge_pnl": "246.515999999999359",
+      "hedge_position": {
+        "avg_hedge_price": 37.06016,
+        "cumulative_shares": -100,
+        "hedges": [
+          {
+            "cost": "0.13",
+            "delta_after": 0.0005261210114627657,
+            "delta_before": -0.12947387898853724,
+            "shares": 13,
+            "spot_price": 33.845,
+            "timestamp": "2025-10-14T13:35:00Z"
+          },
+          {
+            "cost": "1.02",
+            "delta_after": 0.0026644181896949837,
+            "delta_before": 1.0226644181896951,
+            "shares": -102,
+            "spot_price": 34.305,
+            "timestamp": "2025-10-15T13:35:00Z"
+          },
+          {
+            "cost": "0.11",
+            "delta_after": -0.00003177566437639889,
+            "delta_before": 0.10996822433562359,
+            "shares": -11,
+            "spot_price": 34.95,
+            "timestamp": "2025-10-16T13:35:00Z"
+          },
+          {
+            "cost": "0.01",
+            "delta_after": -0.0006424380038965172,
+            "delta_before": -0.010642438003896526,
+            "shares": 1,
+            "spot_price": 34.46,
+            "timestamp": "2025-10-23T13:35:00Z"
+          },
+          {
+            "cost": "1.98",
+            "delta_after": 0.0015263694411626894,
+            "delta_before": -1.9784736305588373,
+            "shares": 198,
+            "spot_price": 33.435,
+            "timestamp": "2025-10-24T13:35:00Z"
+          },
+          {
+            "cost": "0.86",
+            "delta_after": 0.002390812838360845,
+            "delta_before": 0.8623908128383608,
+            "shares": -86,
+            "spot_price": 33.92,
+            "timestamp": "2025-10-27T13:35:00Z"
+          },
+          {
+            "cost": "0.83",
+            "delta_after": 0.003602507859416182,
+            "delta_before": -0.8263974921405838,
+            "shares": 83,
+            "spot_price": 33.615,
+            "timestamp": "2025-10-28T13:35:00Z"
+          },
+          {
+            "cost": "1.79",
+            "delta_after": 0.004520423461081502,
+            "delta_before": 1.7945204234610814,
+            "shares": -179,
+            "spot_price": 34.18,
+            "timestamp": "2025-10-29T13:35:00Z"
+          },
+          {
+            "cost": "1.15",
+            "delta_after": -0.001726993605629723,
+            "delta_before": -1.1517269936056298,
+            "shares": 115,
+            "spot_price": 33.9,
+            "timestamp": "2025-10-30T13:35:00Z"
+          },
+          {
+            "cost": "1.32",
+            "delta_after": -4.0278443509400574e-6,
+            "delta_before": 1.3199959721556491,
+            "shares": -132,
+            "spot_price": 34.623,
+            "timestamp": "2025-10-31T13:35:00Z"
+          }
+        ],
+        "peak_long_shares": 99,
+        "peak_short_shares": 100,
+        "realized_pnl": "0",
+        "realized_vol_metrics": {
+          "entry_hv": 0.02995765247742473,
+          "entry_iv": 0.7507844063360636,
+          "exit_iv": 1.4442923530404554,
+          "iv_premium_at_entry": 2406.152332536183,
+          "num_observations": 15,
+          "realized_vol": 0.2507656257708101,
+          "realized_vs_implied": -66.59951596563086
+        },
+        "spot_history": [
+          [
+            "2026-01-08T03:21:19.019729Z",
+            33.845
+          ],
+          [
+            "2025-10-14T13:35:00Z",
+            33.845
+          ],
+          [
+            "2025-10-15T13:35:00Z",
+            34.305
+          ],
+          [
+            "2025-10-16T13:35:00Z",
+            34.95
+          ],
+          [
+            "2025-10-17T13:35:00Z",
+            35.38
+          ],
+          [
+            "2025-10-20T13:35:00Z",
+            34.87
+          ],
+          [
+            "2025-10-21T13:35:00Z",
+            35.235
+          ],
+          [
+            "2025-10-22T13:35:00Z",
+            35.27
+          ],
+          [
+            "2025-10-23T13:35:00Z",
+            34.46
+          ],
+          [
+            "2025-10-24T13:35:00Z",
+            33.435
+          ],
+          [
+            "2025-10-27T13:35:00Z",
+            33.92
+          ],
+          [
+            "2025-10-28T13:35:00Z",
+            33.615
+          ],
+          [
+            "2025-10-29T13:35:00Z",
+            34.18
+          ],
+          [
+            "2025-10-30T13:35:00Z",
+            33.9
+          ],
+          [
+            "2025-10-31T13:35:00Z",
+            34.623
+          ]
+        ],
+        "total_cost": "9.20",
+        "unrealized_pnl": "246.515999999999359"
+      },
+      "iv_change": 0.6935079467043919,
+      "iv_entry": 0.7507844063360636,
+      "iv_exit": 1.4442923530404554,
+      "net_delta": 0.07202973694190451,
+      "net_gamma": 0.12184547260361991,
+      "net_theta": -0.1068270883208895,
+      "net_vega": 0.06938041013516116,
+      "pnl": "27.449493736628900",
+      "pnl_pct": "5.2529838566062088233886056500",
+      "put_entry_price": "244.724030271453300",
+      "put_exit_price": "200",
+      "spot_at_entry": 33.845,
+      "spot_at_exit": 34.595,
+      "spot_move": 0.75,
+      "spot_move_pct": 2.2159846358398583,
+      "strike": "34",
+      "success": true,
+      "symbol": "TGTX",
+      "theta_pnl": "-184.2767273535344",
+      "total_pnl_with_hedge": "264.765493736628259",
+      "unexplained_pnl": "-278.1789832269257",
+      "vega_pnl": "481.076070129469"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "end_date": "2025-11-03",
+  "num_trades": 1,
+  "start_date": "2025-11-03",
+  "successful_trades": 1,
+  "symbol": "CRK",
+  "total_hedge_pnl": "0",
+  "total_option_pnl": "-52.025998642883700",
+  "total_pnl": "-52.025998642883700",
+  "total_transaction_cost": "0",
+  "trade_type": "straddle",
+  "trades": [
+    {
+      "entry_date": "2025-10-14",
+      "entry_debit": "307.025998642883700",
+      "exit_credit": "255.00",
+      "exit_date": "2025-10-31",
+      "iv_entry": 0.6298264499332186,
+      "iv_exit": 0.706086986231313,
+      "pnl": "-52.025998642883700",
+      "spot_at_entry": 18.895,
+      "spot_at_exit": 18.715,
+      "spot_move_pct": -0.9526329716856297
+    }
+  ]
+}

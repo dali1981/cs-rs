@@ -169,6 +169,16 @@ where
         ).await;
 
         // 2. Apply hedging if enabled and trade succeeded
+        let has_hedge_config = self.hedge_config.is_some();
+        let has_timing = self.timing_strategy.is_some();
+        tracing::info!(
+            symbol = %result.symbol(),
+            success = result.success(),
+            has_hedge_config = has_hedge_config,
+            has_timing = has_timing,
+            "Trade executed, checking hedging"
+        );
+
         if result.success() {
             if let (Some(ref hedge_config), Some(ref timing)) =
                 (&self.hedge_config, &self.timing_strategy)
@@ -177,6 +187,14 @@ where
                     entry_time,
                     exit_time,
                     &hedge_config.strategy,
+                );
+
+                tracing::info!(
+                    symbol = %result.symbol(),
+                    rehedge_count = rehedge_times.len(),
+                    strategy = ?hedge_config.strategy,
+                    delta_mode = ?hedge_config.delta_computation,
+                    "Applying hedging"
                 );
 
                 if let Err(e) = self.apply_hedging(trade, &mut result, entry_time, exit_time, rehedge_times).await {
@@ -338,6 +356,25 @@ where
             DeltaComputation::GammaApproximation => {
                 let delta = result.net_delta().unwrap_or(0.0);
                 let gamma = result.net_gamma().unwrap_or(0.0);
+
+                tracing::debug!(
+                    symbol = %symbol,
+                    delta = delta,
+                    gamma = gamma,
+                    entry_spot = entry_spot,
+                    "GammaApproximation provider initialized"
+                );
+
+                // Warn if Greeks are missing/zero - hedging will be ineffective
+                if delta.abs() < 0.001 && gamma.abs() < 0.001 {
+                    tracing::warn!(
+                        symbol = %symbol,
+                        delta = delta,
+                        gamma = gamma,
+                        "Hedging enabled but Greeks are near-zero. Consider using EntryIV or EntryHV mode."
+                    );
+                }
+
                 hedge_with_provider!(GammaApproximationProvider::new(delta, gamma, entry_spot))
             }
             DeltaComputation::EntryHV { window } => {
@@ -427,10 +464,29 @@ where
         };
 
         // Apply results
+        tracing::debug!(
+            symbol = %symbol,
+            rehedge_count = hedge_position.rehedge_count(),
+            attribution_present = attribution.is_some(),
+            "Hedge position stats before apply"
+        );
+
         if hedge_position.rehedge_count() > 0 || attribution.is_some() {
             let hedge_pnl = hedge_position.calculate_pnl(exit_spot);
             let total_pnl = result.pnl() + hedge_pnl - hedge_position.total_cost;
+            tracing::info!(
+                symbol = %symbol,
+                hedge_pnl = %hedge_pnl,
+                total_cost = %hedge_position.total_cost,
+                total_pnl = %total_pnl,
+                "Applied hedge results"
+            );
             result.apply_hedge_results(hedge_position, hedge_pnl, total_pnl, attribution);
+        } else {
+            tracing::debug!(
+                symbol = %symbol,
+                "No hedges executed - hedge_position.rehedge_count() == 0"
+            );
         }
 
         Ok(())

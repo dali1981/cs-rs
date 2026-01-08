@@ -1,0 +1,217 @@
+{
+  "end_date": "2025-11-03",
+  "num_trades": 1,
+  "start_date": "2025-11-03",
+  "successful_trades": 1,
+  "symbol": "CRGY",
+  "total_hedge_pnl": "-0.96900000000011766",
+  "total_option_pnl": "-42.1173317791709600",
+  "total_pnl": "-44.28633177917107766",
+  "total_transaction_cost": "1.20",
+  "trade_type": "straddle",
+  "trades": [
+    {
+      "call_entry_price": "125.00",
+      "call_exit_price": "93.00",
+      "delta_pnl": "1.69797387109995",
+      "earnings_date": "2025-11-03",
+      "earnings_time": "AfterMarketClose",
+      "entry_debit": "150.00",
+      "entry_surface_time": "2025-10-14T19:51:00Z",
+      "entry_time": "2025-10-14T13:35:00Z",
+      "exit_credit": "107.8826682208290400",
+      "exit_pricing_method": "Market",
+      "exit_surface_time": "2025-10-31T19:55:00Z",
+      "exit_time": "2025-10-31T19:55:00Z",
+      "expected_move_pct": 17.87586995900467,
+      "expiration": "2025-11-21",
+      "failure_reason": null,
+      "gamma_pnl": "0.02111739896260795",
+      "hedge_pnl": "-0.96900000000011766",
+      "hedge_position": {
+        "avg_hedge_price": 8.41511224489796,
+        "cumulative_shares": -98,
+        "hedges": [
+          {
+            "cost": "0.98",
+            "delta_after": 0.004502611718183669,
+            "delta_before": 0.9845026117181837,
+            "shares": -98,
+            "spot_price": 8.3912,
+            "timestamp": "2025-10-14T13:35:00Z"
+          },
+          {
+            "cost": "0.02",
+            "delta_after": -0.0022767736651516657,
+            "delta_before": 0.017723226334848352,
+            "shares": -2,
+            "spot_price": 8.6392,
+            "timestamp": "2025-10-15T13:35:00Z"
+          },
+          {
+            "cost": "0.01",
+            "delta_after": 0.0024679252750017255,
+            "delta_before": -0.007532074724998283,
+            "shares": 1,
+            "spot_price": 8.455,
+            "timestamp": "2025-10-17T13:35:00Z"
+          },
+          {
+            "cost": "0.03",
+            "delta_after": -0.0031330690418969187,
+            "delta_before": -0.033133069041896945,
+            "shares": 3,
+            "spot_price": 8.16,
+            "timestamp": "2025-10-21T13:35:00Z"
+          },
+          {
+            "cost": "0.01",
+            "delta_after": 0.004028343291754277,
+            "delta_before": -0.005971656708245732,
+            "shares": 1,
+            "spot_price": 8.14,
+            "timestamp": "2025-10-22T13:35:00Z"
+          },
+          {
+            "cost": "0.05",
+            "delta_after": -0.003750833957662625,
+            "delta_before": 0.04624916604233742,
+            "shares": -5,
+            "spot_price": 8.45,
+            "timestamp": "2025-10-23T13:35:00Z"
+          },
+          {
+            "cost": "0.01",
+            "delta_after": 0.003774569446095999,
+            "delta_before": -0.00622543055390401,
+            "shares": 1,
+            "spot_price": 8.31,
+            "timestamp": "2025-10-28T13:35:00Z"
+          },
+          {
+            "cost": "0.01",
+            "delta_after": -0.0007455256205854965,
+            "delta_before": -0.010745525620585505,
+            "shares": 1,
+            "spot_price": 8.16,
+            "timestamp": "2025-10-29T13:35:00Z"
+          },
+          {
+            "cost": "0.04",
+            "delta_after": 0.00206515273994623,
+            "delta_before": -0.037934847260053806,
+            "shares": 4,
+            "spot_price": 8.02,
+            "timestamp": "2025-10-30T13:35:00Z"
+          },
+          {
+            "cost": "0.04",
+            "delta_after": -0.004939792084922567,
+            "delta_before": 0.03506020791507747,
+            "shares": -4,
+            "spot_price": 8.11,
+            "timestamp": "2025-10-31T13:35:00Z"
+          }
+        ],
+        "peak_long_shares": 0,
+        "peak_short_shares": 100,
+        "realized_pnl": "0",
+        "realized_vol_metrics": {
+          "entry_hv": 0.15196702608183096,
+          "entry_iv": 0.6324820842347211,
+          "exit_iv": 0.63311552113784,
+          "iv_premium_at_entry": 316.19692149147085,
+          "num_observations": 15,
+          "realized_vol": 0.30187062991262376,
+          "realized_vs_implied": -52.27206628660864
+        },
+        "spot_history": [
+          [
+            "2026-01-08T03:20:53.159906Z",
+            8.3912
+          ],
+          [
+            "2025-10-14T13:35:00Z",
+            8.3912
+          ],
+          [
+            "2025-10-15T13:35:00Z",
+            8.6392
+          ],
+          [
+            "2025-10-16T13:35:00Z",
+            8.635
+          ],
+          [
+            "2025-10-17T13:35:00Z",
+            8.455
+          ],
+          [
+            "2025-10-20T13:35:00Z",
+            8.414
+          ],
+          [
+            "2025-10-21T13:35:00Z",
+            8.16
+          ],
+          [
+            "2025-10-22T13:35:00Z",
+            8.14
+          ],
+          [
+            "2025-10-23T13:35:00Z",
+            8.45
+          ],
+          [
+            "2025-10-24T13:35:00Z",
+            8.575
+          ],
+          [
+            "2025-10-27T13:35:00Z",
+            8.47
+          ],
+          [
+            "2025-10-28T13:35:00Z",
+            8.31
+          ],
+          [
+            "2025-10-29T13:35:00Z",
+            8.16
+          ],
+          [
+            "2025-10-30T13:35:00Z",
+            8.02
+          ],
+          [
+            "2025-10-31T13:35:00Z",
+            8.11
+          ]
+        ],
+        "total_cost": "1.20",
+        "unrealized_pnl": "-0.96900000000011766"
+      },
+      "iv_change": 0.0006334369031189002,
+      "iv_entry": 0.6324820842347211,
+      "iv_exit": 0.63311552113784,
+      "net_delta": 0.5023591334615063,
+      "net_gamma": 0.3696894184833602,
+      "net_theta": -0.014615697025980055,
+      "net_vega": 0.01722032865068459,
+      "pnl": "-42.1173317791709600",
+      "pnl_pct": "-28.078221186113973333333333330",
+      "put_entry_price": "25.00",
+      "put_exit_price": "14.8826682208290400",
+      "spot_at_entry": 8.3912,
+      "spot_at_exit": 8.425,
+      "spot_move": 0.03380000000000116,
+      "spot_move_pct": 0.4028029364095858,
+      "strike": "7.5",
+      "success": true,
+      "symbol": "CRGY",
+      "theta_pnl": "-25.2120773698156",
+      "total_pnl_with_hedge": "-44.28633177917107766",
+      "unexplained_pnl": "-22.08085493456392",
+      "vega_pnl": "3.456509255145997"
+    }
+  ]
+}

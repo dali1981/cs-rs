@@ -40,7 +40,7 @@ pub struct SessionResult {
 }
 
 /// P&L metrics extracted from trade results
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionPnL {
     pub entry_cost: rust_decimal::Decimal,
     pub exit_value: rust_decimal::Decimal,
@@ -49,6 +49,35 @@ pub struct SessionPnL {
     pub spot_at_exit: f64,
     pub iv_entry: Option<f64>,
     pub iv_exit: Option<f64>,
+
+    // Hedge details (when hedging is enabled)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_pnl: Option<rust_decimal::Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_pnl_with_hedge: Option<rust_decimal::Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_count: Option<usize>,
+
+    // Attribution summary (when hedging with attribution enabled)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<SessionAttribution>,
+
+    // Volatility metrics (when track_realized_vol is enabled)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub realized_vol_metrics: Option<cs_domain::RealizedVolatilityMetrics>,
+}
+
+/// P&L attribution summary for a session
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SessionAttribution {
+    pub gross_delta_pnl: rust_decimal::Decimal,
+    pub hedge_delta_pnl: rust_decimal::Decimal,
+    pub net_delta_pnl: rust_decimal::Decimal,
+    pub gamma_pnl: rust_decimal::Decimal,
+    pub theta_pnl: rust_decimal::Decimal,
+    pub vega_pnl: rust_decimal::Decimal,
+    pub unexplained: rust_decimal::Decimal,
+    pub hedge_efficiency: f64,
 }
 
 impl SessionResult {
@@ -171,6 +200,88 @@ impl BatchResult {
             .filter(|r| r.success && r.pnl.is_some())
             .collect()
     }
+
+    /// Check if any sessions have hedge data
+    pub fn has_hedge_data(&self) -> bool {
+        self.results
+            .iter()
+            .filter_map(|r| r.pnl.as_ref())
+            .any(|p| p.hedge_pnl.is_some())
+    }
+
+    /// Calculate total hedge P&L across all sessions
+    pub fn total_hedge_pnl(&self) -> Option<rust_decimal::Decimal> {
+        let hedge_pnls: Vec<_> = self.results
+            .iter()
+            .filter_map(|r| r.pnl.as_ref())
+            .filter_map(|p| p.hedge_pnl)
+            .collect();
+
+        if hedge_pnls.is_empty() {
+            None
+        } else {
+            Some(hedge_pnls.iter().sum())
+        }
+    }
+
+    /// Calculate total P&L including hedges
+    pub fn total_pnl_with_hedge(&self) -> rust_decimal::Decimal {
+        self.results
+            .iter()
+            .filter_map(|r| r.pnl.as_ref())
+            .map(|p| p.total_pnl_with_hedge.unwrap_or(p.pnl))
+            .sum()
+    }
+
+    /// Calculate total hedge trade count
+    pub fn total_hedge_count(&self) -> usize {
+        self.results
+            .iter()
+            .filter_map(|r| r.pnl.as_ref())
+            .filter_map(|p| p.hedge_count)
+            .sum()
+    }
+
+    /// Check if any sessions have attribution data
+    pub fn has_attribution_data(&self) -> bool {
+        self.results
+            .iter()
+            .filter_map(|r| r.pnl.as_ref())
+            .any(|p| p.attribution.is_some())
+    }
+
+    /// Calculate aggregated attribution summary
+    pub fn attribution_summary(&self) -> Option<SessionAttribution> {
+        let attrs: Vec<_> = self.results
+            .iter()
+            .filter_map(|r| r.pnl.as_ref())
+            .filter_map(|p| p.attribution.as_ref())
+            .collect();
+
+        if attrs.is_empty() {
+            return None;
+        }
+
+        let gross_delta_pnl: rust_decimal::Decimal = attrs.iter().map(|a| a.gross_delta_pnl).sum();
+        let hedge_delta_pnl: rust_decimal::Decimal = attrs.iter().map(|a| a.hedge_delta_pnl).sum();
+        let net_delta_pnl: rust_decimal::Decimal = attrs.iter().map(|a| a.net_delta_pnl).sum();
+        let gamma_pnl: rust_decimal::Decimal = attrs.iter().map(|a| a.gamma_pnl).sum();
+        let theta_pnl: rust_decimal::Decimal = attrs.iter().map(|a| a.theta_pnl).sum();
+        let vega_pnl: rust_decimal::Decimal = attrs.iter().map(|a| a.vega_pnl).sum();
+        let unexplained: rust_decimal::Decimal = attrs.iter().map(|a| a.unexplained).sum();
+        let avg_hedge_efficiency = attrs.iter().map(|a| a.hedge_efficiency).sum::<f64>() / attrs.len() as f64;
+
+        Some(SessionAttribution {
+            gross_delta_pnl,
+            hedge_delta_pnl,
+            net_delta_pnl,
+            gamma_pnl,
+            theta_pnl,
+            vega_pnl,
+            unexplained,
+            hedge_efficiency: avg_hedge_efficiency,
+        })
+    }
 }
 
 /// Executor for TradingSession
@@ -188,6 +299,8 @@ pub struct SessionExecutor {
     // Hedging support
     hedge_config: Option<cs_domain::HedgeConfig>,
     timing_strategy: Option<crate::timing_strategy::TimingStrategy>,
+    // Attribution support
+    attribution_config: Option<cs_domain::AttributionConfig>,
 }
 
 impl SessionExecutor {
@@ -205,6 +318,7 @@ impl SessionExecutor {
             config,
             hedge_config: None,
             timing_strategy: None,
+            attribution_config: None,
         }
     }
 
@@ -216,6 +330,15 @@ impl SessionExecutor {
     ) -> Self {
         self.hedge_config = Some(hedge_config);
         self.timing_strategy = Some(timing_strategy);
+        self
+    }
+
+    /// Enable attribution (builder pattern)
+    ///
+    /// Attribution requires hedging to be enabled. If hedging is not enabled,
+    /// attribution will have no effect.
+    pub fn with_attribution(mut self, config: cs_domain::AttributionConfig) -> Self {
+        self.attribution_config = Some(config);
         self
     }
 
@@ -335,15 +458,25 @@ impl SessionExecutor {
             }
         };
 
-        // Create executor
+        // Create executor with optional hedging
         let pricer = SpreadPricer::new();
-        let executor = TradeExecutor::new(
+        let mut executor = TradeExecutor::new(
             self.options_repo.clone(),
             self.equity_repo.clone(),
             pricer,
             self.trade_factory.clone(),
             self.config.clone(),
         );
+
+        // Apply hedging if configured
+        if let (Some(ref hedge_config), Some(ref timing)) = (&self.hedge_config, &self.timing_strategy) {
+            executor = executor.with_hedging(hedge_config.clone(), timing.clone());
+        }
+
+        // Apply attribution if configured
+        if let Some(ref attr_config) = self.attribution_config {
+            executor = executor.with_attribution(attr_config.clone());
+        }
 
         // Execute
         let result = executor.execute(
@@ -353,9 +486,37 @@ impl SessionExecutor {
             session.exit_datetime,
         ).await;
 
-        // Wrap result
+        // Wrap result with P&L extraction including hedge details
         if result.success() {
-            SessionResult::success(session.clone(), Box::new(result))
+            // Extract attribution if available
+            let attribution = result.position_attribution.as_ref().map(|attr| SessionAttribution {
+                gross_delta_pnl: attr.total_gross_delta_pnl,
+                hedge_delta_pnl: attr.total_hedge_delta_pnl,
+                net_delta_pnl: attr.total_net_delta_pnl,
+                gamma_pnl: attr.total_gamma_pnl,
+                theta_pnl: attr.total_theta_pnl,
+                vega_pnl: attr.total_vega_pnl,
+                unexplained: attr.total_unexplained,
+                hedge_efficiency: attr.hedge_efficiency,
+            });
+
+            let hedge_count = result.hedge_position.as_ref().map(|hp| hp.hedges.len());
+
+            let pnl = SessionPnL {
+                entry_cost: result.entry_cost(),
+                exit_value: result.exit_value(),
+                pnl: result.pnl(),
+                spot_at_entry: result.spot_at_entry(),
+                spot_at_exit: result.spot_at_exit(),
+                iv_entry: result.entry_iv().map(|iv| iv.primary),
+                iv_exit: result.exit_iv().map(|iv| iv.primary),
+                hedge_pnl: result.hedge_pnl,
+                total_pnl_with_hedge: result.total_pnl_with_hedge,
+                hedge_count,
+                attribution,
+                realized_vol_metrics: None,
+            };
+            SessionResult::success_with_pnl(session.clone(), pnl, Box::new(result))
         } else {
             SessionResult::failure(
                 session.clone(),
@@ -404,6 +565,11 @@ impl SessionExecutor {
             executor = executor.with_hedging(hedge_config.clone(), timing.clone());
         }
 
+        // Apply attribution if configured
+        if let Some(ref attr_config) = self.attribution_config {
+            executor = executor.with_attribution(attr_config.clone());
+        }
+
         // Execute
         let result = executor.execute(
             &trade,
@@ -412,8 +578,23 @@ impl SessionExecutor {
             session.exit_datetime,
         ).await;
 
-        // Wrap result with P&L extraction
+        // Wrap result with P&L extraction including hedge details
         if result.success() {
+            // Extract attribution from the straddle result if available
+            let attribution = result.position_attribution.as_ref().map(|attr| SessionAttribution {
+                gross_delta_pnl: attr.total_gross_delta_pnl,
+                hedge_delta_pnl: attr.total_hedge_delta_pnl,
+                net_delta_pnl: attr.total_net_delta_pnl,
+                gamma_pnl: attr.total_gamma_pnl,
+                theta_pnl: attr.total_theta_pnl,
+                vega_pnl: attr.total_vega_pnl,
+                unexplained: attr.total_unexplained,
+                hedge_efficiency: attr.hedge_efficiency,
+            });
+
+            // Extract hedge count from position if available
+            let hedge_count = result.hedge_position.as_ref().map(|hp| hp.hedges.len());
+
             let pnl = SessionPnL {
                 entry_cost: result.entry_cost(),
                 exit_value: result.exit_value(),
@@ -422,6 +603,11 @@ impl SessionExecutor {
                 spot_at_exit: result.spot_at_exit(),
                 iv_entry: result.entry_iv().map(|iv| iv.primary),
                 iv_exit: result.exit_iv().map(|iv| iv.primary),
+                hedge_pnl: result.hedge_pnl,
+                total_pnl_with_hedge: result.total_pnl_with_hedge,
+                hedge_count,
+                attribution,
+                realized_vol_metrics: None, // TODO: Extract from result if available
             };
             SessionResult::success_with_pnl(session.clone(), pnl, Box::new(result))
         } else {
@@ -457,15 +643,25 @@ impl SessionExecutor {
             }
         };
 
-        // Create executor
+        // Create executor with optional hedging
         let pricer = IronButterflyPricer::new(SpreadPricer::new());
-        let executor = TradeExecutor::new(
+        let mut executor = TradeExecutor::new(
             self.options_repo.clone(),
             self.equity_repo.clone(),
             pricer,
             self.trade_factory.clone(),
             self.config.clone(),
         );
+
+        // Apply hedging if configured
+        if let (Some(ref hedge_config), Some(ref timing)) = (&self.hedge_config, &self.timing_strategy) {
+            executor = executor.with_hedging(hedge_config.clone(), timing.clone());
+        }
+
+        // Apply attribution if configured
+        if let Some(ref attr_config) = self.attribution_config {
+            executor = executor.with_attribution(attr_config.clone());
+        }
 
         // Execute
         let result = executor.execute(
@@ -475,9 +671,37 @@ impl SessionExecutor {
             session.exit_datetime,
         ).await;
 
-        // Wrap result
+        // Wrap result with P&L extraction including hedge details
         if result.success() {
-            SessionResult::success(session.clone(), Box::new(result))
+            // Extract attribution if available
+            let attribution = result.position_attribution.as_ref().map(|attr| SessionAttribution {
+                gross_delta_pnl: attr.total_gross_delta_pnl,
+                hedge_delta_pnl: attr.total_hedge_delta_pnl,
+                net_delta_pnl: attr.total_net_delta_pnl,
+                gamma_pnl: attr.total_gamma_pnl,
+                theta_pnl: attr.total_theta_pnl,
+                vega_pnl: attr.total_vega_pnl,
+                unexplained: attr.total_unexplained,
+                hedge_efficiency: attr.hedge_efficiency,
+            });
+
+            let hedge_count = result.hedge_position.as_ref().map(|hp| hp.hedges.len());
+
+            let pnl = SessionPnL {
+                entry_cost: result.entry_cost(),
+                exit_value: result.exit_value(),
+                pnl: result.pnl(),
+                spot_at_entry: result.spot_at_entry(),
+                spot_at_exit: result.spot_at_exit(),
+                iv_entry: result.entry_iv().map(|iv| iv.primary),
+                iv_exit: result.exit_iv().map(|iv| iv.primary),
+                hedge_pnl: result.hedge_pnl,
+                total_pnl_with_hedge: result.total_pnl_with_hedge,
+                hedge_count,
+                attribution,
+                realized_vol_metrics: None,
+            };
+            SessionResult::success_with_pnl(session.clone(), pnl, Box::new(result))
         } else {
             SessionResult::failure(
                 session.clone(),

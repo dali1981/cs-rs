@@ -1,5 +1,5 @@
 use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
-use cs_domain::{EarningsEvent, EarningsTradeTiming, StraddleTradeTiming, PostEarningsStraddleTiming, HedgeStrategy};
+use cs_domain::{EarningsEvent, EarningsTradeTiming, StraddleTradeTiming, PostEarningsStraddleTiming, HedgeStrategy, TradingCalendar};
 
 /// Timing strategy enum that wraps all timing implementations
 ///
@@ -101,7 +101,10 @@ impl TimingStrategy {
                 let mut times = vec![entry_time];
                 let mut current = entry_time + *interval;
                 while current < exit_time {
-                    times.push(current);
+                    // Only include trading days (skip weekends/holidays)
+                    if TradingCalendar::is_trading_day(current.date_naive()) {
+                        times.push(current);
+                    }
                     current = current + *interval;
                 }
                 times

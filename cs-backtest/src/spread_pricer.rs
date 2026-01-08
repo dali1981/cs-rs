@@ -2,7 +2,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use polars::prelude::*;
 use rust_decimal::Decimal;
 use finq_core::OptionType;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use cs_analytics::{
     bs_price, bs_greeks, bs_implied_volatility, BSConfig, Greeks, IVSurface, IVPoint,
@@ -313,23 +313,33 @@ impl SpreadPricer {
             &self.bs_config,
         );
 
-        let greeks = if let Some(vol) = iv {
-            Some(bs_greeks(
-                spot_price,
-                strike_f64,
-                ttm,
-                vol,
-                option_type == OptionType::Call,
-                self.bs_config.risk_free_rate,
-            ))
-        } else {
-            None
-        };
+        // Always compute Greeks - use actual IV if available, otherwise estimate
+        let vol_for_greeks = iv.unwrap_or_else(|| {
+            // Fallback: estimate IV from ATM approximation
+            // For ATM options: IV ≈ price / (0.4 × spot × √ttm)
+            // Or use a reasonable default of 30% annualized
+            let atm_estimate = if ttm > 0.0 && spot_price > 0.0 {
+                (market_price / (0.4 * spot_price * ttm.sqrt())).clamp(0.10, 2.0)
+            } else {
+                0.30 // Default 30% IV
+            };
+            debug!("Using estimated IV {:.2} for Greeks (market IV computation failed)", atm_estimate);
+            atm_estimate
+        });
+
+        let greeks = bs_greeks(
+            spot_price,
+            strike_f64,
+            ttm,
+            vol_for_greeks,
+            option_type == OptionType::Call,
+            self.bs_config.risk_free_rate,
+        );
 
         Ok(LegPricing {
             price: Decimal::try_from(market_price).unwrap_or_default(),
-            iv,
-            greeks,
+            iv, // Keep original IV (may be None)
+            greeks: Some(greeks), // Always provide Greeks
             expiration,
         })
     }

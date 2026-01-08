@@ -1,0 +1,177 @@
+{
+  "end_date": "2025-11-03",
+  "num_trades": 1,
+  "start_date": "2025-11-03",
+  "successful_trades": 1,
+  "symbol": "SGHC",
+  "total_hedge_pnl": "-113.22499999999990",
+  "total_option_pnl": "26.760190382758800",
+  "total_pnl": "-89.604809617241100",
+  "total_transaction_cost": "3.14",
+  "trade_type": "straddle",
+  "trades": [
+    {
+      "call_entry_price": "120.0",
+      "call_exit_price": "13.00",
+      "delta_pnl": "-54.917676006629",
+      "earnings_date": "2025-11-03",
+      "earnings_time": "AfterMarketClose",
+      "entry_debit": "220.0",
+      "entry_surface_time": "2025-10-14T19:56:00Z",
+      "entry_time": "2025-10-14T13:35:00Z",
+      "exit_credit": "246.760190382758800",
+      "exit_pricing_method": "Market",
+      "exit_surface_time": "2025-10-31T19:55:00Z",
+      "exit_time": "2025-10-31T19:55:00Z",
+      "expected_move_pct": 16.454749439042633,
+      "expiration": "2025-11-21",
+      "failure_reason": null,
+      "gamma_pnl": "96.1449470444685",
+      "hedge_pnl": "-113.22499999999990",
+      "hedge_position": {
+        "avg_hedge_price": 11.88725,
+        "cumulative_shares": 100,
+        "hedges": [
+          {
+            "cost": "1.00",
+            "delta_after": -4.440892098500626e-16,
+            "delta_before": 0.9999999999999996,
+            "shares": -100,
+            "spot_price": 13.37,
+            "timestamp": "2025-10-14T13:35:00Z"
+          },
+          {
+            "cost": "0.11",
+            "delta_after": 0.004795875473677991,
+            "delta_before": -0.105204124526322,
+            "shares": 11,
+            "spot_price": 13.02,
+            "timestamp": "2025-10-16T13:35:00Z"
+          },
+          {
+            "cost": "0.07",
+            "delta_after": 0.0038253310664444484,
+            "delta_before": 0.0738253310664444,
+            "shares": -7,
+            "spot_price": 13.045,
+            "timestamp": "2025-10-17T13:35:00Z"
+          },
+          {
+            "cost": "0.85",
+            "delta_after": 0.0033159297631636248,
+            "delta_before": -0.8466840702368363,
+            "shares": 85,
+            "spot_price": 12.95,
+            "timestamp": "2025-10-20T13:35:00Z"
+          },
+          {
+            "cost": "1.11",
+            "delta_after": 0.0,
+            "delta_before": -1.11,
+            "shares": 111,
+            "spot_price": 12.37,
+            "timestamp": "2025-10-21T13:35:00Z"
+          }
+        ],
+        "peak_long_shares": 100,
+        "peak_short_shares": 100,
+        "realized_pnl": "0",
+        "realized_vol_metrics": {
+          "entry_hv": 0.01272928382182955,
+          "entry_iv": 0.6402813929524109,
+          "exit_iv": 0.6952689355446784,
+          "iv_premium_at_entry": 4929.987561864143,
+          "num_observations": 15,
+          "realized_vol": 0.238505729951646,
+          "realized_vs_implied": -62.749857706801585
+        },
+        "spot_history": [
+          [
+            "2026-01-08T03:22:54.738443Z",
+            13.37
+          ],
+          [
+            "2025-10-14T13:35:00Z",
+            13.37
+          ],
+          [
+            "2025-10-15T13:35:00Z",
+            13.11
+          ],
+          [
+            "2025-10-16T13:35:00Z",
+            13.02
+          ],
+          [
+            "2025-10-17T13:35:00Z",
+            13.045
+          ],
+          [
+            "2025-10-20T13:35:00Z",
+            12.95
+          ],
+          [
+            "2025-10-21T13:35:00Z",
+            12.37
+          ],
+          [
+            "2025-10-22T13:35:00Z",
+            12.06
+          ],
+          [
+            "2025-10-23T13:35:00Z",
+            12.045
+          ],
+          [
+            "2025-10-24T13:35:00Z",
+            12.19
+          ],
+          [
+            "2025-10-27T13:35:00Z",
+            11.98
+          ],
+          [
+            "2025-10-28T13:35:00Z",
+            11.555
+          ],
+          [
+            "2025-10-29T13:35:00Z",
+            11.371
+          ],
+          [
+            "2025-10-30T13:35:00Z",
+            11.121
+          ],
+          [
+            "2025-10-31T13:35:00Z",
+            10.9
+          ]
+        ],
+        "total_cost": "3.14",
+        "unrealized_pnl": "-113.22499999999990"
+      },
+      "iv_change": 0.05498754259226746,
+      "iv_entry": 0.6402813929524109,
+      "iv_exit": 0.6952689355446784,
+      "net_delta": 0.21001023329494872,
+      "net_gamma": 0.2811985479988408,
+      "net_theta": -0.027972554075215157,
+      "net_vega": 0.03334384160185684,
+      "pnl": "26.760190382758800",
+      "pnl_pct": "12.16372290125400",
+      "put_entry_price": "100",
+      "put_exit_price": "233.760190382758800",
+      "spot_at_entry": 13.37,
+      "spot_at_exit": 10.755,
+      "spot_move": -2.6149999999999984,
+      "spot_move_pct": -19.55871353777112,
+      "strike": "13",
+      "success": true,
+      "symbol": "SGHC",
+      "theta_pnl": "-48.2526557797461",
+      "total_pnl_with_hedge": "-89.604809617241100",
+      "unexplained_pnl": "15.49225251397656",
+      "vega_pnl": "18.2933226106889"
+    }
+  ]
+}

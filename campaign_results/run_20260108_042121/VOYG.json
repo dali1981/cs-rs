@@ -1,0 +1,209 @@
+{
+  "end_date": "2025-11-03",
+  "num_trades": 1,
+  "start_date": "2025-11-03",
+  "successful_trades": 1,
+  "symbol": "VOYG",
+  "total_hedge_pnl": "781.98999999999976",
+  "total_option_pnl": "-293.06871820026500",
+  "total_pnl": "482.82128179973476",
+  "total_transaction_cost": "6.10",
+  "trade_type": "straddle",
+  "trades": [
+    {
+      "call_entry_price": "510.0",
+      "call_exit_price": "145.00",
+      "delta_pnl": "6.79442546363935",
+      "earnings_date": "2025-11-03",
+      "earnings_time": "AfterMarketClose",
+      "entry_debit": "1000.0",
+      "entry_surface_time": "2025-10-14T19:59:00Z",
+      "entry_time": "2025-10-14T13:35:00Z",
+      "exit_credit": "706.93128179973500",
+      "exit_pricing_method": "Market",
+      "exit_surface_time": "2025-10-31T19:55:00Z",
+      "exit_time": "2025-10-31T19:55:00Z",
+      "expected_move_pct": 31.17692907248636,
+      "expiration": "2025-11-21",
+      "failure_reason": null,
+      "gamma_pnl": "6.69971696773753",
+      "hedge_pnl": "781.98999999999976",
+      "hedge_position": {
+        "avg_hedge_price": 22.91010000000001,
+        "cumulative_shares": 100,
+        "hedges": [
+          {
+            "cost": "1.00",
+            "delta_after": 0.0000322562600767462,
+            "delta_before": -0.9999677437399233,
+            "shares": 100,
+            "spot_price": 32.075,
+            "timestamp": "2025-10-14T13:35:00Z"
+          },
+          {
+            "cost": "2.00",
+            "delta_after": -7.170960329982989e-6,
+            "delta_before": 1.99999282903967,
+            "shares": -200,
+            "spot_price": 37.99,
+            "timestamp": "2025-10-15T13:35:00Z"
+          },
+          {
+            "cost": "1.88",
+            "delta_after": -0.00287413256480884,
+            "delta_before": -1.8828741325648088,
+            "shares": 188,
+            "spot_price": 33.81,
+            "timestamp": "2025-10-17T13:35:00Z"
+          },
+          {
+            "cost": "0.08",
+            "delta_after": -0.0018260646191161634,
+            "delta_before": -0.08182606461911612,
+            "shares": 8,
+            "spot_price": 33.56,
+            "timestamp": "2025-10-20T13:35:00Z"
+          },
+          {
+            "cost": "0.42",
+            "delta_after": -0.0011635882481177973,
+            "delta_before": 0.41883641175188213,
+            "shares": -42,
+            "spot_price": 34.39,
+            "timestamp": "2025-10-21T13:35:00Z"
+          },
+          {
+            "cost": "0.46",
+            "delta_after": 0.0006611100227920108,
+            "delta_before": -0.45933888997720795,
+            "shares": 46,
+            "spot_price": 32.835,
+            "timestamp": "2025-10-22T13:35:00Z"
+          },
+          {
+            "cost": "0.02",
+            "delta_after": -0.0023668751067380533,
+            "delta_before": 0.017633124893261964,
+            "shares": -2,
+            "spot_price": 33.49,
+            "timestamp": "2025-10-24T13:35:00Z"
+          },
+          {
+            "cost": "0.11",
+            "delta_after": 0.0035607093215795915,
+            "delta_before": 0.11356070932157958,
+            "shares": -11,
+            "spot_price": 34.05,
+            "timestamp": "2025-10-27T13:35:00Z"
+          },
+          {
+            "cost": "0.13",
+            "delta_after": 0.0022193476060070605,
+            "delta_before": -0.12778065239399294,
+            "shares": 13,
+            "spot_price": 33.25,
+            "timestamp": "2025-10-28T13:35:00Z"
+          }
+        ],
+        "peak_long_shares": 100,
+        "peak_short_shares": 100,
+        "realized_pnl": "0",
+        "realized_vol_metrics": {
+          "entry_hv": 0.06104028649381125,
+          "entry_iv": 1.1346128631887566,
+          "exit_iv": 0.9897367970550823,
+          "iv_premium_at_entry": 1758.7934761803463,
+          "num_observations": 15,
+          "realized_vol": 1.0050381172137632,
+          "realized_vs_implied": -11.420172481636767
+        },
+        "spot_history": [
+          [
+            "2026-01-08T03:21:19.994314Z",
+            32.075
+          ],
+          [
+            "2025-10-14T13:35:00Z",
+            32.075
+          ],
+          [
+            "2025-10-15T13:35:00Z",
+            37.99
+          ],
+          [
+            "2025-10-16T13:35:00Z",
+            37.67
+          ],
+          [
+            "2025-10-17T13:35:00Z",
+            33.81
+          ],
+          [
+            "2025-10-20T13:35:00Z",
+            33.56
+          ],
+          [
+            "2025-10-21T13:35:00Z",
+            34.39
+          ],
+          [
+            "2025-10-22T13:35:00Z",
+            32.835
+          ],
+          [
+            "2025-10-23T13:35:00Z",
+            31.19
+          ],
+          [
+            "2025-10-24T13:35:00Z",
+            33.49
+          ],
+          [
+            "2025-10-27T13:35:00Z",
+            34.05
+          ],
+          [
+            "2025-10-28T13:35:00Z",
+            33.25
+          ],
+          [
+            "2025-10-29T13:35:00Z",
+            32.08
+          ],
+          [
+            "2025-10-30T13:35:00Z",
+            30.29
+          ],
+          [
+            "2025-10-31T13:35:00Z",
+            30.377
+          ]
+        ],
+        "total_cost": "6.10",
+        "unrealized_pnl": "781.98999999999976"
+      },
+      "iv_change": -0.14487606613367432,
+      "iv_entry": 1.1346128631887566,
+      "iv_exit": 0.9897367970550823,
+      "net_delta": -0.050516174450850104,
+      "net_gamma": 0.07406992128619011,
+      "net_theta": -0.12019429511893691,
+      "net_vega": 0.08196030436567434,
+      "pnl": "-293.06871820026500",
+      "pnl_pct": "-29.306871820026500",
+      "put_entry_price": "490.0",
+      "put_exit_price": "561.93128179973500",
+      "spot_at_entry": 32.075,
+      "spot_at_exit": 30.73,
+      "spot_move": -1.3450000000000024,
+      "spot_move_pct": -4.193296960249423,
+      "strike": "35",
+      "success": true,
+      "symbol": "VOYG",
+      "theta_pnl": "-207.3351590801662",
+      "total_pnl_with_hedge": "482.82128179973476",
+      "unexplained_pnl": "22.04388866539938",
+      "vega_pnl": "-121.2715902168751"
+    }
+  ]
+}

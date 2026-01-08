@@ -1,0 +1,145 @@
+{
+  "end_date": "2025-11-03",
+  "num_trades": 1,
+  "start_date": "2025-11-03",
+  "successful_trades": 1,
+  "symbol": "GOOD",
+  "total_hedge_pnl": "-1.340000000000075",
+  "total_option_pnl": "38.449913632485100",
+  "total_pnl": "36.109913632485025",
+  "total_transaction_cost": "1.00",
+  "trade_type": "straddle",
+  "trades": [
+    {
+      "call_entry_price": "16.00",
+      "call_exit_price": "58.59740318515300",
+      "delta_pnl": "0.59853362214541",
+      "earnings_date": "2025-11-03",
+      "earnings_time": "AfterMarketClose",
+      "entry_debit": "141.00",
+      "entry_surface_time": "2025-10-14T18:22:00Z",
+      "entry_time": "2025-10-14T13:35:00Z",
+      "exit_credit": "179.449913632485100",
+      "exit_pricing_method": "Market",
+      "exit_surface_time": "2025-10-31T19:55:00Z",
+      "exit_time": "2025-10-31T19:55:00Z",
+      "expected_move_pct": 12.321512837093868,
+      "expiration": "2025-12-19",
+      "failure_reason": null,
+      "gamma_pnl": "0.004290294149893972",
+      "hedge_pnl": "-1.340000000000075",
+      "hedge_position": {
+        "avg_hedge_price": 11.443400000000002,
+        "cumulative_shares": 100,
+        "hedges": [
+          {
+            "cost": "1.00",
+            "delta_after": 0.0,
+            "delta_before": -1.0,
+            "shares": 100,
+            "spot_price": 11.4434,
+            "timestamp": "2025-10-14T13:35:00Z"
+          }
+        ],
+        "peak_long_shares": 100,
+        "peak_short_shares": 0,
+        "realized_pnl": "0",
+        "realized_vol_metrics": {
+          "entry_hv": 0.019493366021024458,
+          "entry_iv": 0.28948803302234655,
+          "exit_iv": 0.457410955298171,
+          "iv_premium_at_entry": 1385.0592386667386,
+          "num_observations": 15,
+          "realized_vol": 0.13023404672234842,
+          "realized_vs_implied": -55.01228656581627
+        },
+        "spot_history": [
+          [
+            "2026-01-08T03:20:56.282708Z",
+            11.4434
+          ],
+          [
+            "2025-10-14T13:35:00Z",
+            11.4434
+          ],
+          [
+            "2025-10-15T13:35:00Z",
+            11.6399
+          ],
+          [
+            "2025-10-16T13:35:00Z",
+            11.65
+          ],
+          [
+            "2025-10-17T13:35:00Z",
+            11.48
+          ],
+          [
+            "2025-10-20T13:35:00Z",
+            11.62
+          ],
+          [
+            "2025-10-21T13:35:00Z",
+            11.6
+          ],
+          [
+            "2025-10-22T13:35:00Z",
+            11.51
+          ],
+          [
+            "2025-10-23T13:35:00Z",
+            11.38
+          ],
+          [
+            "2025-10-24T13:35:00Z",
+            11.3796
+          ],
+          [
+            "2025-10-27T13:35:00Z",
+            11.4
+          ],
+          [
+            "2025-10-28T13:35:00Z",
+            11.34
+          ],
+          [
+            "2025-10-29T13:35:00Z",
+            11.248
+          ],
+          [
+            "2025-10-30T13:35:00Z",
+            11.284
+          ],
+          [
+            "2025-10-31T13:35:00Z",
+            11.25
+          ]
+        ],
+        "total_cost": "1.00",
+        "unrealized_pnl": "-1.340000000000075"
+      },
+      "iv_change": 0.16792292227582445,
+      "iv_entry": 0.28948803302234655,
+      "iv_exit": 0.457410955298171,
+      "net_delta": -0.44666688219804235,
+      "net_gamma": 0.47786747047154104,
+      "net_theta": -0.0062640087916301015,
+      "net_vega": 0.032434400044087965,
+      "pnl": "38.449913632485100",
+      "pnl_pct": "27.269442292542624113475177300",
+      "put_entry_price": "125.00",
+      "put_exit_price": "120.852510447332100",
+      "spot_at_entry": 11.4434,
+      "spot_at_exit": 11.43,
+      "spot_move": -0.013400000000000745,
+      "spot_move_pct": -0.11709806526033124,
+      "strike": "12.5",
+      "success": true,
+      "symbol": "GOOD",
+      "theta_pnl": "-10.80541516556192",
+      "total_pnl_with_hedge": "36.109913632485025",
+      "unexplained_pnl": "-2.287065837668841",
+      "vega_pnl": "50.9395707194206"
+    }
+  ]
+}

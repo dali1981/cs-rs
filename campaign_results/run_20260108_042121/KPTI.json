@@ -1,0 +1,169 @@
+{
+  "end_date": "2025-11-03",
+  "num_trades": 1,
+  "start_date": "2025-11-03",
+  "successful_trades": 1,
+  "symbol": "KPTI",
+  "total_hedge_pnl": "-18.3390999999999823",
+  "total_option_pnl": "-25.561611685676400",
+  "total_pnl": "-44.9007116856763823",
+  "total_transaction_cost": "1.00",
+  "trade_type": "straddle",
+  "trades": [
+    {
+      "call_entry_price": "110.0",
+      "call_exit_price": "109.438388314323600",
+      "delta_pnl": "8.63973081291464",
+      "earnings_date": "2025-11-03",
+      "earnings_time": "BeforeMarketOpen",
+      "entry_debit": "160.0",
+      "entry_surface_time": "2025-10-14T19:58:00Z",
+      "entry_time": "2025-10-14T13:35:00Z",
+      "exit_credit": "134.438388314323600",
+      "exit_pricing_method": "Market",
+      "exit_surface_time": "2025-10-31T19:55:00Z",
+      "exit_time": "2025-10-31T19:55:00Z",
+      "expected_move_pct": 28.520499108734406,
+      "expiration": "2025-11-21",
+      "failure_reason": null,
+      "gamma_pnl": "0.835085909182863",
+      "hedge_pnl": "-18.3390999999999823",
+      "hedge_position": {
+        "avg_hedge_price": 5.646609000000001,
+        "cumulative_shares": -100,
+        "hedges": [
+          {
+            "cost": "0.89",
+            "delta_after": 0.003907419480577823,
+            "delta_before": 0.8939074194805778,
+            "shares": -89,
+            "spot_price": 5.61,
+            "timestamp": "2025-10-14T13:35:00Z"
+          },
+          {
+            "cost": "0.09",
+            "delta_after": 0.0012222579783858212,
+            "delta_before": 0.09122225797838579,
+            "shares": -9,
+            "spot_price": 5.9201,
+            "timestamp": "2025-10-15T13:35:00Z"
+          },
+          {
+            "cost": "0.01",
+            "delta_after": -0.001900083970258537,
+            "delta_before": 0.008099916029741472,
+            "shares": -1,
+            "spot_price": 5.98,
+            "timestamp": "2025-10-16T13:35:00Z"
+          },
+          {
+            "cost": "0.01",
+            "delta_after": -0.0030485615630184704,
+            "delta_before": 0.0069514384369815385,
+            "shares": -1,
+            "spot_price": 6.11,
+            "timestamp": "2025-10-20T13:35:00Z"
+          }
+        ],
+        "peak_long_shares": 0,
+        "peak_short_shares": 100,
+        "realized_pnl": "0",
+        "realized_vol_metrics": {
+          "entry_hv": 0.23632621105424548,
+          "entry_iv": 1.1158458065045,
+          "exit_iv": 1.118817672077379,
+          "iv_premium_at_entry": 372.1633717761306,
+          "num_observations": 15,
+          "realized_vol": 0.503995612052738,
+          "realized_vs_implied": -54.83286229021594
+        },
+        "spot_history": [
+          [
+            "2026-01-08T03:21:01.518640Z",
+            5.61
+          ],
+          [
+            "2025-10-14T13:35:00Z",
+            5.61
+          ],
+          [
+            "2025-10-15T13:35:00Z",
+            5.9201
+          ],
+          [
+            "2025-10-16T13:35:00Z",
+            5.98
+          ],
+          [
+            "2025-10-17T13:35:00Z",
+            6.03
+          ],
+          [
+            "2025-10-20T13:35:00Z",
+            6.11
+          ],
+          [
+            "2025-10-21T13:35:00Z",
+            6.31
+          ],
+          [
+            "2025-10-22T13:35:00Z",
+            6.49
+          ],
+          [
+            "2025-10-23T13:35:00Z",
+            6.21
+          ],
+          [
+            "2025-10-24T13:35:00Z",
+            6.38
+          ],
+          [
+            "2025-10-27T13:35:00Z",
+            6.15
+          ],
+          [
+            "2025-10-28T13:35:00Z",
+            6.5
+          ],
+          [
+            "2025-10-29T13:35:00Z",
+            6.325
+          ],
+          [
+            "2025-10-30T13:35:00Z",
+            6.2607
+          ],
+          [
+            "2025-10-31T13:35:00Z",
+            6.025
+          ]
+        ],
+        "total_cost": "1.00",
+        "unrealized_pnl": "-18.3390999999999823"
+      },
+      "iv_change": 0.0029718655728789845,
+      "iv_entry": 1.1158458065045,
+      "iv_exit": 1.118817672077379,
+      "net_delta": 0.392715036950666,
+      "net_gamma": 0.34507682197639045,
+      "net_theta": -0.018596130231797417,
+      "net_vega": 0.012702704107839545,
+      "pnl": "-25.561611685676400",
+      "pnl_pct": "-15.9760073035477500",
+      "put_entry_price": "50.0",
+      "put_exit_price": "25.00",
+      "spot_at_entry": 5.61,
+      "spot_at_exit": 5.83,
+      "spot_move": 0.21999999999999975,
+      "spot_move_pct": 3.9215686274509753,
+      "strike": "5",
+      "success": true,
+      "symbol": "KPTI",
+      "theta_pnl": "-32.07832464985054",
+      "total_pnl_with_hedge": "-44.9007116856763823",
+      "unexplained_pnl": "-3.328381142534287",
+      "vega_pnl": "0.3702773846109248"
+    }
+  ]
+}

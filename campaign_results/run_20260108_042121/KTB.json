@@ -1,0 +1,161 @@
+{
+  "end_date": "2025-11-03",
+  "num_trades": 1,
+  "start_date": "2025-11-03",
+  "successful_trades": 1,
+  "symbol": "KTB",
+  "total_hedge_pnl": "1162.739999999999805",
+  "total_option_pnl": "-49.81301925852700",
+  "total_pnl": "1109.936980741472805",
+  "total_transaction_cost": "2.99",
+  "trade_type": "straddle",
+  "trades": [
+    {
+      "call_entry_price": "453.50844753481600",
+      "call_exit_price": "568.00",
+      "delta_pnl": "-1.833317748355778",
+      "earnings_date": "2025-11-03",
+      "earnings_time": "BeforeMarketOpen",
+      "entry_debit": "1054.81301925852700",
+      "entry_surface_time": "2025-10-14T19:07:00Z",
+      "entry_time": "2025-10-14T13:35:00Z",
+      "exit_credit": "1005.00",
+      "exit_pricing_method": "Market",
+      "exit_surface_time": "2025-10-31T19:55:00Z",
+      "exit_time": "2025-10-31T19:55:00Z",
+      "expected_move_pct": 13.458539320682961,
+      "expiration": "2025-11-21",
+      "failure_reason": null,
+      "gamma_pnl": "24.18482313575471",
+      "hedge_pnl": "1162.739999999999805",
+      "hedge_position": {
+        "avg_hedge_price": 92.93484848484847,
+        "cumulative_shares": -99,
+        "hedges": [
+          {
+            "cost": "0.99",
+            "delta_after": 0.0029863609838025607,
+            "delta_before": -0.9870136390161974,
+            "shares": 99,
+            "spot_price": 78.375,
+            "timestamp": "2025-10-14T13:35:00Z"
+          },
+          {
+            "cost": "1.99",
+            "delta_after": 0.0,
+            "delta_before": 1.99,
+            "shares": -199,
+            "spot_price": 85.63,
+            "timestamp": "2025-10-15T13:35:00Z"
+          },
+          {
+            "cost": "0.01",
+            "delta_after": -0.0017266416072556634,
+            "delta_before": -0.011726641607255672,
+            "shares": 1,
+            "spot_price": 80.695,
+            "timestamp": "2025-10-31T13:35:00Z"
+          }
+        ],
+        "peak_long_shares": 99,
+        "peak_short_shares": 100,
+        "realized_pnl": "0",
+        "realized_vol_metrics": {
+          "entry_hv": 0.019084898732402097,
+          "entry_iv": 0.5153062284396879,
+          "exit_iv": 0.6485194558757408,
+          "iv_premium_at_entry": 2600.0731608012547,
+          "num_observations": 15,
+          "realized_vol": 0.43833823058308224,
+          "realized_vs_implied": -14.936360868305334
+        },
+        "spot_history": [
+          [
+            "2026-01-08T03:21:01.634711Z",
+            78.375
+          ],
+          [
+            "2025-10-14T13:35:00Z",
+            78.375
+          ],
+          [
+            "2025-10-15T13:35:00Z",
+            85.63
+          ],
+          [
+            "2025-10-16T13:35:00Z",
+            84.385
+          ],
+          [
+            "2025-10-17T13:35:00Z",
+            85.84
+          ],
+          [
+            "2025-10-20T13:35:00Z",
+            84.63
+          ],
+          [
+            "2025-10-21T13:35:00Z",
+            84.045
+          ],
+          [
+            "2025-10-22T13:35:00Z",
+            85.2
+          ],
+          [
+            "2025-10-23T13:35:00Z",
+            84.82
+          ],
+          [
+            "2025-10-24T13:35:00Z",
+            86.15
+          ],
+          [
+            "2025-10-27T13:35:00Z",
+            85.93
+          ],
+          [
+            "2025-10-28T13:35:00Z",
+            84.792
+          ],
+          [
+            "2025-10-29T13:35:00Z",
+            84.28
+          ],
+          [
+            "2025-10-30T13:35:00Z",
+            81.14
+          ],
+          [
+            "2025-10-31T13:35:00Z",
+            80.695
+          ]
+        ],
+        "total_cost": "2.99",
+        "unrealized_pnl": "1162.739999999999805"
+      },
+      "iv_change": 0.1332132274360529,
+      "iv_entry": 0.5153062284396879,
+      "iv_exit": 0.6485194558757408,
+      "net_delta": -0.006512674061654622,
+      "net_gamma": 0.06104022320354292,
+      "net_theta": -0.13478208116906448,
+      "net_vega": 0.2025135561847576,
+      "pnl": "-49.81301925852700",
+      "pnl_pct": "-4.7224501735428609873694446500",
+      "put_entry_price": "601.30457172371100",
+      "put_exit_price": "437.00",
+      "spot_at_entry": 78.375,
+      "spot_at_exit": 81.19,
+      "spot_move": 2.8149999999999977,
+      "spot_move_pct": 3.591706539074957,
+      "strike": "80",
+      "success": true,
+      "symbol": "KTB",
+      "theta_pnl": "-232.4990900166363",
+      "total_pnl_with_hedge": "1109.936980741472805",
+      "unexplained_pnl": "-109.4398131727666",
+      "vega_pnl": "269.7743785434769"
+    }
+  ]
+}

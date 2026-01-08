@@ -414,3 +414,69 @@ impl AppConfig {
         }
     }
 }
+
+/// Build HedgeConfig from CLI arguments (shared by backtest and campaign commands)
+///
+/// Returns None if hedging is not enabled.
+pub fn build_hedge_config_from_args(
+    enabled: bool,
+    strategy: &str,
+    interval_hours: u64,
+    delta_threshold: f64,
+    max_rehedges: Option<usize>,
+    cost_per_share: f64,
+    delta_mode: &str,
+    hv_window: u32,
+    track_realized_vol: bool,
+    attribution_enabled: bool,
+) -> Option<cs_domain::HedgeConfig> {
+    use cs_domain::{HedgeConfig, HedgeStrategy};
+    use chrono::Duration;
+    use rust_decimal::Decimal;
+
+    if !enabled {
+        return None;
+    }
+
+    let hedge_strategy = match strategy.to_lowercase().as_str() {
+        "time" => HedgeStrategy::TimeBased {
+            interval: Duration::hours(interval_hours as i64),
+        },
+        "delta" => HedgeStrategy::DeltaThreshold {
+            threshold: delta_threshold,
+        },
+        "gamma" => HedgeStrategy::GammaDollar {
+            threshold: delta_threshold * 100.0,
+        },
+        _ => HedgeStrategy::TimeBased {
+            interval: Duration::hours(interval_hours as i64),
+        },
+    };
+
+    // Parse delta computation mode
+    let delta_computation = match delta_mode.to_lowercase().as_str() {
+        "gamma" | "gamma-approximation" => cs_domain::DeltaComputation::GammaApproximation,
+        "entry-hv" => cs_domain::DeltaComputation::EntryHV { window: hv_window },
+        "entry-iv" => cs_domain::DeltaComputation::EntryIV { _marker: () },
+        "current-hv" => cs_domain::DeltaComputation::CurrentHV { window: hv_window },
+        "current-iv" | "current-market-iv" => cs_domain::DeltaComputation::CurrentMarketIV { _marker: () },
+        "historical-iv" | "historical-average-iv" => cs_domain::DeltaComputation::HistoricalAverageIV {
+            lookback_days: hv_window,
+            _marker: (),
+        },
+        _ => {
+            tracing::warn!("Unknown delta mode '{}', using GammaApproximation", delta_mode);
+            cs_domain::DeltaComputation::GammaApproximation
+        }
+    };
+
+    Some(HedgeConfig {
+        strategy: hedge_strategy,
+        max_rehedges,
+        min_hedge_size: 1,
+        transaction_cost_per_share: Decimal::try_from(cost_per_share).unwrap_or(Decimal::ZERO),
+        contract_multiplier: 100,
+        delta_computation,
+        track_realized_vol: track_realized_vol || attribution_enabled,
+    })
+}

@@ -283,8 +283,8 @@ enum Commands {
         /// Strategy (calendar-spread, straddle, iron-butterfly)
         #[arg(long)]
         strategy: String,
-        /// Period policy (earnings-only, inter-earnings, continuous, fixed)
-        #[arg(long)]
+        /// Period policy (earnings-only, inter-earnings, pre-earnings, post-earnings, continuous)
+        #[arg(long, default_value = "pre-earnings")]
         period_policy: String,
         /// Roll policy (none, weekly, monthly)
         #[arg(long, default_value = "none")]
@@ -328,9 +328,33 @@ enum Commands {
         /// For time-based: rehedge interval in hours (default: 24)
         #[arg(long, default_value = "24")]
         hedge_interval_hours: u64,
-        /// Output file path
+        /// For delta-based: threshold to trigger rehedge (default: 0.10)
+        #[arg(long, default_value = "0.10")]
+        delta_threshold: f64,
+        /// Maximum number of rehedges per trade
+        #[arg(long)]
+        max_rehedges: Option<usize>,
+        /// Transaction cost per share for hedging (default: 0.01)
+        #[arg(long, default_value = "0.01")]
+        hedge_cost_per_share: f64,
+        /// Delta computation mode: gamma, entry-hv, entry-iv, current-hv, current-iv (default: gamma)
+        #[arg(long, default_value = "gamma")]
+        hedge_delta_mode: String,
+        /// HV lookback window in days for entry-hv mode (default: 20)
+        #[arg(long, default_value = "20")]
+        hv_window: u16,
+        /// Enable P&L attribution
+        #[arg(long)]
+        attribution: bool,
+        /// Track realized volatility during hedging
+        #[arg(long)]
+        track_realized_vol: bool,
+        /// Output file path (CSV format)
         #[arg(long)]
         output: Option<PathBuf>,
+        /// Output directory for detailed JSON files (one per symbol)
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
     },
 }
 
@@ -546,7 +570,15 @@ async fn main() -> Result<()> {
             hedge,
             hedge_strategy,
             hedge_interval_hours,
+            delta_threshold,
+            max_rehedges,
+            hedge_cost_per_share,
+            hedge_delta_mode,
+            hv_window,
+            attribution,
+            track_realized_vol,
             output,
+            output_dir,
         } => {
             run_campaign_command(
                 cli.data_dir.as_ref(),
@@ -567,7 +599,15 @@ async fn main() -> Result<()> {
                 hedge,
                 &hedge_strategy,
                 hedge_interval_hours,
+                delta_threshold,
+                max_rehedges,
+                hedge_cost_per_share,
+                &hedge_delta_mode,
+                hv_window,
+                attribution,
+                track_realized_vol,
                 output,
+                output_dir,
             )
             .await?;
         }
@@ -2190,8 +2230,8 @@ async fn run_campaign_command(
     start: &str,
     end: &str,
     earnings_file: Option<&PathBuf>,
-    entry_time: &str,
-    exit_time: &str,
+    _entry_time: &str,
+    _exit_time: &str,
     entry_days_before: Option<u16>,
     exit_days_after: Option<u16>,
     inter_entry_days_after: u16,
@@ -2200,7 +2240,15 @@ async fn run_campaign_command(
     hedge: bool,
     hedge_strategy: &str,
     hedge_interval_hours: u64,
+    delta_threshold: f64,
+    max_rehedges: Option<usize>,
+    hedge_cost_per_share: f64,
+    hedge_delta_mode: &str,
+    hv_window: u16,
+    attribution: bool,
+    track_realized_vol: bool,
     output: Option<PathBuf>,
+    output_dir: Option<PathBuf>,
 ) -> Result<()> {
     use cs_domain::{
         TradingCampaign, SessionSchedule, OptionStrategy, PeriodPolicy, RollPolicy,
@@ -2212,9 +2260,14 @@ async fn run_campaign_command(
     use std::sync::Arc;
 
     println!("{}", style("Campaign-Based Backtest").bold().green());
-    println!("  Symbols:  {}", symbols.join(", "));
+    if !symbols.is_empty() {
+        println!("  Symbols:  {}", symbols.join(", "));
+    } else {
+        println!("  Symbols:  (auto-discover from earnings)");
+    }
     println!("  Strategy: {}", strategy);
     println!("  Period:   {} to {}", start, end);
+    println!("  Hedging:  {}", if hedge { format!("Enabled ({})", hedge_strategy) } else { "Disabled".to_string() });
     println!();
 
     // Parse dates
@@ -2291,19 +2344,72 @@ async fn run_campaign_command(
         _ => anyhow::bail!("Unknown period policy: {}. Use: earnings-only, inter-earnings, pre-earnings, post-earnings, continuous", period_policy),
     };
 
-    // Load earnings calendar
-    let earnings_calendar = if let Some(path) = earnings_file {
+    // Load earnings calendar and determine symbols
+    let (earnings_calendar, discovered_symbols) = if let Some(path) = earnings_file {
         // Load from file
-        load_earnings_from_file(path).await?
+        let earnings = load_earnings_from_file(path).await?;
+        let unique_symbols: Vec<String> = if symbols.is_empty() {
+            // Auto-discover symbols from earnings file
+            let syms: std::collections::HashSet<String> = earnings
+                .iter()
+                .map(|e| e.symbol.clone())
+                .collect();
+            let mut sorted: Vec<String> = syms.into_iter().collect();
+            sorted.sort();
+            sorted
+        } else {
+            symbols.clone()
+        };
+        (earnings, unique_symbols)
+    } else if symbols.is_empty() {
+        // Auto-discover: load all earnings from earnings-rs adapter
+        use cs_domain::infrastructure::EarningsReaderAdapter;
+        use cs_domain::repositories::EarningsRepository;
+
+        let earnings_dir = std::env::var("EARNINGS_DATA_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("trading_project/nasdaq_earnings/data")
+            });
+
+        println!("{}", style("Auto-discovering symbols from earnings database...").dim());
+        let earnings_repo = EarningsReaderAdapter::new(earnings_dir);
+        let all_earnings = earnings_repo
+            .load_earnings(start_date, end_date, None)
+            .await
+            .context("Failed to load earnings for symbol discovery")?;
+
+        let unique_symbols: std::collections::HashSet<String> = all_earnings
+            .iter()
+            .map(|e| e.symbol.clone())
+            .collect();
+
+        let mut sorted: Vec<String> = unique_symbols.into_iter().collect();
+        sorted.sort();
+
+        if sorted.is_empty() {
+            anyhow::bail!("No symbols found in earnings database for date range {} to {}", start_date, end_date);
+        }
+
+        println!("  Found {} symbols: {}", sorted.len(),
+            if sorted.len() <= 10 { sorted.join(", ") }
+            else { format!("{}, ... ({} more)", sorted[..10].join(", "), sorted.len() - 10) }
+        );
+        println!();
+
+        (all_earnings, sorted)
     } else {
-        // Load from default location based on symbols
-        load_earnings_for_symbols(&symbols, data_dir)?
+        // Load from default location based on explicit symbols
+        let earnings = load_earnings_for_symbols(&symbols, data_dir)?;
+        (earnings, symbols.clone())
     };
 
     println!("Loaded {} earnings events", earnings_calendar.len());
 
-    // Create campaigns for each symbol
-    let campaigns: Vec<TradingCampaign> = symbols
+    // Create campaigns for each discovered symbol
+    let campaigns: Vec<TradingCampaign> = discovered_symbols
         .iter()
         .map(|symbol| TradingCampaign {
             symbol: symbol.clone(),
@@ -2345,19 +2451,52 @@ async fn run_campaign_command(
     // Create session executor
     // Use calendar spread config as a reasonable default for all strategies
     let config = ExecutionConfig::for_calendar_spread(None);
-    let executor = SessionExecutor::new(
+    let mut executor = SessionExecutor::new(
         options_repo_arc,
         equity_repo_arc,
         trade_factory,
         config,
     );
 
-    // TODO: Hedging for campaign command - see TICKET-002
-    if hedge {
-        println!("{}", style("Warning:").bold().yellow());
-        println!("  Hedging not yet implemented for campaign command.");
-        println!("  Use 'cs backtest --hedge' instead.");
+    // Apply hedging if enabled - use shared config builder
+    if let Some(hedge_config) = crate::config::build_hedge_config_from_args(
+        hedge,
+        hedge_strategy,
+        hedge_interval_hours,
+        delta_threshold,
+        max_rehedges,
+        hedge_cost_per_share,
+        hedge_delta_mode,
+        hv_window as u32,
+        track_realized_vol,
+        attribution,
+    ) {
+        use cs_backtest::TimingStrategy;
+        use cs_domain::{EarningsTradeTiming, StraddleTradeTiming, TimingConfig};
+
+        println!("{}", style("Hedging Configuration:").bold().cyan());
+        println!("  Strategy:    {:?}", hedge_config.strategy);
+        println!("  Delta Mode:  {:?}", hedge_config.delta_computation);
+        println!("  Track RV:    {}", hedge_config.track_realized_vol);
+        println!("  Attribution: {}", attribution);
         println!();
+
+        // Create timing strategy based on strategy type
+        let timing_strategy = match strategy {
+            OptionStrategy::Straddle => TimingStrategy::Straddle(
+                StraddleTradeTiming::new(TimingConfig::default())
+            ),
+            _ => TimingStrategy::Earnings(
+                EarningsTradeTiming::new(TimingConfig::default())
+            ),
+        };
+
+        executor = executor.with_hedging(hedge_config.clone(), timing_strategy);
+
+        // Also set attribution config if enabled
+        if attribution {
+            executor = executor.with_attribution(cs_domain::AttributionConfig::default());
+        }
     }
 
     // Collect all sessions from schedule
@@ -2383,8 +2522,14 @@ async fn run_campaign_command(
     // Save results if requested
     if let Some(output_path) = output {
         println!();
-        println!("Saving results to: {}", output_path.display());
         save_campaign_results(&results, &output_path)?;
+    }
+
+    // Save detailed JSON files per symbol if output_dir specified
+    if let Some(dir) = output_dir {
+        println!();
+        let strategy_str = format!("{:?}", strategy).to_lowercase();
+        save_campaign_json_per_symbol(&results, &dir, &strategy_str, start, end)?;
     }
 
     println!();
@@ -2500,21 +2645,277 @@ fn save_campaign_results(results: &cs_backtest::BatchResult, path: &PathBuf) -> 
 
     let mut file = std::fs::File::create(path)?;
 
-    writeln!(file, "symbol,strategy,entry_date,exit_date,action,success,error")?;
+    // Build header based on available data
+    let has_hedge = results.has_hedge_data();
+    let has_attr = results.has_attribution_data();
+
+    let mut header = "symbol,strategy,entry_date,exit_date,success,entry_cost,exit_value,option_pnl,spot_entry,spot_exit".to_string();
+
+    if has_hedge {
+        header.push_str(",hedge_pnl,total_pnl,hedge_count");
+    }
+    if has_attr {
+        header.push_str(",delta_gross,delta_hedge,delta_net,gamma,theta,vega,unexplained,hedge_efficiency");
+    }
+    header.push_str(",error");
+
+    writeln!(file, "{}", header)?;
 
     for result in &results.results {
-        writeln!(
-            file,
-            "{},{:?},{},{},{:?},{},{}",
+        let mut row = format!(
+            "{},{:?},{},{},{},",
             result.session.symbol,
             result.session.strategy,
             result.session.entry_date(),
             result.session.exit_date(),
-            result.session.action,
             result.success,
-            result.error.as_deref().unwrap_or(""),
-        )?;
+        );
+
+        if let Some(pnl) = &result.pnl {
+            row.push_str(&format!(
+                "{:.2},{:.2},{:.2},{:.4},{:.4}",
+                pnl.entry_cost,
+                pnl.exit_value,
+                pnl.pnl,
+                pnl.spot_at_entry,
+                pnl.spot_at_exit,
+            ));
+
+            if has_hedge {
+                let hedge_pnl = pnl.hedge_pnl.map(|h| format!("{:.2}", h)).unwrap_or_default();
+                let total_pnl = pnl.total_pnl_with_hedge.map(|t| format!("{:.2}", t)).unwrap_or_default();
+                let hedge_count = pnl.hedge_count.map(|c| c.to_string()).unwrap_or_default();
+                row.push_str(&format!(",{},{},{}", hedge_pnl, total_pnl, hedge_count));
+            }
+
+            if has_attr {
+                if let Some(attr) = &pnl.attribution {
+                    row.push_str(&format!(
+                        ",{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{:.4}",
+                        attr.gross_delta_pnl,
+                        attr.hedge_delta_pnl,
+                        attr.net_delta_pnl,
+                        attr.gamma_pnl,
+                        attr.theta_pnl,
+                        attr.vega_pnl,
+                        attr.unexplained,
+                        attr.hedge_efficiency,
+                    ));
+                } else {
+                    row.push_str(",,,,,,,,");
+                }
+            }
+        } else {
+            // No P&L data - fill with empty columns
+            row.push_str(",,,,,");
+            if has_hedge {
+                row.push_str(",,,");
+            }
+            if has_attr {
+                row.push_str(",,,,,,,,");
+            }
+        }
+
+        row.push_str(&format!(",{}", result.error.as_deref().unwrap_or("")));
+        writeln!(file, "{}", row)?;
     }
+
+    // Write summary file alongside the main file
+    let summary_path = path.with_extension("summary.json");
+    save_campaign_summary(results, &summary_path)?;
+
+    println!("  Saved trade details to: {}", path.display());
+    println!("  Saved summary to: {}", summary_path.display());
+
+    Ok(())
+}
+
+/// Save detailed JSON files per symbol in a timestamped run directory
+/// Uses the same serialization as backtest command for full detail
+fn save_campaign_json_per_symbol(
+    results: &cs_backtest::BatchResult,
+    output_dir: &PathBuf,
+    strategy: &str,
+    start: &str,
+    end: &str,
+) -> Result<()> {
+    use serde_json::json;
+    use std::collections::HashMap;
+    use chrono::Local;
+    use cs_domain::{StraddleResult, CalendarSpreadResult, IronButterflyResult};
+
+    // Create timestamped run directory
+    let timestamp = Local::now().format("%Y%m%d_%H%M%S");
+    let run_dir = output_dir.join(format!("run_{}", timestamp));
+    std::fs::create_dir_all(&run_dir)?;
+
+    // Group results by symbol
+    let mut by_symbol: HashMap<String, Vec<&cs_backtest::SessionResult>> = HashMap::new();
+    for result in &results.results {
+        by_symbol
+            .entry(result.session.symbol.clone())
+            .or_default()
+            .push(result);
+    }
+
+    println!("Saving detailed JSON files to: {}", run_dir.display());
+
+    // Collect symbol names for summary before iterating
+    let symbol_names: Vec<String> = by_symbol.keys().cloned().collect();
+
+    for (symbol, symbol_results) in &by_symbol {
+        // Extract full trade results by downcasting from Box<dyn Any>
+        let mut trades_json: Vec<serde_json::Value> = Vec::new();
+        let mut total_option_pnl = rust_decimal::Decimal::ZERO;
+        let mut total_hedge_pnl = rust_decimal::Decimal::ZERO;
+        let mut total_transaction_cost = rust_decimal::Decimal::ZERO;
+
+        for result in symbol_results {
+            // Try to downcast to the actual result type and serialize directly
+            if let Some(trade_result) = &result.trade_result {
+                // Try StraddleResult first (most common for straddle strategy)
+                if let Some(sr) = trade_result.downcast_ref::<StraddleResult>() {
+                    total_option_pnl += sr.pnl;
+                    if let Some(hp) = sr.hedge_pnl {
+                        total_hedge_pnl += hp;
+                    }
+                    if let Some(ref pos) = sr.hedge_position {
+                        total_transaction_cost += pos.total_cost;
+                    }
+                    // Serialize the full StraddleResult - this includes ALL fields
+                    if let Ok(json_val) = serde_json::to_value(sr) {
+                        trades_json.push(json_val);
+                    }
+                }
+                // Try CalendarSpreadResult
+                else if let Some(csr) = trade_result.downcast_ref::<CalendarSpreadResult>() {
+                    total_option_pnl += csr.pnl;
+                    if let Some(hp) = csr.hedge_pnl {
+                        total_hedge_pnl += hp;
+                    }
+                    if let Some(ref pos) = csr.hedge_position {
+                        total_transaction_cost += pos.total_cost;
+                    }
+                    if let Ok(json_val) = serde_json::to_value(csr) {
+                        trades_json.push(json_val);
+                    }
+                }
+                // Try IronButterflyResult
+                else if let Some(ibr) = trade_result.downcast_ref::<IronButterflyResult>() {
+                    total_option_pnl += ibr.pnl;
+                    if let Some(hp) = ibr.hedge_pnl {
+                        total_hedge_pnl += hp;
+                    }
+                    if let Some(ref pos) = ibr.hedge_position {
+                        total_transaction_cost += pos.total_cost;
+                    }
+                    if let Ok(json_val) = serde_json::to_value(ibr) {
+                        trades_json.push(json_val);
+                    }
+                }
+            } else if let Some(err) = &result.error {
+                // Include failed trades with error info
+                trades_json.push(json!({
+                    "entry_date": result.session.entry_date().to_string(),
+                    "exit_date": result.session.exit_date().to_string(),
+                    "success": false,
+                    "error": err,
+                }));
+            }
+        }
+
+        let total_pnl = total_option_pnl + total_hedge_pnl - total_transaction_cost;
+
+        // Build symbol summary with full trade details
+        let symbol_json = json!({
+            "symbol": symbol,
+            "start_date": start,
+            "end_date": end,
+            "trade_type": strategy,
+            "trades": trades_json,
+            "total_option_pnl": total_option_pnl.to_string(),
+            "total_hedge_pnl": total_hedge_pnl.to_string(),
+            "total_transaction_cost": total_transaction_cost.to_string(),
+            "total_pnl": total_pnl.to_string(),
+            "num_trades": symbol_results.len(),
+            "successful_trades": symbol_results.iter().filter(|r| r.success).count(),
+        });
+
+        // Write symbol JSON file (sanitize symbol for filename - replace / with _)
+        let safe_symbol = symbol.replace('/', "_");
+        let symbol_path = run_dir.join(format!("{}.json", safe_symbol));
+        let file = std::fs::File::create(&symbol_path)?;
+        serde_json::to_writer_pretty(file, &symbol_json)?;
+    }
+
+    // Write aggregate summary
+    let summary = json!({
+        "run_timestamp": timestamp.to_string(),
+        "start_date": start,
+        "end_date": end,
+        "strategy": strategy,
+        "total_sessions": results.total_sessions,
+        "successful": results.successful,
+        "failed": results.failed,
+        "symbols": symbol_names,
+        "total_option_pnl": results.total_pnl().to_string(),
+        "total_hedge_pnl": results.total_hedge_pnl().map(|p| p.to_string()),
+        "total_pnl_with_hedge": results.total_pnl_with_hedge().to_string(),
+    });
+
+    let summary_path = run_dir.join("_summary.json");
+    let file = std::fs::File::create(&summary_path)?;
+    serde_json::to_writer_pretty(file, &summary)?;
+
+    println!("  Saved {} symbol files + summary", by_symbol.len());
+
+    Ok(())
+}
+
+/// Save campaign summary as JSON
+fn save_campaign_summary(results: &cs_backtest::BatchResult, path: &PathBuf) -> Result<()> {
+    use serde_json::json;
+
+    let mut summary = json!({
+        "total_sessions": results.total_sessions,
+        "successful": results.successful,
+        "failed": results.failed,
+        "success_rate": 100.0 * results.successful as f64 / results.total_sessions as f64,
+        "option_pnl": results.total_pnl().to_string(),
+    });
+
+    if let Some(avg) = results.avg_pnl() {
+        summary["avg_pnl"] = json!(avg.to_string());
+    }
+    if let Some(win_rate) = results.win_rate() {
+        summary["win_rate"] = json!(win_rate);
+    }
+
+    if results.has_hedge_data() {
+        summary["total_pnl_with_hedge"] = json!(results.total_pnl_with_hedge().to_string());
+        if let Some(hedge_pnl) = results.total_hedge_pnl() {
+            summary["hedge_pnl"] = json!(hedge_pnl.to_string());
+        }
+        summary["total_hedge_trades"] = json!(results.total_hedge_count());
+    }
+
+    if results.has_attribution_data() {
+        if let Some(attr) = results.attribution_summary() {
+            summary["attribution"] = json!({
+                "gross_delta_pnl": attr.gross_delta_pnl.to_string(),
+                "hedge_delta_pnl": attr.hedge_delta_pnl.to_string(),
+                "net_delta_pnl": attr.net_delta_pnl.to_string(),
+                "gamma_pnl": attr.gamma_pnl.to_string(),
+                "theta_pnl": attr.theta_pnl.to_string(),
+                "vega_pnl": attr.vega_pnl.to_string(),
+                "unexplained": attr.unexplained.to_string(),
+                "avg_hedge_efficiency": attr.hedge_efficiency,
+            });
+        }
+    }
+
+    let file = std::fs::File::create(path)?;
+    serde_json::to_writer_pretty(file, &summary)?;
 
     Ok(())
 }
@@ -2528,7 +2929,17 @@ fn print_campaign_pnl_summary(results: &cs_backtest::BatchResult) {
 
     println!();
     println!("{}", style("P&L Summary:").bold().green());
-    println!("  Total P&L:         ${:.2}", results.total_pnl());
+    println!("  Option P&L:        ${:.2}", results.total_pnl());
+
+    // Show hedge P&L if hedging was active
+    if results.has_hedge_data() {
+        if let Some(hedge_pnl) = results.total_hedge_pnl() {
+            println!("  Hedge P&L:         ${:.2}", hedge_pnl);
+        }
+        println!("  Total P&L (w/hedge): ${:.2}", results.total_pnl_with_hedge());
+        println!("  Hedge Trades:      {}", results.total_hedge_count());
+    }
+
     if let Some(avg) = results.avg_pnl() {
         println!("  Avg P&L per Trade: ${:.2}", avg);
     }
@@ -2536,31 +2947,82 @@ fn print_campaign_pnl_summary(results: &cs_backtest::BatchResult) {
         println!("  Win Rate:          {:.1}%", win_rate);
     }
 
-    // Individual session results
+    // Show attribution summary if available
+    if results.has_attribution_data() {
+        if let Some(attr) = results.attribution_summary() {
+            println!();
+            println!("{}", style("P&L Attribution:").bold().cyan());
+            println!("  Delta P&L (gross): ${:.2}", attr.gross_delta_pnl);
+            println!("  Delta P&L (hedge): ${:.2}", attr.hedge_delta_pnl);
+            println!("  Delta P&L (net):   ${:.2}", attr.net_delta_pnl);
+            println!("  Gamma P&L:         ${:.2}", attr.gamma_pnl);
+            println!("  Theta P&L:         ${:.2}", attr.theta_pnl);
+            println!("  Vega P&L:          ${:.2}", attr.vega_pnl);
+            println!("  Unexplained:       ${:.2}", attr.unexplained);
+            println!("  Hedge Efficiency:  {:.1}%", attr.hedge_efficiency * 100.0);
+        }
+    }
+
+    // Individual session results - with hedge columns if hedging is active
     println!();
     println!("{}", style("Individual Trades:").bold());
     println!();
-    println!("{:<4} {:<12} {:<12} {:>10} {:>10} {:>10} {:>8}",
-        "#", "Entry", "Exit", "Entry $", "Exit $", "P&L", "Spot Δ%");
-    println!("{}", "-".repeat(76));
+
+    let has_hedge = results.has_hedge_data();
+
+    if has_hedge {
+        println!("{:<4} {:<8} {:<12} {:<12} {:>10} {:>10} {:>10} {:>10} {:>6}",
+            "#", "Symbol", "Entry", "Exit", "Entry $", "Exit $", "Opt P&L", "Hdg P&L", "Hdg#");
+        println!("{}", "-".repeat(100));
+    } else {
+        println!("{:<4} {:<8} {:<12} {:<12} {:>10} {:>10} {:>10} {:>8}",
+            "#", "Symbol", "Entry", "Exit", "Entry $", "Exit $", "P&L", "Spot Δ%");
+        println!("{}", "-".repeat(86));
+    }
 
     for (i, result) in results.successful_with_pnl().iter().enumerate() {
         if let Some(pnl) = &result.pnl {
-            let spot_change = (pnl.spot_at_exit - pnl.spot_at_entry) / pnl.spot_at_entry * 100.0;
-            println!("{:<4} {:<12} {:<12} {:>10.2} {:>10.2} {:>10.2} {:>7.1}%",
-                i + 1,
-                result.session.entry_date(),
-                result.session.exit_date(),
-                pnl.entry_cost,
-                pnl.exit_value,
-                pnl.pnl,
-                spot_change,
-            );
+            if has_hedge {
+                let hedge_pnl_str = pnl.hedge_pnl
+                    .map(|h| format!("{:.2}", h))
+                    .unwrap_or_else(|| "-".to_string());
+                let hedge_count_str = pnl.hedge_count
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+
+                println!("{:<4} {:<8} {:<12} {:<12} {:>10.2} {:>10.2} {:>10.2} {:>10} {:>6}",
+                    i + 1,
+                    &result.session.symbol,
+                    result.session.entry_date(),
+                    result.session.exit_date(),
+                    pnl.entry_cost,
+                    pnl.exit_value,
+                    pnl.pnl,
+                    hedge_pnl_str,
+                    hedge_count_str,
+                );
+            } else {
+                let spot_change = (pnl.spot_at_exit - pnl.spot_at_entry) / pnl.spot_at_entry * 100.0;
+                println!("{:<4} {:<8} {:<12} {:<12} {:>10.2} {:>10.2} {:>10.2} {:>7.1}%",
+                    i + 1,
+                    &result.session.symbol,
+                    result.session.entry_date(),
+                    result.session.exit_date(),
+                    pnl.entry_cost,
+                    pnl.exit_value,
+                    pnl.pnl,
+                    spot_change,
+                );
+            }
         }
     }
-    println!("{}", "-".repeat(76));
+    if has_hedge {
+        println!("{}", "-".repeat(100));
+    } else {
+        println!("{}", "-".repeat(86));
+    }
 
-    // Show failed sessions
+    // Show failed sessions (limit to first 10)
     let failed_results: Vec<_> = results.results.iter()
         .filter(|r| !r.success)
         .collect();
@@ -2568,12 +3030,16 @@ fn print_campaign_pnl_summary(results: &cs_backtest::BatchResult) {
     if !failed_results.is_empty() {
         println!();
         println!("{}", style("Failed Sessions:").bold().red());
-        for result in &failed_results {
+        let shown = failed_results.len().min(10);
+        for result in &failed_results[..shown] {
             println!("  {} ({}): {}",
                 result.session.symbol,
                 result.session.entry_date(),
                 result.error.as_deref().unwrap_or("Unknown error"),
             );
+        }
+        if failed_results.len() > 10 {
+            println!("  ... and {} more failures", failed_results.len() - 10);
         }
     }
 }
