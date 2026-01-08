@@ -995,14 +995,23 @@ fn display_rolling_results(result: &cs_domain::RollingResult) {
     }
 }
 
-/// Parse roll strategy from CLI arguments
-fn parse_roll_policy(strategy_str: &str, roll_day_str: Option<&str>) -> Result<cs_domain::RollPolicy> {
+/// Parse roll policy from CLI arguments (unified for both backtest and campaign)
+///
+/// # Arguments
+/// * `policy_str` - The policy type: "weekly", "monthly", or "days:N"
+/// * `roll_day_modifier` - The day/offset modifier (e.g., "friday", "0" for monthly)
+/// * `allow_monthly` - Whether to accept monthly policy (false for backtest, true for campaign)
+fn parse_roll_policy_impl(
+    policy_str: &str,
+    roll_day_modifier: Option<&str>,
+    allow_monthly: bool,
+) -> Result<cs_domain::RollPolicy> {
     use chrono::Weekday;
+    use cs_domain::RollPolicy;
 
-    match strategy_str.to_lowercase().as_str() {
+    match policy_str.to_lowercase().as_str() {
         "weekly" => {
-            // Require --roll-day for weekly
-            let day_str = roll_day_str.context("--roll-day is required for weekly roll strategy")?;
+            let day_str = roll_day_modifier.context("--roll-day is required for weekly roll policy")?;
             let weekday = match day_str.to_lowercase().as_str() {
                 "monday" => Weekday::Mon,
                 "tuesday" => Weekday::Tue,
@@ -1011,17 +1020,29 @@ fn parse_roll_policy(strategy_str: &str, roll_day_str: Option<&str>) -> Result<c
                 "friday" => Weekday::Fri,
                 _ => anyhow::bail!("Invalid --roll-day: {}. Must be monday-friday", day_str),
             };
-            Ok(cs_domain::RollPolicy::Weekly { roll_day: weekday })
+            Ok(RollPolicy::Weekly { roll_day: weekday })
+        }
+        "monthly" if allow_monthly => {
+            let offset_str = roll_day_modifier.context("--roll-day is required for monthly policy (use week offset, e.g., 0)")?;
+            let offset = offset_str.parse::<i8>()
+                .with_context(|| format!("Invalid month offset: {}. Expected integer week offset (e.g., 0 for 3rd Friday)", offset_str))?;
+            Ok(RollPolicy::Monthly { roll_week_offset: offset })
         }
         s if s.starts_with("days:") => {
-            // Parse days:N format
             let interval_str = &s[5..];
             let interval: u16 = interval_str.parse()
-                .with_context(|| format!("Invalid interval in '{}'. Expected days:N (e.g., days:5)", strategy_str))?;
-            Ok(cs_domain::RollPolicy::TradingDays { interval })
+                .with_context(|| format!("Invalid interval in '{}'. Expected days:N (e.g., days:5)", policy_str))?;
+            Ok(RollPolicy::TradingDays { interval })
         }
-        _ => anyhow::bail!("Invalid --roll-strategy: {}. Must be 'weekly' or 'days:N'", strategy_str),
+        "monthly" => anyhow::bail!("monthly policy not supported in this context. Use 'weekly' or 'days:N'"),
+        _ if allow_monthly => anyhow::bail!("Unknown roll policy: {}. Use: weekly, monthly, or days:N", policy_str),
+        _ => anyhow::bail!("Unknown roll policy: {}. Use: weekly or days:N", policy_str),
     }
+}
+
+/// Parse roll strategy from CLI arguments (backtest command - no monthly)
+fn parse_roll_policy(strategy_str: &str, roll_day_str: Option<&str>) -> Result<cs_domain::RollPolicy> {
+    parse_roll_policy_impl(strategy_str, roll_day_str, false)
 }
 
 /// Build CLI overrides from command-line arguments
@@ -2538,40 +2559,9 @@ async fn run_campaign_command(
     Ok(())
 }
 
-/// Parse roll policy from string for campaign commands
+/// Parse roll policy from string for campaign commands (supports monthly)
 fn parse_campaign_roll_policy(roll_policy: &str, roll_day: &str) -> Result<cs_domain::RollPolicy> {
-    use cs_domain::RollPolicy;
-    use chrono::Weekday;
-
-    match roll_policy.to_lowercase().as_str() {
-        "weekly" => {
-            // Parse roll_day as weekday
-            let weekday = match roll_day.to_lowercase().as_str() {
-                "monday" => Weekday::Mon,
-                "tuesday" => Weekday::Tue,
-                "wednesday" => Weekday::Wed,
-                "thursday" => Weekday::Thu,
-                "friday" => Weekday::Fri,
-                _ => anyhow::bail!("Invalid --roll-day: {}. Must be monday-friday", roll_day),
-            };
-            Ok(RollPolicy::Weekly { roll_day: weekday })
-        }
-        "monthly" => {
-            // Parse roll_day as offset
-            let offset = roll_day.parse::<i8>()
-                .with_context(|| format!("Invalid roll day offset: {}. Use integer weeks offset (e.g., 0 for 3rd Friday)", roll_day))?;
-
-            Ok(RollPolicy::Monthly { roll_week_offset: offset })
-        }
-        s if s.starts_with("days:") => {
-            // Parse days:N format
-            let interval_str = &s[5..];
-            let interval: u16 = interval_str.parse()
-                .with_context(|| format!("Invalid interval in '{}'. Expected days:N (e.g., days:5)", roll_policy))?;
-            Ok(RollPolicy::TradingDays { interval })
-        }
-        _ => anyhow::bail!("Unknown roll policy: {}. Use: weekly, monthly, or days:N", roll_policy),
-    }
+    parse_roll_policy_impl(roll_policy, Some(roll_day), true)
 }
 
 /// Load earnings events from file
