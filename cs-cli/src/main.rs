@@ -23,8 +23,15 @@ use cs_domain::{
 
 mod config;
 mod cli_args;
+mod parsing;
+mod display;
+mod handlers;
+mod commands;
 
 use cli_args::*;
+use parsing::{parse_roll_policy, parse_campaign_roll_policy, load_earnings_from_file, load_earnings_for_symbols};
+use display::ResultRow;
+use handlers::{save_earnings_parquet, save_earnings_csv, save_earnings_json};
 
 #[derive(Parser)]
 #[command(name = "cs")]
@@ -356,14 +363,6 @@ enum Commands {
         #[arg(long)]
         output_dir: Option<PathBuf>,
     },
-}
-
-#[derive(Tabled)]
-struct ResultRow {
-    #[tabled(rename = "Metric")]
-    metric: String,
-    #[tabled(rename = "Value")]
-    value: String,
 }
 
 #[tokio::main]
@@ -993,56 +992,6 @@ fn display_rolling_results(result: &cs_domain::RollingResult) {
             println!("{}", attr_table);
         }
     }
-}
-
-/// Parse roll policy from CLI arguments (unified for both backtest and campaign)
-///
-/// # Arguments
-/// * `policy_str` - The policy type: "weekly", "monthly", or "days:N"
-/// * `roll_day_modifier` - The day/offset modifier (e.g., "friday", "0" for monthly)
-/// * `allow_monthly` - Whether to accept monthly policy (false for backtest, true for campaign)
-fn parse_roll_policy_impl(
-    policy_str: &str,
-    roll_day_modifier: Option<&str>,
-    allow_monthly: bool,
-) -> Result<cs_domain::RollPolicy> {
-    use chrono::Weekday;
-    use cs_domain::RollPolicy;
-
-    match policy_str.to_lowercase().as_str() {
-        "weekly" => {
-            let day_str = roll_day_modifier.context("--roll-day is required for weekly roll policy")?;
-            let weekday = match day_str.to_lowercase().as_str() {
-                "monday" => Weekday::Mon,
-                "tuesday" => Weekday::Tue,
-                "wednesday" => Weekday::Wed,
-                "thursday" => Weekday::Thu,
-                "friday" => Weekday::Fri,
-                _ => anyhow::bail!("Invalid --roll-day: {}. Must be monday-friday", day_str),
-            };
-            Ok(RollPolicy::Weekly { roll_day: weekday })
-        }
-        "monthly" if allow_monthly => {
-            let offset_str = roll_day_modifier.context("--roll-day is required for monthly policy (use week offset, e.g., 0)")?;
-            let offset = offset_str.parse::<i8>()
-                .with_context(|| format!("Invalid month offset: {}. Expected integer week offset (e.g., 0 for 3rd Friday)", offset_str))?;
-            Ok(RollPolicy::Monthly { roll_week_offset: offset })
-        }
-        s if s.starts_with("days:") => {
-            let interval_str = &s[5..];
-            let interval: u16 = interval_str.parse()
-                .with_context(|| format!("Invalid interval in '{}'. Expected days:N (e.g., days:5)", policy_str))?;
-            Ok(RollPolicy::TradingDays { interval })
-        }
-        "monthly" => anyhow::bail!("monthly policy not supported in this context. Use 'weekly' or 'days:N'"),
-        _ if allow_monthly => anyhow::bail!("Unknown roll policy: {}. Use: weekly, monthly, or days:N", policy_str),
-        _ => anyhow::bail!("Unknown roll policy: {}. Use: weekly or days:N", policy_str),
-    }
-}
-
-/// Parse roll strategy from CLI arguments (backtest command - no monthly)
-fn parse_roll_policy(strategy_str: &str, roll_day_str: Option<&str>) -> Result<cs_domain::RollPolicy> {
-    parse_roll_policy_impl(strategy_str, roll_day_str, false)
 }
 
 /// Build CLI overrides from command-line arguments
@@ -2143,104 +2092,6 @@ async fn run_earnings_analysis_command(
     Ok(())
 }
 
-/// Save earnings analysis to Parquet
-fn save_earnings_parquet(
-    result: &cs_backtest::EarningsAnalysisResult,
-    path: &PathBuf,
-) -> Result<()> {
-    use polars::prelude::*;
-    use cs_domain::datetime::TradingDate;
-
-    let outcomes = &result.outcomes;
-
-    // Build DataFrame
-    let symbols: Vec<String> = outcomes.iter().map(|o| o.symbol.clone()).collect();
-    let dates: Vec<i32> = outcomes
-        .iter()
-        .map(|o| TradingDate::from_naive_date(o.earnings_date).to_polars_date())
-        .collect();
-    let earnings_time: Vec<String> = outcomes
-        .iter()
-        .map(|o| match o.earnings_time {
-            cs_domain::value_objects::EarningsTime::BeforeMarketOpen => "BMO".to_string(),
-            cs_domain::value_objects::EarningsTime::AfterMarketClose => "AMC".to_string(),
-            cs_domain::value_objects::EarningsTime::Unknown => "Unknown".to_string(),
-        })
-        .collect();
-    let pre_spot: Vec<f64> = outcomes.iter().map(|o| o.pre_spot.to_string().parse::<f64>().unwrap_or(0.0)).collect();
-    let pre_straddle: Vec<f64> = outcomes.iter().map(|o| o.pre_straddle.to_string().parse::<f64>().unwrap_or(0.0)).collect();
-    let expected_move_pct: Vec<f64> = outcomes.iter().map(|o| o.expected_move_pct).collect();
-    let post_spot: Vec<f64> = outcomes.iter().map(|o| o.post_spot.to_string().parse::<f64>().unwrap_or(0.0)).collect();
-    let actual_move_pct: Vec<f64> = outcomes.iter().map(|o| o.actual_move_pct).collect();
-    let move_ratio: Vec<f64> = outcomes.iter().map(|o| o.move_ratio).collect();
-    let gamma_dominated: Vec<bool> = outcomes.iter().map(|o| o.gamma_dominated).collect();
-
-    let df = DataFrame::new(vec![
-        Series::new("symbol", symbols),
-        Series::new("earnings_date", dates),
-        Series::new("earnings_time", earnings_time),
-        Series::new("pre_spot", pre_spot),
-        Series::new("pre_straddle", pre_straddle),
-        Series::new("expected_move_pct", expected_move_pct),
-        Series::new("post_spot", post_spot),
-        Series::new("actual_move_pct", actual_move_pct),
-        Series::new("move_ratio", move_ratio),
-        Series::new("gamma_dominated", gamma_dominated),
-    ])?;
-
-    let mut file = std::fs::File::create(path)?;
-    ParquetWriter::new(&mut file).finish(&mut df.clone())?;
-
-    Ok(())
-}
-
-/// Save earnings analysis to CSV
-fn save_earnings_csv(
-    result: &cs_backtest::EarningsAnalysisResult,
-    path: &PathBuf,
-) -> Result<()> {
-    use std::io::Write;
-
-    let mut file = std::fs::File::create(path)?;
-
-    // Header
-    writeln!(file, "symbol,earnings_date,earnings_time,pre_spot,pre_straddle,expected_move_pct,post_spot,actual_move_pct,move_ratio,gamma_dominated")?;
-
-    // Data rows
-    for outcome in &result.outcomes {
-        writeln!(
-            file,
-            "{},{},{},{},{},{},{},{},{},{}",
-            outcome.symbol,
-            outcome.earnings_date,
-            match outcome.earnings_time {
-                cs_domain::value_objects::EarningsTime::BeforeMarketOpen => "BMO",
-                cs_domain::value_objects::EarningsTime::AfterMarketClose => "AMC",
-                cs_domain::value_objects::EarningsTime::Unknown => "Unknown",
-            },
-            outcome.pre_spot,
-            outcome.pre_straddle,
-            outcome.expected_move_pct,
-            outcome.post_spot,
-            outcome.actual_move_pct,
-            outcome.move_ratio,
-            outcome.gamma_dominated,
-        )?;
-    }
-
-    Ok(())
-}
-
-/// Save earnings analysis to JSON
-fn save_earnings_json(
-    result: &cs_backtest::EarningsAnalysisResult,
-    path: &PathBuf,
-) -> Result<()> {
-    let json = serde_json::to_string_pretty(result)?;
-    std::fs::write(path, json)?;
-    Ok(())
-}
-
 /// Run campaign-based backtest
 async fn run_campaign_command(
     data_dir: Option<&PathBuf>,
@@ -2557,76 +2408,6 @@ async fn run_campaign_command(
     println!("{}", style("Done!").bold().green());
 
     Ok(())
-}
-
-/// Parse roll policy from string for campaign commands (supports monthly)
-fn parse_campaign_roll_policy(roll_policy: &str, roll_day: &str) -> Result<cs_domain::RollPolicy> {
-    parse_roll_policy_impl(roll_policy, Some(roll_day), true)
-}
-
-/// Load earnings events from file
-async fn load_earnings_from_file(path: &PathBuf) -> Result<Vec<cs_domain::EarningsEvent>> {
-    use cs_domain::infrastructure::CustomFileEarningsReader;
-    use cs_domain::EarningsRepository;
-    use chrono::NaiveDate;
-
-    let reader = CustomFileEarningsReader::from_file(path.clone())
-        .map_err(|e| anyhow::anyhow!("Failed to open earnings file: {}", e))?;
-
-    // Load all earnings (use wide date range)
-    let start = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
-    let end = NaiveDate::from_ymd_opt(2030, 12, 31).unwrap();
-
-    let earnings = reader.load_earnings(start, end, None).await
-        .map_err(|e| anyhow::anyhow!("Failed to load earnings: {}", e))?;
-
-    Ok(earnings)
-}
-
-/// Load earnings for specific symbols from data directory
-fn load_earnings_for_symbols(symbols: &[String], data_dir: Option<&PathBuf>) -> Result<Vec<cs_domain::EarningsEvent>> {
-    use cs_domain::{EarningsEvent, value_objects::EarningsTime};
-    use chrono::NaiveDate;
-
-    let data_dir = data_dir
-        .cloned()
-        .or_else(|| std::env::var("FINQ_DATA_DIR").ok().map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("data"));
-
-    let mut all_earnings = Vec::new();
-
-    for symbol in symbols {
-        let earnings_path = data_dir.join(format!("earnings/{}.csv", symbol));
-
-        if !earnings_path.exists() {
-            eprintln!("Warning: No earnings file found for {}", symbol);
-            continue;
-        }
-
-        let content = std::fs::read_to_string(&earnings_path)?;
-
-        for line in content.lines().skip(1) {
-            let parts: Vec<&str> = line.split(',').collect();
-            if parts.len() < 2 {
-                continue;
-            }
-
-            let date = NaiveDate::parse_from_str(parts[0], "%Y-%m-%d")?;
-            let time = if parts.len() >= 3 {
-                match parts[2].to_lowercase().as_str() {
-                    "bmo" | "before" => EarningsTime::BeforeMarketOpen,
-                    "amc" | "after" => EarningsTime::AfterMarketClose,
-                    _ => EarningsTime::Unknown,
-                }
-            } else {
-                EarningsTime::Unknown
-            };
-
-            all_earnings.push(EarningsEvent::new(symbol.clone(), date, time));
-        }
-    }
-
-    Ok(all_earnings)
 }
 
 /// Save campaign results to file
