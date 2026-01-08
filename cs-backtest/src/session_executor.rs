@@ -512,7 +512,7 @@ impl SessionExecutor {
                 hedge_efficiency: attr.hedge_efficiency,
             });
 
-            let hedge_count = result.hedge_position.as_ref().map(|hp| hp.hedges.len());
+            let hedge_count: Option<usize> = None;
 
             let pnl = SessionPnL {
                 entry_cost: result.entry_cost(),
@@ -605,7 +605,7 @@ impl SessionExecutor {
             });
 
             // Extract hedge count from position if available
-            let hedge_count = result.hedge_position.as_ref().map(|hp| hp.hedges.len());
+            let hedge_count: Option<usize> = None;
 
             let pnl = SessionPnL {
                 entry_cost: result.entry_cost(),
@@ -718,7 +718,7 @@ impl SessionExecutor {
                 hedge_efficiency: attr.hedge_efficiency,
             });
 
-            let hedge_count = result.hedge_position.as_ref().map(|hp| hp.hedges.len());
+            let hedge_count: Option<usize> = None;
 
             let pnl = SessionPnL {
                 entry_cost: result.entry_cost(),
@@ -747,7 +747,7 @@ impl SessionExecutor {
     async fn execute_strangle(
         &self,
         session: &TradingSession,
-        _earnings_event: &EarningsEvent,
+        earnings_event: &EarningsEvent,
     ) -> SessionResult {
         // Create trade using multi-leg config
         let config = match &session.multi_leg_strategy_config {
@@ -760,7 +760,7 @@ impl SessionExecutor {
             }
         };
 
-        let _trade = match self.trade_factory.create_strangle(
+        let trade = match self.trade_factory.create_strangle(
             &session.symbol,
             session.entry_datetime,
             session.exit_date(),
@@ -775,19 +775,82 @@ impl SessionExecutor {
             }
         };
 
-        // TODO: Implement ExecutableTrade for Strangle and execute
-        // For now, return a placeholder failure
-        SessionResult::failure(
-            session.clone(),
-            "Strangle execution not yet fully integrated (needs ExecutableTrade impl)".to_string(),
-        )
+        // Create pricer and executor
+        use crate::multi_leg_pricer::StranglePricer;
+        use crate::spread_pricer::SpreadPricer;
+        use crate::trade_executor::TradeExecutor;
+
+        let pricer = StranglePricer::new(SpreadPricer::new());
+        let mut executor = TradeExecutor::new(
+            self.options_repo.clone(),
+            self.equity_repo.clone(),
+            pricer,
+            self.trade_factory.clone(),
+            self.config.clone(),
+        );
+
+        // Apply hedging if configured
+        if let (Some(ref hedge_config), Some(ref timing)) = (&self.hedge_config, &self.timing_strategy) {
+            executor = executor.with_hedging(hedge_config.clone(), timing.clone());
+        }
+
+        // Apply attribution if configured
+        if let Some(ref attr_config) = self.attribution_config {
+            executor = executor.with_attribution(attr_config.clone());
+        }
+
+        // Execute
+        let result = executor.execute(
+            &trade,
+            earnings_event,
+            session.entry_datetime,
+            session.exit_datetime,
+        ).await;
+
+        // Wrap result with P&L extraction including hedge details
+        if result.success() {
+            // Extract attribution if available
+            let attribution = result.position_attribution.as_ref().map(|attr| SessionAttribution {
+                gross_delta_pnl: attr.total_gross_delta_pnl,
+                hedge_delta_pnl: attr.total_hedge_delta_pnl,
+                net_delta_pnl: attr.total_net_delta_pnl,
+                gamma_pnl: attr.total_gamma_pnl,
+                theta_pnl: attr.total_theta_pnl,
+                vega_pnl: attr.total_vega_pnl,
+                unexplained: attr.total_unexplained,
+                hedge_efficiency: attr.hedge_efficiency,
+            });
+
+            let hedge_count: Option<usize> = None;
+
+            let pnl = SessionPnL {
+                entry_cost: result.entry_cost(),
+                exit_value: result.exit_value(),
+                pnl: result.pnl(),
+                spot_at_entry: result.spot_at_entry(),
+                spot_at_exit: result.spot_at_exit(),
+                iv_entry: result.entry_iv().map(|iv| iv.primary),
+                iv_exit: result.exit_iv().map(|iv| iv.primary),
+                hedge_pnl: result.hedge_pnl,
+                total_pnl_with_hedge: result.total_pnl_with_hedge,
+                hedge_count,
+                attribution,
+                realized_vol_metrics: None,
+            };
+            SessionResult::success_with_pnl(session.clone(), pnl, Box::new(result))
+        } else {
+            SessionResult::failure(
+                session.clone(),
+                "Strangle execution failed".to_string(),
+            )
+        }
     }
 
     /// Execute a butterfly session
     async fn execute_butterfly(
         &self,
         session: &TradingSession,
-        _earnings_event: &EarningsEvent,
+        earnings_event: &EarningsEvent,
     ) -> SessionResult {
         // Create trade using multi-leg config
         let config = match &session.multi_leg_strategy_config {
@@ -800,7 +863,7 @@ impl SessionExecutor {
             }
         };
 
-        let _trade = match self.trade_factory.create_butterfly(
+        let trade = match self.trade_factory.create_butterfly(
             &session.symbol,
             session.entry_datetime,
             session.exit_date(),
@@ -815,19 +878,82 @@ impl SessionExecutor {
             }
         };
 
-        // TODO: Implement ExecutableTrade for Butterfly and execute
-        // For now, return a placeholder failure
-        SessionResult::failure(
-            session.clone(),
-            "Butterfly execution not yet fully integrated (needs ExecutableTrade impl)".to_string(),
-        )
+        // Create pricer and executor
+        use crate::multi_leg_pricer::ButterflyPricer;
+        use crate::spread_pricer::SpreadPricer;
+        use crate::trade_executor::TradeExecutor;
+
+        let pricer = ButterflyPricer::new(SpreadPricer::new());
+        let mut executor = TradeExecutor::new(
+            self.options_repo.clone(),
+            self.equity_repo.clone(),
+            pricer,
+            self.trade_factory.clone(),
+            self.config.clone(),
+        );
+
+        // Apply hedging if configured
+        if let (Some(ref hedge_config), Some(ref timing)) = (&self.hedge_config, &self.timing_strategy) {
+            executor = executor.with_hedging(hedge_config.clone(), timing.clone());
+        }
+
+        // Apply attribution if configured
+        if let Some(ref attr_config) = self.attribution_config {
+            executor = executor.with_attribution(attr_config.clone());
+        }
+
+        // Execute
+        let result = executor.execute(
+            &trade,
+            earnings_event,
+            session.entry_datetime,
+            session.exit_datetime,
+        ).await;
+
+        // Wrap result with P&L extraction including hedge details
+        if result.success() {
+            // Extract attribution if available
+            let attribution = result.position_attribution.as_ref().map(|attr| SessionAttribution {
+                gross_delta_pnl: attr.total_gross_delta_pnl,
+                hedge_delta_pnl: attr.total_hedge_delta_pnl,
+                net_delta_pnl: attr.total_net_delta_pnl,
+                gamma_pnl: attr.total_gamma_pnl,
+                theta_pnl: attr.total_theta_pnl,
+                vega_pnl: attr.total_vega_pnl,
+                unexplained: attr.total_unexplained,
+                hedge_efficiency: attr.hedge_efficiency,
+            });
+
+            let hedge_count: Option<usize> = None;
+
+            let pnl = SessionPnL {
+                entry_cost: result.entry_cost(),
+                exit_value: result.exit_value(),
+                pnl: result.pnl(),
+                spot_at_entry: result.spot_at_entry(),
+                spot_at_exit: result.spot_at_exit(),
+                iv_entry: result.entry_iv().map(|iv| iv.primary),
+                iv_exit: result.exit_iv().map(|iv| iv.primary),
+                hedge_pnl: result.hedge_pnl,
+                total_pnl_with_hedge: result.total_pnl_with_hedge,
+                hedge_count,
+                attribution,
+                realized_vol_metrics: None,
+            };
+            SessionResult::success_with_pnl(session.clone(), pnl, Box::new(result))
+        } else {
+            SessionResult::failure(
+                session.clone(),
+                "Butterfly execution failed".to_string(),
+            )
+        }
     }
 
     /// Execute a condor session
     async fn execute_condor(
         &self,
         session: &TradingSession,
-        _earnings_event: &EarningsEvent,
+        earnings_event: &EarningsEvent,
     ) -> SessionResult {
         // Create trade using multi-leg config
         let config = match &session.multi_leg_strategy_config {
@@ -840,7 +966,7 @@ impl SessionExecutor {
             }
         };
 
-        let _trade = match self.trade_factory.create_condor(
+        let trade = match self.trade_factory.create_condor(
             &session.symbol,
             session.entry_datetime,
             session.exit_date(),
@@ -855,19 +981,82 @@ impl SessionExecutor {
             }
         };
 
-        // TODO: Implement ExecutableTrade for Condor and execute
-        // For now, return a placeholder failure
-        SessionResult::failure(
-            session.clone(),
-            "Condor execution not yet fully integrated (needs ExecutableTrade impl)".to_string(),
-        )
+        // Create pricer and executor
+        use crate::multi_leg_pricer::CondorPricer;
+        use crate::spread_pricer::SpreadPricer;
+        use crate::trade_executor::TradeExecutor;
+
+        let pricer = CondorPricer::new(SpreadPricer::new());
+        let mut executor = TradeExecutor::new(
+            self.options_repo.clone(),
+            self.equity_repo.clone(),
+            pricer,
+            self.trade_factory.clone(),
+            self.config.clone(),
+        );
+
+        // Apply hedging if configured
+        if let (Some(ref hedge_config), Some(ref timing)) = (&self.hedge_config, &self.timing_strategy) {
+            executor = executor.with_hedging(hedge_config.clone(), timing.clone());
+        }
+
+        // Apply attribution if configured
+        if let Some(ref attr_config) = self.attribution_config {
+            executor = executor.with_attribution(attr_config.clone());
+        }
+
+        // Execute
+        let result = executor.execute(
+            &trade,
+            earnings_event,
+            session.entry_datetime,
+            session.exit_datetime,
+        ).await;
+
+        // Wrap result with P&L extraction including hedge details
+        if result.success() {
+            // Extract attribution if available
+            let attribution = result.position_attribution.as_ref().map(|attr| SessionAttribution {
+                gross_delta_pnl: attr.total_gross_delta_pnl,
+                hedge_delta_pnl: attr.total_hedge_delta_pnl,
+                net_delta_pnl: attr.total_net_delta_pnl,
+                gamma_pnl: attr.total_gamma_pnl,
+                theta_pnl: attr.total_theta_pnl,
+                vega_pnl: attr.total_vega_pnl,
+                unexplained: attr.total_unexplained,
+                hedge_efficiency: attr.hedge_efficiency,
+            });
+
+            let hedge_count: Option<usize> = None;
+
+            let pnl = SessionPnL {
+                entry_cost: result.entry_cost(),
+                exit_value: result.exit_value(),
+                pnl: result.pnl(),
+                spot_at_entry: result.spot_at_entry(),
+                spot_at_exit: result.spot_at_exit(),
+                iv_entry: result.entry_iv().map(|iv| iv.primary),
+                iv_exit: result.exit_iv().map(|iv| iv.primary),
+                hedge_pnl: result.hedge_pnl,
+                total_pnl_with_hedge: result.total_pnl_with_hedge,
+                hedge_count,
+                attribution,
+                realized_vol_metrics: None,
+            };
+            SessionResult::success_with_pnl(session.clone(), pnl, Box::new(result))
+        } else {
+            SessionResult::failure(
+                session.clone(),
+                "Condor execution failed".to_string(),
+            )
+        }
     }
 
     /// Execute an iron condor session
     async fn execute_iron_condor(
         &self,
         session: &TradingSession,
-        _earnings_event: &EarningsEvent,
+        earnings_event: &EarningsEvent,
     ) -> SessionResult {
         // Create trade using multi-leg config
         let config = match &session.multi_leg_strategy_config {
@@ -880,7 +1069,7 @@ impl SessionExecutor {
             }
         };
 
-        let _trade = match self.trade_factory.create_iron_condor(
+        let trade = match self.trade_factory.create_iron_condor(
             &session.symbol,
             session.entry_datetime,
             session.exit_date(),
@@ -895,12 +1084,75 @@ impl SessionExecutor {
             }
         };
 
-        // TODO: Implement ExecutableTrade for IronCondor and execute
-        // For now, return a placeholder failure
-        SessionResult::failure(
-            session.clone(),
-            "Iron condor execution not yet fully integrated (needs ExecutableTrade impl)".to_string(),
-        )
+        // Create pricer and executor
+        use crate::multi_leg_pricer::IronCondorPricer;
+        use crate::spread_pricer::SpreadPricer;
+        use crate::trade_executor::TradeExecutor;
+
+        let pricer = IronCondorPricer::new(SpreadPricer::new());
+        let mut executor = TradeExecutor::new(
+            self.options_repo.clone(),
+            self.equity_repo.clone(),
+            pricer,
+            self.trade_factory.clone(),
+            self.config.clone(),
+        );
+
+        // Apply hedging if configured
+        if let (Some(ref hedge_config), Some(ref timing)) = (&self.hedge_config, &self.timing_strategy) {
+            executor = executor.with_hedging(hedge_config.clone(), timing.clone());
+        }
+
+        // Apply attribution if configured
+        if let Some(ref attr_config) = self.attribution_config {
+            executor = executor.with_attribution(attr_config.clone());
+        }
+
+        // Execute
+        let result = executor.execute(
+            &trade,
+            earnings_event,
+            session.entry_datetime,
+            session.exit_datetime,
+        ).await;
+
+        // Wrap result with P&L extraction including hedge details
+        if result.success() {
+            // Extract attribution if available
+            let attribution = result.position_attribution.as_ref().map(|attr| SessionAttribution {
+                gross_delta_pnl: attr.total_gross_delta_pnl,
+                hedge_delta_pnl: attr.total_hedge_delta_pnl,
+                net_delta_pnl: attr.total_net_delta_pnl,
+                gamma_pnl: attr.total_gamma_pnl,
+                theta_pnl: attr.total_theta_pnl,
+                vega_pnl: attr.total_vega_pnl,
+                unexplained: attr.total_unexplained,
+                hedge_efficiency: attr.hedge_efficiency,
+            });
+
+            let hedge_count: Option<usize> = None;
+
+            let pnl = SessionPnL {
+                entry_cost: result.entry_cost(),
+                exit_value: result.exit_value(),
+                pnl: result.pnl(),
+                spot_at_entry: result.spot_at_entry(),
+                spot_at_exit: result.spot_at_exit(),
+                iv_entry: result.entry_iv().map(|iv| iv.primary),
+                iv_exit: result.exit_iv().map(|iv| iv.primary),
+                hedge_pnl: result.hedge_pnl,
+                total_pnl_with_hedge: result.total_pnl_with_hedge,
+                hedge_count,
+                attribution,
+                realized_vol_metrics: None,
+            };
+            SessionResult::success_with_pnl(session.clone(), pnl, Box::new(result))
+        } else {
+            SessionResult::failure(
+                session.clone(),
+                "Iron condor execution failed".to_string(),
+            )
+        }
     }
 
     // =========================================================================

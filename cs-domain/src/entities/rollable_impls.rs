@@ -447,3 +447,164 @@ impl TradeResult for CalendarStraddleResult {
         self.position_attribution = attribution;
     }
 }
+
+// ============================================================================
+// Strangle
+// ============================================================================
+
+#[async_trait]
+impl RollableTrade for Strangle {
+    type Result = StrangleResult;
+
+    async fn create(
+        factory: &dyn TradeFactory,
+        symbol: &str,
+        dt: DateTime<Utc>,
+        min_expiration: NaiveDate,
+    ) -> Result<Self, TradeConstructionError> {
+        // Use 25-delta strangle configuration
+        let config = crate::value_objects::MultiLegStrategyConfig::strangle_delta(0.25);
+        factory
+            .create_strangle(
+                symbol,
+                dt,
+                min_expiration,
+                &config,
+            )
+            .await
+            .map_err(|e| TradeConstructionError::FactoryError(e.to_string()))
+    }
+
+    fn expiration(&self) -> NaiveDate {
+        self.expiration()
+    }
+
+    fn strike(&self) -> Decimal {
+        // Use call strike as representative strike
+        self.call_leg.strike.value()
+    }
+
+    fn symbol(&self) -> &str {
+        self.symbol()
+    }
+}
+
+// ============================================================================
+// Butterfly
+// ============================================================================
+
+#[async_trait]
+impl RollableTrade for Butterfly {
+    type Result = ButterflyResult;
+
+    async fn create(
+        factory: &dyn TradeFactory,
+        symbol: &str,
+        dt: DateTime<Utc>,
+        min_expiration: NaiveDate,
+    ) -> Result<Self, TradeConstructionError> {
+        // Use 25-delta butterfly configuration
+        let config = crate::value_objects::MultiLegStrategyConfig::butterfly_delta(0.25);
+        factory
+            .create_butterfly(
+                symbol,
+                dt,
+                min_expiration,
+                &config,
+            )
+            .await
+            .map_err(|e| TradeConstructionError::FactoryError(e.to_string()))
+    }
+
+    fn expiration(&self) -> NaiveDate {
+        self.short_call.expiration
+    }
+
+    fn strike(&self) -> Decimal {
+        self.short_call.strike.value()
+    }
+
+    fn symbol(&self) -> &str {
+        self.symbol()
+    }
+}
+
+// ============================================================================
+// Condor
+// ============================================================================
+
+#[async_trait]
+impl RollableTrade for Condor {
+    type Result = CondorResult;
+
+    async fn create(
+        factory: &dyn TradeFactory,
+        symbol: &str,
+        dt: DateTime<Utc>,
+        min_expiration: NaiveDate,
+    ) -> Result<Self, TradeConstructionError> {
+        // Use 10/20-delta condor configuration
+        let config = crate::value_objects::MultiLegStrategyConfig::condor_delta(0.10, 0.20);
+        factory
+            .create_condor(
+                symbol,
+                dt,
+                min_expiration,
+                &config,
+            )
+            .await
+            .map_err(|e| TradeConstructionError::FactoryError(e.to_string()))
+    }
+
+    fn expiration(&self) -> NaiveDate {
+        self.near_call.expiration
+    }
+
+    fn strike(&self) -> Decimal {
+        self.near_call.strike.value()
+    }
+
+    fn symbol(&self) -> &str {
+        self.symbol()
+    }
+}
+
+// ============================================================================
+// IronCondor
+// ============================================================================
+
+#[async_trait]
+impl RollableTrade for IronCondor {
+    type Result = IronCondorResult;
+
+    async fn create(
+        factory: &dyn TradeFactory,
+        symbol: &str,
+        dt: DateTime<Utc>,
+        min_expiration: NaiveDate,
+    ) -> Result<Self, TradeConstructionError> {
+        // Use 10/20-delta iron condor configuration
+        let config = crate::value_objects::MultiLegStrategyConfig::iron_condor_delta(0.10, 0.20);
+        factory
+            .create_iron_condor(
+                symbol,
+                dt,
+                min_expiration,
+                &config,
+            )
+            .await
+            .map_err(|e| TradeConstructionError::FactoryError(e.to_string()))
+    }
+
+    fn expiration(&self) -> NaiveDate {
+        self.near_call.expiration
+    }
+
+    fn strike(&self) -> Decimal {
+        self.near_call.strike.value()
+    }
+
+    fn symbol(&self) -> &str {
+        self.symbol()
+    }
+}
