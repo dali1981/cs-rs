@@ -634,6 +634,145 @@ impl EarningsSummaryStats {
     }
 }
 
+/// Direction of a multi-leg trade (long or short)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TradeDirection {
+    Long,
+    Short,
+}
+
+impl Default for TradeDirection {
+    fn default() -> Self {
+        TradeDirection::Short
+    }
+}
+
+impl From<&str> for TradeDirection {
+    fn from(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "long" => TradeDirection::Long,
+            _ => TradeDirection::Short,
+        }
+    }
+}
+
+impl std::fmt::Display for TradeDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TradeDirection::Long => write!(f, "long"),
+            TradeDirection::Short => write!(f, "short"),
+        }
+    }
+}
+
+/// Wing selection mode for iron butterfly positioning
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WingSelectionMode {
+    /// Delta-based selection: e.g., 0.25 for 25-delta OTM wings
+    Delta { wing_delta: f64 },
+    /// Moneyness-based selection: e.g., 0.10 for 10% OTM wings
+    Moneyness { wing_percent: f64 },
+}
+
+impl WingSelectionMode {
+    /// Parse wing mode from CLI argument (e.g., "delta:0.25" or "moneyness:0.10")
+    pub fn from_cli_arg(arg: &str) -> Result<Self, String> {
+        let parts: Vec<&str> = arg.split(':').collect();
+        match parts.as_slice() {
+            ["delta", val] => {
+                let wing_delta = val.parse::<f64>()
+                    .map_err(|_| format!("Invalid delta value: {}", val))?;
+                if !(0.0..=1.0).contains(&wing_delta) {
+                    return Err(format!("Delta must be between 0.0 and 1.0, got {}", wing_delta));
+                }
+                Ok(WingSelectionMode::Delta { wing_delta })
+            }
+            ["moneyness", val] => {
+                let wing_percent = val.parse::<f64>()
+                    .map_err(|_| format!("Invalid moneyness value: {}", val))?;
+                if !(0.0..=1.0).contains(&wing_percent) {
+                    return Err(format!("Moneyness percent must be between 0.0 and 1.0, got {}", wing_percent));
+                }
+                Ok(WingSelectionMode::Moneyness { wing_percent })
+            }
+            _ => Err(format!("Invalid wing mode format: '{}'. Use 'delta:0.25' or 'moneyness:0.10'", arg)),
+        }
+    }
+
+    /// Create a delta-based config with defaults
+    pub fn default_delta() -> Self {
+        WingSelectionMode::Delta { wing_delta: 0.25 }
+    }
+}
+
+impl Default for WingSelectionMode {
+    fn default() -> Self {
+        Self::default_delta()
+    }
+}
+
+impl std::fmt::Display for WingSelectionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WingSelectionMode::Delta { wing_delta } => write!(f, "delta:{}", wing_delta),
+            WingSelectionMode::Moneyness { wing_percent } => write!(f, "moneyness:{}", wing_percent),
+        }
+    }
+}
+
+/// Configuration for iron butterfly wing positioning
+#[derive(Debug, Clone)]
+pub struct IronButterflyConfig {
+    /// How to select wing strikes
+    pub wing_mode: WingSelectionMode,
+    /// Whether wings should be symmetric (equal width on both sides)
+    pub symmetric: bool,
+}
+
+impl IronButterflyConfig {
+    /// Create a new iron butterfly configuration
+    pub fn new(wing_mode: WingSelectionMode, symmetric: bool) -> Self {
+        Self { wing_mode, symmetric }
+    }
+
+    /// Create default configuration (25-delta symmetric)
+    pub fn default_delta() -> Self {
+        Self {
+            wing_mode: WingSelectionMode::default_delta(),
+            symmetric: true,
+        }
+    }
+
+    /// Create configuration from CLI argument
+    pub fn from_cli_arg(arg: &str) -> Result<Self, String> {
+        let wing_mode = WingSelectionMode::from_cli_arg(arg)?;
+        Ok(Self {
+            wing_mode,
+            symmetric: true,  // Always symmetric for now
+        })
+    }
+
+    /// Parse wing mode from optional CLI argument, using default if not provided
+    pub fn from_cli_arg_optional(arg: Option<&str>) -> Result<Self, String> {
+        match arg {
+            Some(s) => Self::from_cli_arg(s),
+            None => Ok(Self::default_delta()),
+        }
+    }
+}
+
+impl Default for IronButterflyConfig {
+    fn default() -> Self {
+        Self::default_delta()
+    }
+}
+
+impl std::fmt::Display for IronButterflyConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.wing_mode)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -734,5 +873,119 @@ mod tests {
         let err1 = FailureReason::PricingError("test".to_string());
         let err2 = FailureReason::PricingError("test".to_string());
         assert_eq!(err1, err2);
+    }
+
+    #[test]
+    fn test_trade_direction_default() {
+        assert_eq!(TradeDirection::default(), TradeDirection::Short);
+    }
+
+    #[test]
+    fn test_trade_direction_from_str() {
+        assert_eq!(TradeDirection::from("long"), TradeDirection::Long);
+        assert_eq!(TradeDirection::from("Long"), TradeDirection::Long);
+        assert_eq!(TradeDirection::from("LONG"), TradeDirection::Long);
+        assert_eq!(TradeDirection::from("short"), TradeDirection::Short);
+        assert_eq!(TradeDirection::from("Short"), TradeDirection::Short);
+        assert_eq!(TradeDirection::from("invalid"), TradeDirection::Short);
+    }
+
+    #[test]
+    fn test_trade_direction_display() {
+        assert_eq!(TradeDirection::Long.to_string(), "long");
+        assert_eq!(TradeDirection::Short.to_string(), "short");
+    }
+
+    #[test]
+    fn test_wing_selection_mode_default_delta() {
+        let mode = WingSelectionMode::default();
+        match mode {
+            WingSelectionMode::Delta { wing_delta } => {
+                assert_eq!(wing_delta, 0.25);
+            }
+            _ => panic!("Expected Delta mode"),
+        }
+    }
+
+    #[test]
+    fn test_wing_selection_mode_from_cli_delta() {
+        let mode = WingSelectionMode::from_cli_arg("delta:0.25").unwrap();
+        match mode {
+            WingSelectionMode::Delta { wing_delta } => {
+                assert_eq!(wing_delta, 0.25);
+            }
+            _ => panic!("Expected Delta mode"),
+        }
+    }
+
+    #[test]
+    fn test_wing_selection_mode_from_cli_moneyness() {
+        let mode = WingSelectionMode::from_cli_arg("moneyness:0.10").unwrap();
+        match mode {
+            WingSelectionMode::Moneyness { wing_percent } => {
+                assert_eq!(wing_percent, 0.10);
+            }
+            _ => panic!("Expected Moneyness mode"),
+        }
+    }
+
+    #[test]
+    fn test_wing_selection_mode_from_cli_invalid_format() {
+        assert!(WingSelectionMode::from_cli_arg("invalid").is_err());
+        assert!(WingSelectionMode::from_cli_arg("delta:invalid").is_err());
+        assert!(WingSelectionMode::from_cli_arg("delta:1.5").is_err());
+    }
+
+    #[test]
+    fn test_wing_selection_mode_display() {
+        let delta_mode = WingSelectionMode::Delta { wing_delta: 0.25 };
+        assert_eq!(delta_mode.to_string(), "delta:0.25");
+
+        let moneyness_mode = WingSelectionMode::Moneyness { wing_percent: 0.10 };
+        assert_eq!(moneyness_mode.to_string(), "moneyness:0.1");
+    }
+
+    #[test]
+    fn test_iron_butterfly_config_default() {
+        let config = IronButterflyConfig::default();
+        assert_eq!(config.symmetric, true);
+        match config.wing_mode {
+            WingSelectionMode::Delta { wing_delta } => {
+                assert_eq!(wing_delta, 0.25);
+            }
+            _ => panic!("Expected Delta mode"),
+        }
+    }
+
+    #[test]
+    fn test_iron_butterfly_config_from_cli_arg() {
+        let config = IronButterflyConfig::from_cli_arg("delta:0.15").unwrap();
+        assert_eq!(config.symmetric, true);
+        match config.wing_mode {
+            WingSelectionMode::Delta { wing_delta } => {
+                assert_eq!(wing_delta, 0.15);
+            }
+            _ => panic!("Expected Delta mode"),
+        }
+    }
+
+    #[test]
+    fn test_iron_butterfly_config_from_cli_arg_optional() {
+        let config = IronButterflyConfig::from_cli_arg_optional(None).unwrap();
+        assert_eq!(config.symmetric, true);
+        match config.wing_mode {
+            WingSelectionMode::Delta { wing_delta } => {
+                assert_eq!(wing_delta, 0.25);
+            }
+            _ => panic!("Expected Delta mode"),
+        }
+
+        let config = IronButterflyConfig::from_cli_arg_optional(Some("moneyness:0.10")).unwrap();
+        match config.wing_mode {
+            WingSelectionMode::Moneyness { wing_percent } => {
+                assert_eq!(wing_percent, 0.10);
+            }
+            _ => panic!("Expected Moneyness mode"),
+        }
     }
 }

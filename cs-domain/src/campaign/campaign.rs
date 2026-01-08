@@ -4,6 +4,7 @@ use chrono::{NaiveDate, NaiveTime};
 use crate::{
     EarningsEvent, OptionStrategy, ExpirationPolicy,
     TradingCalendar, TradingPeriodSpec, RollPolicy,
+    value_objects::{IronButterflyConfig, TradeDirection},
 };
 use crate::datetime::eastern_to_utc;
 use super::{TradingSession, SessionAction, SessionContext, EarningsTimingType, PeriodPolicy};
@@ -15,6 +16,7 @@ use super::{TradingSession, SessionAction, SessionContext, EarningsTimingType, P
 /// - WHEN to trade (period policy: around earnings, between earnings, fixed)
 /// - HOW to roll (roll policy)
 /// - WHICH expirations (expiration policy)
+/// - STRATEGY-SPECIFIC CONFIG (wing mode, direction, etc.)
 ///
 /// It generates `TradingSession`s that can be executed.
 #[derive(Debug, Clone)]
@@ -34,6 +36,12 @@ pub struct TradingCampaign {
 
     /// How to select expirations
     pub expiration_policy: ExpirationPolicy,
+
+    /// Iron butterfly wing configuration (optional, for IronButterfly strategy)
+    pub iron_butterfly_config: Option<IronButterflyConfig>,
+
+    /// Trade direction (Short by default, Long if inverted)
+    pub trade_direction: TradeDirection,
 }
 
 impl TradingCampaign {
@@ -313,6 +321,8 @@ mod tests {
             expiration_policy: ExpirationPolicy::FirstAfter {
                 min_date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
             },
+            iron_butterfly_config: None,
+            trade_direction: TradeDirection::Short,
         };
 
         let earnings = sample_earnings();

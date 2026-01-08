@@ -213,6 +213,21 @@ pub trait StrikeSelector: Send + Sync {
             "Iron butterfly not supported by this selector".to_string()
         ))
     }
+
+    /// Select an iron butterfly with advanced wing positioning configuration
+    fn select_iron_butterfly_with_config(
+        &self,
+        _spot: &SpotPrice,
+        _surface: &IVSurface,
+        _config: &crate::value_objects::IronButterflyConfig,
+        _direction: crate::value_objects::TradeDirection,
+        _min_dte: i32,
+        _max_dte: i32,
+    ) -> Result<IronButterfly, SelectionError> {
+        Err(SelectionError::UnsupportedStrategy(
+            "Advanced iron butterfly selection not supported by this selector".to_string()
+        ))
+    }
 }
 
 /// Option strategy type (the trade structure)

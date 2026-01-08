@@ -176,6 +176,47 @@ impl TradeFactory for DefaultTradeFactory {
             .map_err(|e| TradeFactoryError::SelectionError(format!("Iron butterfly selection failed: {}", e)))
     }
 
+    async fn create_iron_butterfly_advanced(
+        &self,
+        symbol: &str,
+        as_of: DateTime<Utc>,
+        min_expiration: NaiveDate,
+        config: &cs_domain::value_objects::IronButterflyConfig,
+        direction: cs_domain::value_objects::TradeDirection,
+    ) -> Result<IronButterfly, TradeFactoryError> {
+        // 1. Get option chain
+        let chain = self.options_repo
+            .get_option_bars_at_time(symbol, as_of)
+            .await
+            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+
+        // 2. Build IV surface
+        let surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
+            &chain,
+            &*self.equity_repo,
+            symbol,
+        )
+        .await
+        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+
+        // 3. Extract spot price
+        let spot_price = SpotPrice::new(
+            Decimal::try_from(surface.spot_price())
+                .map_err(|_| TradeFactoryError::DataError("Invalid spot price".to_string()))?,
+            as_of,
+        );
+
+        // 4. Compute DTE range from min_expiration
+        let as_of_date = as_of.naive_utc().date();
+        let min_dte = (min_expiration - as_of_date).num_days() as i32;
+        let max_dte = min_dte + 15;
+
+        // 5. Use selector to build advanced iron butterfly
+        self.selector
+            .select_iron_butterfly_with_config(&spot_price, &surface, config, direction, min_dte, max_dte)
+            .map_err(|e| TradeFactoryError::SelectionError(format!("Advanced iron butterfly selection failed: {}", e)))
+    }
+
     async fn available_expirations(
         &self,
         symbol: &str,

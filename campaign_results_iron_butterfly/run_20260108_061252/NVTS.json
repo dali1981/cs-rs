@@ -1,0 +1,170 @@
+{
+  "end_date": "2025-11-03",
+  "num_trades": 1,
+  "start_date": "2025-11-03",
+  "successful_trades": 1,
+  "symbol": "NVTS",
+  "total_hedge_pnl": "-233.630000000000135",
+  "total_option_pnl": "294.793527381491938300",
+  "total_pnl": "57.163527381491803300",
+  "total_transaction_cost": "4.00",
+  "trade_type": "ironbutterfly",
+  "trades": [
+    {
+      "breakeven_down": 8.78206472618508,
+      "breakeven_up": 16.21793527381492,
+      "center_strike": "12.5",
+      "delta_pnl": "35.18508169851302",
+      "earnings_date": "2025-11-03",
+      "earnings_time": "AfterMarketClose",
+      "entry_credit": "371.793527381491938300",
+      "entry_surface_time": "2025-10-14T19:59:00Z",
+      "entry_time": "2025-10-14T13:35:00Z",
+      "exit_cost": "77.00",
+      "exit_surface_time": "2025-10-31T19:55:00Z",
+      "exit_time": "2025-10-31T19:55:00Z",
+      "expiration": "2025-10-31",
+      "failure_reason": null,
+      "gamma_pnl": "-43.3901994125919",
+      "hedge_pnl": "-233.630000000000135",
+      "hedge_position": {
+        "avg_hedge_price": 0.0,
+        "cumulative_shares": 0,
+        "hedges": [
+          {
+            "cost": "1.00",
+            "delta_after": 0.0,
+            "delta_before": 1.0,
+            "shares": -100,
+            "spot_price": 11.23,
+            "timestamp": "2025-10-14T13:35:00Z"
+          },
+          {
+            "cost": "2.00",
+            "delta_after": 0.0,
+            "delta_before": -2.0,
+            "shares": 200,
+            "spot_price": 13.4388,
+            "timestamp": "2025-10-15T13:35:00Z"
+          },
+          {
+            "cost": "1.00",
+            "delta_after": 0.0,
+            "delta_before": 1.0,
+            "shares": -100,
+            "spot_price": 13.3113,
+            "timestamp": "2025-10-31T13:35:00Z"
+          }
+        ],
+        "peak_long_shares": 100,
+        "peak_short_shares": 100,
+        "realized_pnl": "0",
+        "realized_vol_metrics": {
+          "entry_hv": 0.0224132874008077,
+          "entry_iv": 2.0474358138286237,
+          "exit_iv": 3.5818161069587426,
+          "iv_premium_at_entry": 9034.919734062933,
+          "num_observations": 15,
+          "realized_vol": 1.500169788796926,
+          "realized_vs_implied": -26.729337317213957
+        },
+        "spot_history": [
+          [
+            "2026-01-08T05:12:40.075002Z",
+            11.23
+          ],
+          [
+            "2025-10-14T13:35:00Z",
+            11.23
+          ],
+          [
+            "2025-10-15T13:35:00Z",
+            13.4388
+          ],
+          [
+            "2025-10-16T13:35:00Z",
+            16.8
+          ],
+          [
+            "2025-10-17T13:35:00Z",
+            15.155
+          ],
+          [
+            "2025-10-20T13:35:00Z",
+            16.16
+          ],
+          [
+            "2025-10-21T13:35:00Z",
+            16.395
+          ],
+          [
+            "2025-10-22T13:35:00Z",
+            14.29
+          ],
+          [
+            "2025-10-23T13:35:00Z",
+            13.66
+          ],
+          [
+            "2025-10-24T13:35:00Z",
+            14.42
+          ],
+          [
+            "2025-10-27T13:35:00Z",
+            14.2
+          ],
+          [
+            "2025-10-28T13:35:00Z",
+            13.445
+          ],
+          [
+            "2025-10-29T13:35:00Z",
+            13.04
+          ],
+          [
+            "2025-10-30T13:35:00Z",
+            12.78
+          ],
+          [
+            "2025-10-31T13:35:00Z",
+            13.3113
+          ]
+        ],
+        "total_cost": "4.00",
+        "unrealized_pnl": "-233.630000000000135"
+      },
+      "iv_crush": -1.534380293130119,
+      "iv_entry": 2.0474358138286237,
+      "iv_exit": 3.5818161069587426,
+      "long_call_entry": "12.9570889452472300",
+      "long_call_exit": "10.0",
+      "long_put_entry": "0.249383673260831700",
+      "long_put_exit": "0",
+      "lower_strike": "2.5",
+      "max_loss": "778.206472618508061700",
+      "net_delta": -15.956953151253073,
+      "net_gamma": 17.84861221922631,
+      "net_theta": -7.9989712814799345,
+      "net_vega": 1.5607956696479983,
+      "pnl": "294.793527381491938300",
+      "pnl_pct": "79.28958028336210963862941474",
+      "short_call_entry": "200",
+      "short_call_exit": "85.00",
+      "short_put_entry": "185.00",
+      "short_put_exit": "2.00",
+      "spot_at_entry": 11.23,
+      "spot_at_exit": 13.435,
+      "spot_move": 2.205,
+      "spot_move_pct": 19.634906500445236,
+      "success": true,
+      "symbol": "NVTS",
+      "theta_pnl": "137.9822546055289",
+      "total_pnl_with_hedge": "57.163527381491803300",
+      "unexplained_pnl": "163.9487496277563",
+      "upper_strike": "24",
+      "vega_pnl": "1.067640862285652",
+      "wing_width": "11.5",
+      "within_breakeven": true
+    }
+  ]
+}

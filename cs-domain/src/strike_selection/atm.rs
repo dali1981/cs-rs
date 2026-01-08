@@ -535,6 +535,156 @@ impl StrikeSelector for ATMStrategy {
         IronButterfly::new(short_call, short_put, long_call, long_put)
             .map_err(Into::into)
     }
+
+    fn select_iron_butterfly_with_config(
+        &self,
+        spot: &SpotPrice,
+        surface: &IVSurface,
+        config: &crate::value_objects::IronButterflyConfig,
+        direction: crate::value_objects::TradeDirection,
+        min_dte: i32,
+        max_dte: i32,
+    ) -> Result<IronButterfly, SelectionError> {
+        use crate::value_objects::{WingSelectionMode, TradeDirection};
+
+        // Get strikes and expirations from IV surface
+        let strikes: Vec<Strike> = surface.strikes()
+            .iter()
+            .filter_map(|&s| Strike::new(s).ok())
+            .collect();
+
+        if strikes.is_empty() {
+            return Err(SelectionError::NoStrikes);
+        }
+
+        let expirations = surface.expirations();
+
+        // Select expiration with DTE in range
+        let reference_date = surface.as_of_time().date_naive();
+        let expiration = expirations
+            .iter()
+            .find(|&&exp| {
+                let dte = (exp - reference_date).num_days() as i32;
+                dte >= min_dte && dte <= max_dte
+            })
+            .copied()
+            .ok_or(SelectionError::NoExpirations)?;
+
+        // Find ATM strike for center
+        let spot_f64: f64 = spot.value.try_into().unwrap_or(0.0);
+        let center = super::find_closest_strike(&strikes, spot_f64)?;
+
+        // Select wing strikes based on config
+        let (upper, lower) = match config.wing_mode {
+            WingSelectionMode::Delta { wing_delta } => {
+                // Build delta-parameterized surface
+                let delta_surface = DeltaVolSurface::from_iv_surface(surface, self.risk_free_rate);
+
+                // Convert target delta to strikes
+                let upper_strike_f64 = delta_surface
+                    .delta_to_strike(wing_delta, expiration, true)
+                    .ok_or(SelectionError::NoIVSurface)?;
+
+                let lower_strike_f64 = delta_surface
+                    .delta_to_strike(-wing_delta, expiration, false)
+                    .ok_or(SelectionError::NoIVSurface)?;
+
+                // Convert to Strike and snap to available
+                let upper_target = Strike::try_from(upper_strike_f64)
+                    .map_err(|_| SelectionError::NoStrikes)?;
+                let lower_target = Strike::try_from(lower_strike_f64)
+                    .map_err(|_| SelectionError::NoStrikes)?;
+
+                let upper_snapped = Self::snap_to_strike(upper_target, &strikes, true)?;
+                let lower_snapped = Self::snap_to_strike(lower_target, &strikes, false)?;
+
+                // Validate symmetric constraint if required
+                if config.symmetric {
+                    let upper_distance = upper_snapped.value() - center.value();
+                    let lower_distance = center.value() - lower_snapped.value();
+                    let tolerance = Decimal::new(5, 2); // 0.05
+
+                    // Allow some tolerance for snapping
+                    if (upper_distance - lower_distance).abs() > tolerance {
+                        // Try to find better symmetric strikes
+                        // Use the average distance for symmetry
+                        let symmetric_distance = (upper_distance + lower_distance) / Decimal::new(2, 0);
+                        let target_upper = Strike::new(center.value() + symmetric_distance)
+                            .map_err(|_| SelectionError::NoStrikes)?;
+                        let target_lower = Strike::new(center.value() - symmetric_distance)
+                            .map_err(|_| SelectionError::NoStrikes)?;
+
+                        (
+                            Self::snap_to_strike(target_upper, &strikes, true)?,
+                            Self::snap_to_strike(target_lower, &strikes, false)?,
+                        )
+                    } else {
+                        (upper_snapped, lower_snapped)
+                    }
+                } else {
+                    (upper_snapped, lower_snapped)
+                }
+            }
+            WingSelectionMode::Moneyness { wing_percent } => {
+                // Calculate wing strikes based on moneyness
+                let upper_strike_f64 = spot_f64 * (1.0 + wing_percent);
+                let lower_strike_f64 = spot_f64 * (1.0 - wing_percent);
+
+                // Convert to Strike and snap to available
+                let upper_target = Strike::try_from(upper_strike_f64)
+                    .map_err(|_| SelectionError::NoStrikes)?;
+                let lower_target = Strike::try_from(lower_strike_f64)
+                    .map_err(|_| SelectionError::NoStrikes)?;
+
+                (
+                    Self::snap_to_strike(upper_target, &strikes, true)?,
+                    Self::snap_to_strike(lower_target, &strikes, false)?,
+                )
+            }
+        };
+
+        // Build legs based on direction
+        let symbol = surface.underlying().to_string();
+
+        let (short_call_strike, short_put_strike, long_call_strike, long_put_strike) = match direction {
+            TradeDirection::Short => {
+                // Short: short ATM straddle + long OTM wings
+                (center, center, upper, lower)
+            }
+            TradeDirection::Long => {
+                // Long: long ATM straddle + short OTM wings (invert)
+                (upper, lower, center, center)
+            }
+        };
+
+        let short_call = OptionLeg::new(
+            symbol.clone(),
+            short_call_strike,
+            expiration,
+            OptionType::Call,
+        );
+        let short_put = OptionLeg::new(
+            symbol.clone(),
+            short_put_strike,
+            expiration,
+            OptionType::Put,
+        );
+        let long_call = OptionLeg::new(
+            symbol.clone(),
+            long_call_strike,
+            expiration,
+            OptionType::Call,
+        );
+        let long_put = OptionLeg::new(
+            symbol,
+            long_put_strike,
+            expiration,
+            OptionType::Put,
+        );
+
+        IronButterfly::new(short_call, short_put, long_call, long_put)
+            .map_err(Into::into)
+    }
 }
 
 #[cfg(test)]

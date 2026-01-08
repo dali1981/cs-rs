@@ -1,0 +1,225 @@
+{
+  "end_date": "2025-11-03",
+  "num_trades": 1,
+  "start_date": "2025-11-03",
+  "successful_trades": 1,
+  "symbol": "PLTR",
+  "total_hedge_pnl": "-2218.9330999999969",
+  "total_option_pnl": "-183.00",
+  "total_pnl": "-2413.8530999999969",
+  "total_transaction_cost": "11.92",
+  "trade_type": "ironbutterfly",
+  "trades": [
+    {
+      "breakeven_down": 171.91,
+      "breakeven_up": 188.09,
+      "center_strike": "180",
+      "delta_pnl": "357.2858660371825",
+      "earnings_date": "2025-11-03",
+      "earnings_time": "AfterMarketClose",
+      "entry_credit": "809.00",
+      "entry_surface_time": "2025-10-14T19:59:00Z",
+      "entry_time": "2025-10-14T13:35:00Z",
+      "exit_cost": "992.00",
+      "exit_surface_time": "2025-10-31T19:55:00Z",
+      "exit_time": "2025-10-31T19:55:00Z",
+      "expiration": "2025-10-31",
+      "failure_reason": null,
+      "gamma_pnl": "-222.397971905361",
+      "hedge_pnl": "-2218.9330999999969",
+      "hedge_position": {
+        "avg_hedge_price": 0.0,
+        "cumulative_shares": 0,
+        "hedges": [
+          {
+            "cost": "1.00",
+            "delta_after": 0.0,
+            "delta_before": 1.0,
+            "shares": -100,
+            "spot_price": 173.815,
+            "timestamp": "2025-10-14T13:35:00Z"
+          },
+          {
+            "cost": "2.00",
+            "delta_after": 0.0,
+            "delta_before": -2.0,
+            "shares": 200,
+            "spot_price": 183.855,
+            "timestamp": "2025-10-15T13:35:00Z"
+          },
+          {
+            "cost": "2.00",
+            "delta_after": 0.0,
+            "delta_before": 2.0,
+            "shares": -200,
+            "spot_price": 177.656,
+            "timestamp": "2025-10-17T13:35:00Z"
+          },
+          {
+            "cost": "1.50",
+            "delta_after": 0.0035174695944903966,
+            "delta_before": -1.4964825304055096,
+            "shares": 150,
+            "spot_price": 179.89,
+            "timestamp": "2025-10-21T13:35:00Z"
+          },
+          {
+            "cost": "0.17",
+            "delta_after": 0.0023302494453675826,
+            "delta_before": 0.17233024944536757,
+            "shares": -17,
+            "spot_price": 179.86,
+            "timestamp": "2025-10-22T13:35:00Z"
+          },
+          {
+            "cost": "1.33",
+            "delta_after": 0.0,
+            "delta_before": 1.33,
+            "shares": -133,
+            "spot_price": 176.37,
+            "timestamp": "2025-10-23T13:35:00Z"
+          },
+          {
+            "cost": "2.00",
+            "delta_after": 0.0,
+            "delta_before": -2.0,
+            "shares": 200,
+            "spot_price": 184.8393,
+            "timestamp": "2025-10-24T13:35:00Z"
+          },
+          {
+            "cost": "0.65",
+            "delta_after": 0.004344029079635159,
+            "delta_before": 0.6543440290796352,
+            "shares": -65,
+            "spot_price": 189.95,
+            "timestamp": "2025-10-27T13:35:00Z"
+          },
+          {
+            "cost": "0.46",
+            "delta_after": 0.0039734198056139425,
+            "delta_before": -0.45602658019438613,
+            "shares": 46,
+            "spot_price": 189.82,
+            "timestamp": "2025-10-28T13:35:00Z"
+          },
+          {
+            "cost": "0.81",
+            "delta_after": 0.0,
+            "delta_before": 0.81,
+            "shares": -81,
+            "spot_price": 190.8749,
+            "timestamp": "2025-10-29T13:35:00Z"
+          }
+        ],
+        "peak_long_shares": 100,
+        "peak_short_shares": 100,
+        "realized_pnl": "0",
+        "realized_vol_metrics": {
+          "entry_hv": 0.006856525544028962,
+          "entry_iv": 0.5489289178112411,
+          "iv_premium_at_entry": 7905.934117598066,
+          "num_observations": 15,
+          "realized_vol": 0.36005414993717655,
+          "realized_vs_implied": -34.407873541654524
+        },
+        "spot_history": [
+          [
+            "2026-01-08T05:12:48.734804Z",
+            173.815
+          ],
+          [
+            "2025-10-14T13:35:00Z",
+            173.815
+          ],
+          [
+            "2025-10-15T13:35:00Z",
+            183.855
+          ],
+          [
+            "2025-10-16T13:35:00Z",
+            180.8299
+          ],
+          [
+            "2025-10-17T13:35:00Z",
+            177.656
+          ],
+          [
+            "2025-10-20T13:35:00Z",
+            178.575
+          ],
+          [
+            "2025-10-21T13:35:00Z",
+            179.89
+          ],
+          [
+            "2025-10-22T13:35:00Z",
+            179.86
+          ],
+          [
+            "2025-10-23T13:35:00Z",
+            176.37
+          ],
+          [
+            "2025-10-24T13:35:00Z",
+            184.8393
+          ],
+          [
+            "2025-10-27T13:35:00Z",
+            189.95
+          ],
+          [
+            "2025-10-28T13:35:00Z",
+            189.82
+          ],
+          [
+            "2025-10-29T13:35:00Z",
+            190.8749
+          ],
+          [
+            "2025-10-30T13:35:00Z",
+            195.95
+          ],
+          [
+            "2025-10-31T13:35:00Z",
+            202.1031
+          ]
+        ],
+        "total_cost": "11.92",
+        "unrealized_pnl": "-2218.9330999999969"
+      },
+      "iv_crush": null,
+      "iv_entry": 0.5489289178112411,
+      "iv_exit": null,
+      "long_call_entry": "464.00",
+      "long_call_exit": "1054.00",
+      "long_put_entry": "456.00",
+      "long_put_exit": "3.00",
+      "lower_strike": "170",
+      "max_loss": "191.00",
+      "net_delta": -13.220568586019699,
+      "net_gamma": 0.609016996200588,
+      "net_theta": -1.2180024364643993,
+      "net_vega": 1.2241999771877232,
+      "pnl": "-183.00",
+      "pnl_pct": "-22.620519159456118665018541410",
+      "short_call_entry": "875.00",
+      "short_call_exit": "2048.00",
+      "short_put_entry": "854.00",
+      "short_put_exit": "1.00",
+      "spot_at_entry": 173.815,
+      "spot_at_exit": 200.84,
+      "spot_move": 27.025000000000006,
+      "spot_move_pct": 15.548140264073876,
+      "success": true,
+      "symbol": "PLTR",
+      "theta_pnl": "21.01054202901089",
+      "total_pnl_with_hedge": "-2413.8530999999969",
+      "unexplained_pnl": "-338.8984361608324",
+      "upper_strike": "190",
+      "vega_pnl": "0",
+      "wing_width": "10",
+      "within_breakeven": false
+    }
+  ]
+}

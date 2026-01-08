@@ -1,4 +1,5 @@
 use crate::entities::{Straddle, CalendarSpread, IronButterfly};
+use crate::value_objects::{IronButterflyConfig, TradeDirection};
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use thiserror::Error;
@@ -94,6 +95,35 @@ pub trait TradeFactory: Send + Sync {
         as_of: DateTime<Utc>,
         min_expiration: NaiveDate,
         wing_width: Decimal,
+    ) -> Result<IronButterfly, TradeFactoryError>;
+
+    /// Create an iron butterfly with advanced wing positioning configuration
+    ///
+    /// Creates an iron butterfly with configurable wing selection strategy:
+    /// - Delta-based: Select wings by delta (e.g., 25-delta OTM)
+    /// - Moneyness-based: Select wings by % OTM (e.g., 10% OTM)
+    /// - Symmetric: Enforce equal wing width on both sides
+    /// - Direction: Short (default) or Long (inverted)
+    ///
+    /// # Arguments
+    /// * `symbol` - Ticker symbol
+    /// * `as_of` - Date/time to query market data
+    /// * `min_expiration` - Minimum required expiration date
+    /// * `config` - Wing selection configuration (mode, symmetry)
+    /// * `direction` - Trade direction (Short or Long)
+    ///
+    /// # Returns
+    /// An IronButterfly configured per the provided settings
+    ///
+    /// # Errors
+    /// Returns error if no suitable expirations/strikes found or selection fails
+    async fn create_iron_butterfly_advanced(
+        &self,
+        symbol: &str,
+        as_of: DateTime<Utc>,
+        min_expiration: NaiveDate,
+        config: &IronButterflyConfig,
+        direction: TradeDirection,
     ) -> Result<IronButterfly, TradeFactoryError>;
 
     /// Query available expiration dates for a symbol at a given time
