@@ -1,14 +1,16 @@
 use std::sync::Arc;
 use chrono::NaiveDate;
-use tracing::{info, debug, warn};
+use tracing::{info, debug};
 use rust_decimal::Decimal;
 
 use cs_domain::*;
-use cs_domain::timing::{EarningsTradeTiming, StraddleTradeTiming, PostEarningsStraddleTiming};
-use cs_domain::strike_selection::{StrikeSelector, ATMStrategy, DeltaStrategy, ExpirationCriteria, IronButterflyStrategy, StraddleStrategy};
-use crate::config::{BacktestConfig, SpreadType, SelectionType};
-use crate::execution::ExecutionConfig;
-use crate::backtest_use_case_helpers;
+use cs_domain::strike_selection::{StrikeSelector, ATMStrategy, DeltaStrategy, ExpirationCriteria};
+use crate::config::{BacktestConfig, SelectionType};
+use crate::trade_strategy::{
+    TradeStrategy, StrategyDispatch,
+    CalendarSpreadStrategy, IronButterflyStrategy, StraddleStrategy,
+    PostEarningsStraddleStrategy, CalendarStraddleStrategy,
+};
 
 /// Backtest execution result
 #[derive(Debug)]
@@ -328,175 +330,119 @@ where
     }
 
     /// Execute backtest based on config.spread type
-    /// Uses config.start_date and config.end_date from the config
-    pub async fn execute(
-        &self,
-    ) -> Result<UnifiedBacktestResult, BacktestError> {
-        let start_date = self.config.start_date;
-        let end_date = self.config.end_date;
+    ///
+    /// This is the main entry point that dispatches to the appropriate strategy.
+    pub async fn execute(&self) -> Result<UnifiedBacktestResult, BacktestError> {
+        let strategy = StrategyDispatch::from_config(self.config.spread, &self.config);
 
-        match self.config.spread {
-            SpreadType::Calendar => {
-                // Default to Call for calendar spreads
-                let result = self.execute_calendar_spread(
-                    start_date,
-                    end_date,
-                    finq_core::OptionType::Call,
-                    None,
-                ).await?;
+        match strategy {
+            StrategyDispatch::CalendarSpread(s) => {
+                let result = self.execute_with_strategy(&s, None).await?;
                 Ok(UnifiedBacktestResult::CalendarSpread(result))
             }
-            SpreadType::IronButterfly => {
-                let result = self.execute_iron_butterfly(
-                    start_date,
-                    end_date,
-                    None,
-                ).await?;
+            StrategyDispatch::IronButterfly(s) => {
+                let result = self.execute_with_strategy(&s, None).await?;
                 Ok(UnifiedBacktestResult::IronButterfly(result))
             }
-            SpreadType::Straddle => {
-                let result = self.execute_straddle(
-                    start_date,
-                    end_date,
-                    None,
-                ).await?;
+            StrategyDispatch::Straddle(s) => {
+                let result = self.execute_with_strategy(&s, None).await?;
                 Ok(UnifiedBacktestResult::Straddle(result))
             }
-            SpreadType::CalendarStraddle => {
-                let result = self.execute_calendar_straddle(
-                    start_date,
-                    end_date,
-                    None,
-                ).await?;
-                Ok(UnifiedBacktestResult::CalendarStraddle(result))
-            }
-            SpreadType::PostEarningsStraddle => {
-                let result = self.execute_post_earnings_straddle(
-                    start_date,
-                    end_date,
-                    None,
-                ).await?;
+            StrategyDispatch::PostEarningsStraddle(s) => {
+                let result = self.execute_with_strategy(&s, None).await?;
                 Ok(UnifiedBacktestResult::PostEarningsStraddle(result))
+            }
+            StrategyDispatch::CalendarStraddle(s) => {
+                let result = self.execute_with_strategy(&s, None).await?;
+                Ok(UnifiedBacktestResult::CalendarStraddle(result))
             }
         }
     }
 
-    pub async fn execute_calendar_spread(
+    /// Generic backtest executor for any trade strategy
+    ///
+    /// This method handles the common backtest loop:
+    /// 1. Iterate through trading days
+    /// 2. Load earnings events
+    /// 3. Filter events for entry
+    /// 4. Execute trades (parallel or sequential)
+    /// 5. Apply post-execution filters
+    /// 6. Collect results
+    pub async fn execute_with_strategy<S, R>(
         &self,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-        option_type: finq_core::OptionType,
+        strategy: &S,
         on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult<CalendarSpreadResult>, BacktestError> {
-        let mut all_results: Vec<CalendarSpreadResult> = Vec::new();
+    ) -> Result<BacktestResult<R>, BacktestError>
+    where
+        S: TradeStrategy<R> + Sync,
+        R: TradeResultMethods + Send + Clone,
+    {
+        let mut all_results: Vec<R> = Vec::new();
         let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
         let mut sessions_processed = 0;
         let mut total_opportunities = 0;
 
-        // Create selector and criteria
         let selector = self.create_selector();
         let criteria = self.build_expiration_criteria();
-        let exec_config = ExecutionConfig::for_calendar_spread(self.config.max_entry_iv);
 
-        // Calendar spreads use earnings timing (enter on/before earnings day)
-        use crate::timing_strategy::TimingStrategy;
-        let timing = TimingStrategy::Earnings(EarningsTradeTiming::new(self.config.timing));
+        let start_date = self.config.start_date;
+        let end_date = self.config.end_date;
+
+        info!(
+            spread = ?self.config.spread,
+            start = %start_date,
+            end = %end_date,
+            "Starting backtest"
+        );
 
         for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
             sessions_processed += 1;
 
-            // Load earnings for this session
-            let events = self.load_earnings_window(session_date).await?;
-            let to_enter = self.filter_for_entry(&events, session_date, &timing);
+            // Load earnings events for this session
+            let events = self.load_earnings_for_strategy(session_date, strategy).await?;
+
+            // Filter events where entry_date == session_date
+            let to_enter: Vec<_> = events
+                .iter()
+                .filter(|e| strategy.entry_date(e) == session_date)
+                .filter(|e| self.passes_market_cap_filter(e))
+                .cloned()
+                .collect();
 
             if to_enter.is_empty() {
-                if let Some(ref callback) = on_progress {
-                    callback(SessionProgress {
-                        session_date,
-                        entries_count: 0,
-                        events_found: 0,
-                    });
-                }
+                self.report_progress(&on_progress, session_date, 0, 0);
                 continue;
             }
 
             debug!(
                 session_date = %session_date,
                 events_count = to_enter.len(),
-                "Processing calendar spread session"
+                "Processing session"
             );
 
-            // Process events using helper
-            let session_results: Vec<_> = if self.config.parallel {
-                let futures: Vec<_> = to_enter
-                    .iter()
-                    .map(|event| {
-                        let entry_time = timing.entry_datetime(event);
-                        let exit_time = timing.exit_datetime(event);
-                        backtest_use_case_helpers::execute_calendar_spread(
-                            self.options_repo.as_ref(),
-                            self.equity_repo.as_ref(),
-                            &*selector,
-                            &criteria,
-                            event,
-                            entry_time,
-                            exit_time,
-                            option_type,
-                            &exec_config,
-                        )
-                    })
-                    .collect();
+            // Execute trades (parallel or sequential)
+            let session_results = self.execute_batch(
+                &to_enter,
+                strategy,
+                &*selector,
+                &criteria,
+            ).await;
 
-                futures::future::join_all(futures).await
-            } else {
-                let mut results = Vec::new();
-                for event in &to_enter {
-                    let entry_time = timing.entry_datetime(event);
-                    let exit_time = timing.exit_datetime(event);
-                    let result = backtest_use_case_helpers::execute_calendar_spread(
-                        self.options_repo.as_ref(),
-                        self.equity_repo.as_ref(),
-                        &*selector,
-                        &criteria,
-                        event,
-                        entry_time,
-                        exit_time,
-                        option_type,
-                        &exec_config,
-                    ).await;
-                    results.push(result);
-                }
-                results
-            };
-
-            // Collect results and apply IV filter
+            // Collect and filter results
             let mut session_entries = 0;
-            for result in session_results {
+            for (result_opt, event) in session_results.into_iter().zip(to_enter.iter()) {
                 total_opportunities += 1;
-                if let Some(trade_result) = result {
-                    if self.passes_iv_filter(&trade_result) {
-                        all_results.push(trade_result);
+                if let Some(result) = result_opt {
+                    if strategy.apply_filter(&result) {
+                        all_results.push(result);
                         session_entries += 1;
-                    } else {
-                        dropped_events.push(TradeGenerationError {
-                            symbol: trade_result.symbol.clone(),
-                            earnings_date: trade_result.earnings_date,
-                            earnings_time: trade_result.earnings_time,
-                            reason: "IV_RATIO_FILTER".into(),
-                            details: None,
-                            phase: "filter".into(),
-                        });
+                    } else if let Some(error) = strategy.create_filter_error(&result, event) {
+                        dropped_events.push(error);
                     }
                 }
             }
 
-            if let Some(ref callback) = on_progress {
-                callback(SessionProgress {
-                    session_date,
-                    entries_count: session_entries,
-                    events_found: to_enter.len(),
-                });
-            }
+            self.report_progress(&on_progress, session_date, session_entries, to_enter.len());
         }
 
         let total_entries = all_results.len();
@@ -518,611 +464,108 @@ where
         })
     }
 
-    pub async fn execute_iron_butterfly(
+    /// Execute a batch of trades (parallel or sequential based on config)
+    async fn execute_batch<S, R>(
         &self,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult<IronButterflyResult>, BacktestError> {
-        let mut all_results: Vec<IronButterflyResult> = Vec::new();
-        let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
-        let mut sessions_processed = 0;
-        let mut total_opportunities = 0;
-
-        // Create selector and criteria
-        let selector = self.create_selector();
-        let criteria = self.build_expiration_criteria();
-        let exec_config = ExecutionConfig::for_iron_butterfly(self.config.max_entry_iv);
-
-        // Iron butterflies use earnings timing (enter on/before earnings day)
-        use crate::timing_strategy::TimingStrategy;
-        let timing = TimingStrategy::Earnings(EarningsTradeTiming::new(self.config.timing));
-
-        for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
-            sessions_processed += 1;
-
-            // Load earnings for this session
-            let events = self.load_earnings_window(session_date).await?;
-            let to_enter = self.filter_for_entry(&events, session_date, &timing);
-
-            if to_enter.is_empty() {
-                if let Some(ref callback) = on_progress {
-                    callback(SessionProgress {
-                        session_date,
-                        entries_count: 0,
-                        events_found: 0,
-                    });
-                }
-                continue;
-            }
-
-            debug!(
-                session_date = %session_date,
-                events_count = to_enter.len(),
-                "Processing iron butterfly session"
-            );
-
-            // Process events using helper
-            let session_results: Vec<_> = if self.config.parallel {
-                let futures: Vec<_> = to_enter
-                    .iter()
-                    .map(|event| {
-                        let entry_time = timing.entry_datetime(event);
-                        let exit_time = timing.exit_datetime(event);
-                        backtest_use_case_helpers::execute_iron_butterfly(
-                            self.options_repo.as_ref(),
-                            self.equity_repo.as_ref(),
-                            &*selector,
-                            &criteria,
-                            event,
-                            entry_time,
-                            exit_time,
-                            &exec_config,
-                        )
-                    })
-                    .collect();
-                futures::future::join_all(futures).await
-            } else {
-                let mut results = Vec::new();
-                for event in &to_enter {
-                    let entry_time = timing.entry_datetime(event);
-                    let exit_time = timing.exit_datetime(event);
-                    let result = backtest_use_case_helpers::execute_iron_butterfly(
-                        self.options_repo.as_ref(),
-                        self.equity_repo.as_ref(),
-                        &*selector,
-                        &criteria,
-                        event,
-                        entry_time,
-                        exit_time,
-                        &exec_config,
-                    ).await;
-                    results.push(result);
-                }
-                results
-            };
-
-            // Collect results
-            let mut session_entries = 0;
-            for result in session_results {
-                total_opportunities += 1;
-                if let Some(trade_result) = result {
-                    all_results.push(trade_result);
-                    session_entries += 1;
-                }
-            }
-
-            if let Some(ref callback) = on_progress {
-                callback(SessionProgress {
-                    session_date,
-                    entries_count: session_entries,
-                    events_found: to_enter.len(),
-                });
-            }
-        }
-
-        let total_entries = all_results.len();
-
-        info!(
-            sessions_processed,
-            total_opportunities,
-            results_count = total_entries,
-            dropped_count = dropped_events.len(),
-            "Iron butterfly backtest completed"
-        );
-
-        Ok(BacktestResult {
-            results: all_results,
-            sessions_processed,
-            total_entries,
-            total_opportunities,
-            dropped_events,
-        })
-    }
-
-    pub async fn execute_straddle(
-        &self,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult<StraddleResult>, BacktestError> {
-        let mut all_results: Vec<StraddleResult> = Vec::new();
-        let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
-        let mut sessions_processed = 0;
-        let mut total_opportunities = 0;
-
-        // Create selector and criteria
-        let selector = self.create_selector();
-        let criteria = self.build_expiration_criteria();
-        let exec_config = ExecutionConfig::for_straddle(self.config.max_entry_iv);
-
-        // Create straddle timing
-        let timing_impl = StraddleTradeTiming::new(self.config.timing)
-            .with_entry_days(self.config.straddle_entry_days)
-            .with_exit_days(self.config.straddle_exit_days);
-
-        // Wrap in TimingStrategy enum
-        use crate::timing_strategy::TimingStrategy;
-        let timing = TimingStrategy::Straddle(timing_impl);
-
-        info!(
-            entry_days = self.config.straddle_entry_days,
-            exit_days = self.config.straddle_exit_days,
-            "Starting straddle backtest"
-        );
-
-        for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
-            sessions_processed += 1;
-
-            // Load earnings for wider window (need events where entry falls on session_date)
-            // Entry is N days before earnings, so look for earnings N days ahead
-            // Use timing-aware lookahead calculation
-            let lookahead = timing.lookahead_days();
-            let events_end = session_date + chrono::Duration::days(lookahead);
-            let events = self.earnings_repo
-                .load_earnings(session_date, events_end, self.config.symbols.as_deref())
-                .await
-                .map_err(|e| BacktestError::Repository(e.to_string()))?;
-
-            // DEBUG: Log loaded earnings and entry dates
-            if !events.is_empty() {
-                debug!(
-                    session_date = %session_date,
-                    events_count = events.len(),
-                    "Loaded earnings for session"
-                );
-                for event in &events {
-                    let entry_date = timing.entry_date(event);
-                    let passes_mc = self.passes_market_cap_filter(event);
-                    debug!(
-                        symbol = %event.symbol,
-                        earnings_date = %event.earnings_date,
-                        entry_date = %entry_date,
-                        matches_session = entry_date == session_date,
-                        passes_market_cap = passes_mc,
-                        "Event timing check"
-                    );
-                }
-            }
-
-            // Filter: Entry date == session_date
-            let to_enter: Vec<_> = events
+        events: &[EarningsEvent],
+        strategy: &S,
+        selector: &dyn StrikeSelector,
+        criteria: &ExpirationCriteria,
+    ) -> Vec<Option<R>>
+    where
+        S: TradeStrategy<R> + Sync,
+        R: TradeResultMethods + Send,
+    {
+        if self.config.parallel {
+            let futures: Vec<_> = events
                 .iter()
-                .filter(|e| timing.entry_date(e) == session_date)
-                .filter(|e| self.passes_market_cap_filter(e))
-                .cloned()
+                .map(|event| {
+                    let entry_time = strategy.entry_datetime(event);
+                    let exit_time = strategy.exit_datetime(event);
+                    strategy.execute_trade(
+                        self.options_repo.as_ref(),
+                        self.equity_repo.as_ref(),
+                        selector,
+                        criteria,
+                        event,
+                        entry_time,
+                        exit_time,
+                    )
+                })
                 .collect();
-
-            if to_enter.is_empty() {
-                if let Some(ref callback) = on_progress {
-                    callback(SessionProgress {
-                        session_date,
-                        entries_count: 0,
-                        events_found: 0,
-                    });
-                }
-                continue;
+            futures::future::join_all(futures).await
+        } else {
+            let mut results = Vec::with_capacity(events.len());
+            for event in events {
+                let entry_time = strategy.entry_datetime(event);
+                let exit_time = strategy.exit_datetime(event);
+                let result = strategy.execute_trade(
+                    self.options_repo.as_ref(),
+                    self.equity_repo.as_ref(),
+                    selector,
+                    criteria,
+                    event,
+                    entry_time,
+                    exit_time,
+                ).await;
+                results.push(result);
             }
-
-            debug!(
-                session_date = %session_date,
-                events_count = to_enter.len(),
-                "Processing straddle session"
-            );
-
-            // Process events using helper
-            let session_results: Vec<_> = if self.config.parallel {
-                let futures: Vec<_> = to_enter
-                    .iter()
-                    .map(|event| {
-                        let entry_time = timing.entry_datetime(event);
-                        let exit_time = timing.exit_datetime(event);
-                        backtest_use_case_helpers::execute_straddle(
-                            self.options_repo.as_ref(),
-                            self.equity_repo.as_ref(),
-                            &*selector,
-                            &criteria,
-                            event,
-                            entry_time,
-                            exit_time,
-                            &exec_config,
-                        )
-                    })
-                    .collect();
-                futures::future::join_all(futures).await
-            } else {
-                let mut results = Vec::new();
-                for event in &to_enter {
-                    let entry_time = timing.entry_datetime(event);
-                    let exit_time = timing.exit_datetime(event);
-                    let result = backtest_use_case_helpers::execute_straddle(
-                        self.options_repo.as_ref(),
-                        self.equity_repo.as_ref(),
-                        &*selector,
-                        &criteria,
-                        event,
-                        entry_time,
-                        exit_time,
-                        &exec_config,
-                    ).await;
-                    results.push(result);
-                }
-                results
-            };
-
-            let mut session_entries = 0;
-            for result in session_results {
-                total_opportunities += 1;
-                if let Some(trade_result) = result {
-                    all_results.push(trade_result);
-                    session_entries += 1;
-                }
-            }
-
-            if let Some(ref callback) = on_progress {
-                callback(SessionProgress {
-                    session_date,
-                    entries_count: session_entries,
-                    events_found: to_enter.len(),
-                });
-            }
+            results
         }
-
-        let total_entries = all_results.len();
-
-        info!(
-            sessions_processed,
-            total_opportunities,
-            results_count = total_entries,
-            dropped_count = dropped_events.len(),
-            "Straddle backtest completed"
-        );
-
-        Ok(BacktestResult {
-            results: all_results,
-            sessions_processed,
-            total_entries,
-            total_opportunities,
-            dropped_events,
-        })
     }
 
-    /// Execute post-earnings straddle backtest
+    /// Load earnings events for a strategy
     ///
-    /// Post-earnings straddle enters AFTER earnings (when IV has crushed) and holds
-    /// for ~1 week to capture continued stock movement. Unlike pre-earnings straddle,
-    /// this benefits from lower entry IV.
-    pub async fn execute_post_earnings_straddle(
+    /// Different strategies need different lookahead windows:
+    /// - Earnings timing: small window around session date
+    /// - Straddle timing: large lookahead (entry N days before earnings)
+    /// - Post-earnings: lookback (entry after earnings)
+    async fn load_earnings_for_strategy<S, R>(
         &self,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult<StraddleResult>, BacktestError> {
-        let mut all_results: Vec<StraddleResult> = Vec::new();
-        let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
-        let mut sessions_processed = 0;
-        let mut total_opportunities = 0;
+        session_date: NaiveDate,
+        strategy: &S,
+    ) -> Result<Vec<EarningsEvent>, BacktestError>
+    where
+        S: TradeStrategy<R>,
+        R: TradeResultMethods + Send,
+    {
+        let lookahead = strategy.lookahead_days();
 
-        // Create selector and criteria
-        let selector = self.create_selector();
-        let criteria = self.build_expiration_criteria();
-        let exec_config = ExecutionConfig::for_straddle(self.config.max_entry_iv);
+        let (start, end) = if lookahead < 0 {
+            // Lookback (post-earnings): look backwards from session_date
+            let lookback = -lookahead;
+            (session_date - chrono::Duration::days(lookback), session_date)
+        } else if lookahead <= 3 {
+            // Small window (earnings timing): use adjacent days
+            let start = TradingCalendar::previous_trading_day(session_date);
+            let end = TradingCalendar::next_trading_day(session_date);
+            (start, end)
+        } else {
+            // Large lookahead (straddle): session_date to session_date + lookahead
+            (session_date, session_date + chrono::Duration::days(lookahead))
+        };
 
-        // Create post-earnings timing
-        let timing_impl = PostEarningsStraddleTiming::new(self.config.timing)
-            .with_holding_days(self.config.post_earnings_holding_days);
-
-        // Wrap in TimingStrategy enum
-        use crate::timing_strategy::TimingStrategy;
-        let timing = TimingStrategy::PostEarnings(timing_impl);
-
-        info!(
-            holding_days = self.config.post_earnings_holding_days,
-            "Starting post-earnings straddle backtest"
-        );
-
-        for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
-            sessions_processed += 1;
-
-            // Load earnings events (look backwards since we enter AFTER earnings)
-            // Entry can be same day (BMO) or next day (AMC), so check 1-2 days back
-            let lookback_days = 3;  // Buffer for weekends
-            let events_start = session_date - chrono::Duration::days(lookback_days);
-            let events = self.earnings_repo
-                .load_earnings(events_start, session_date, self.config.symbols.as_deref())
-                .await
-                .map_err(|e| BacktestError::Repository(e.to_string()))?;
-
-            // Filter: Entry date == session_date
-            let to_enter: Vec<_> = events
-                .iter()
-                .filter(|e| timing.entry_date(e) == session_date)
-                .filter(|e| self.passes_market_cap_filter(e))
-                .cloned()
-                .collect();
-
-            if to_enter.is_empty() {
-                if let Some(ref callback) = on_progress {
-                    callback(SessionProgress {
-                        session_date,
-                        entries_count: 0,
-                        events_found: 0,
-                    });
-                }
-                continue;
-            }
-
-            debug!(
-                session_date = %session_date,
-                events_count = to_enter.len(),
-                "Processing post-earnings straddle session"
-            );
-
-            // Process events using helper
-            let session_results: Vec<_> = if self.config.parallel {
-                let futures: Vec<_> = to_enter
-                    .iter()
-                    .map(|event| {
-                        let entry_time = timing.entry_datetime(event);
-                        let exit_time = timing.exit_datetime(event);
-                        backtest_use_case_helpers::execute_straddle(
-                            self.options_repo.as_ref(),
-                            self.equity_repo.as_ref(),
-                            &*selector,
-                            &criteria,
-                            event,
-                            entry_time,
-                            exit_time,
-                            &exec_config,
-                        )
-                    })
-                    .collect();
-                futures::future::join_all(futures).await
-            } else {
-                let mut results = Vec::new();
-                for event in &to_enter {
-                    let entry_time = timing.entry_datetime(event);
-                    let exit_time = timing.exit_datetime(event);
-                    let result = backtest_use_case_helpers::execute_straddle(
-                        self.options_repo.as_ref(),
-                        self.equity_repo.as_ref(),
-                        &*selector,
-                        &criteria,
-                        event,
-                        entry_time,
-                        exit_time,
-                        &exec_config,
-                    ).await;
-                    results.push(result);
-                }
-                results
-            };
-
-            let mut session_entries = 0;
-            for result in session_results {
-                total_opportunities += 1;
-                if let Some(trade_result) = result {
-                    all_results.push(trade_result);
-                    session_entries += 1;
-                }
-            }
-
-            if let Some(ref callback) = on_progress {
-                callback(SessionProgress {
-                    session_date,
-                    entries_count: session_entries,
-                    events_found: to_enter.len(),
-                });
-            }
-        }
-
-        let total_entries = all_results.len();
-
-        info!(
-            sessions_processed,
-            total_opportunities,
-            results_count = total_entries,
-            dropped_count = dropped_events.len(),
-            "Post-earnings straddle backtest completed"
-        );
-
-        Ok(BacktestResult {
-            results: all_results,
-            sessions_processed,
-            total_entries,
-            total_opportunities,
-            dropped_events,
-        })
+        self.earnings_repo
+            .load_earnings(start, end, self.config.symbols.as_deref())
+            .await
+            .map_err(|e| BacktestError::Repository(e.to_string()))
     }
 
-    /// Execute calendar straddle backtest
-    ///
-    /// Calendar straddle uses the same timing as calendar spreads (EarningsTradeTiming):
-    /// - Entry: Day of/before earnings (AMC/BMO aware)
-    /// - Exit: Day after earnings (post IV crush)
-    pub async fn execute_calendar_straddle(
+    /// Report progress to callback
+    fn report_progress(
         &self,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult<CalendarStraddleResult>, BacktestError> {
-        let mut all_results: Vec<CalendarStraddleResult> = Vec::new();
-        let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
-        let mut sessions_processed = 0;
-        let mut total_opportunities = 0;
-
-        // Create selector and criteria
-        let selector = self.create_selector();
-        let criteria = self.build_expiration_criteria();
-        let exec_config = ExecutionConfig::for_straddle(self.config.max_entry_iv); // Calendar straddle uses same config as straddle
-
-        // Calendar straddles use earnings timing (enter on/before earnings day)
-        use crate::timing_strategy::TimingStrategy;
-        let timing = TimingStrategy::Earnings(EarningsTradeTiming::new(self.config.timing));
-
-        for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
-            sessions_processed += 1;
-
-            // Load earnings for this session
-            let events = self.load_earnings_window(session_date).await?;
-            let to_enter = self.filter_for_entry(&events, session_date, &timing);
-
-            if to_enter.is_empty() {
-                if let Some(ref callback) = on_progress {
-                    callback(SessionProgress {
-                        session_date,
-                        entries_count: 0,
-                        events_found: 0,
-                    });
-                }
-                continue;
-            }
-
-            debug!(
-                session_date = %session_date,
-                events_count = to_enter.len(),
-                "Processing calendar straddle session"
-            );
-
-            // Process events using helper
-            let session_results: Vec<_> = if self.config.parallel {
-                let futures: Vec<_> = to_enter
-                    .iter()
-                    .map(|event| {
-                        let entry_time = timing.entry_datetime(event);
-                        let exit_time = timing.exit_datetime(event);
-                        backtest_use_case_helpers::execute_calendar_straddle(
-                            self.options_repo.as_ref(),
-                            self.equity_repo.as_ref(),
-                            &*selector,
-                            &criteria,
-                            event,
-                            entry_time,
-                            exit_time,
-                            &exec_config,
-                        )
-                    })
-                    .collect();
-                futures::future::join_all(futures).await
-            } else {
-                let mut results = Vec::new();
-                for event in &to_enter {
-                    let entry_time = timing.entry_datetime(event);
-                    let exit_time = timing.exit_datetime(event);
-                    let result = backtest_use_case_helpers::execute_calendar_straddle(
-                        self.options_repo.as_ref(),
-                        self.equity_repo.as_ref(),
-                        &*selector,
-                        &criteria,
-                        event,
-                        entry_time,
-                        exit_time,
-                        &exec_config,
-                    ).await;
-                    results.push(result);
-                }
-                results
-            };
-
-            // Collect results and apply IV filter
-            let mut session_entries = 0;
-            for result in session_results {
-                total_opportunities += 1;
-                if let Some(trade_result) = result {
-                    // Apply IV ratio filter if configured
-                    if self.passes_calendar_straddle_iv_filter(&trade_result) {
-                        all_results.push(trade_result);
-                        session_entries += 1;
-                    } else {
-                        dropped_events.push(TradeGenerationError {
-                            symbol: trade_result.symbol.clone(),
-                            earnings_date: trade_result.earnings_date,
-                            earnings_time: trade_result.earnings_time,
-                            reason: "IV_RATIO_FILTER".into(),
-                            details: trade_result.iv_ratio().map(|r| format!("IV ratio: {:.2}", r)),
-                            phase: "filter".into(),
-                        });
-                    }
-                }
-            }
-
-            if let Some(ref callback) = on_progress {
-                callback(SessionProgress {
-                    session_date,
-                    entries_count: session_entries,
-                    events_found: to_enter.len(),
-                });
-            }
+        on_progress: &Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
+        session_date: NaiveDate,
+        entries_count: usize,
+        events_found: usize,
+    ) {
+        if let Some(ref callback) = on_progress {
+            callback(SessionProgress {
+                session_date,
+                entries_count,
+                events_found,
+            });
         }
-
-        let total_entries = all_results.len();
-
-        info!(
-            sessions_processed,
-            total_opportunities,
-            results_count = total_entries,
-            dropped_count = dropped_events.len(),
-            "Calendar straddle backtest completed"
-        );
-
-        Ok(BacktestResult {
-            results: all_results,
-            sessions_processed,
-            total_entries,
-            total_opportunities,
-            dropped_events,
-        })
-    }
-    fn create_strategy(&self) -> Box<dyn SelectionStrategy> {
-        match self.config.selection_strategy {
-            SelectionType::ATM => Box::new(
-                ATMStrategy::new(self.config.selection.clone())
-                    .with_strike_match_mode(self.config.strike_match_mode)
-            ),
-            SelectionType::Delta => Box::new(
-                DeltaStrategy::fixed(
-                    self.config.target_delta,
-                    self.config.selection.clone(),
-                )
-                .with_strike_match_mode(self.config.strike_match_mode)
-            ),
-            SelectionType::DeltaScan => Box::new(
-                DeltaStrategy::scanning(
-                    self.config.delta_range,
-                    self.config.delta_scan_steps,
-                    self.config.selection.clone(),
-                )
-                .with_strike_match_mode(self.config.strike_match_mode)
-            ),
-        }
-    }
-
-    fn create_iron_butterfly_strategy(&self) -> IronButterflyStrategy {
-        IronButterflyStrategy::new(
-            rust_decimal::Decimal::try_from(self.config.wing_width).unwrap_or(rust_decimal::Decimal::new(10, 0)),
-            self.config.selection.min_short_dte,
-            self.config.selection.max_short_dte,
-        )
     }
 
     /// Create strike selector based on config
@@ -1160,46 +603,6 @@ where
         )
     }
 
-
-    fn passes_iv_filter(&self, result: &CalendarSpreadResult) -> bool {
-        match (self.config.selection.min_iv_ratio, result.iv_ratio()) {
-            (Some(min), Some(ratio)) => ratio >= min,
-            (Some(_), None) => false,
-            (None, _) => true,
-        }
-    }
-
-    fn passes_calendar_straddle_iv_filter(&self, result: &CalendarStraddleResult) -> bool {
-        match (self.config.selection.min_iv_ratio, result.iv_ratio()) {
-            (Some(min), Some(ratio)) => ratio >= min,
-            (Some(_), None) => false,
-            (None, _) => true,
-        }
-    }
-
-    async fn load_earnings_window(&self, session_date: NaiveDate) -> Result<Vec<EarningsEvent>, BacktestError> {
-        let start = TradingCalendar::previous_trading_day(session_date);
-        let end = TradingCalendar::next_trading_day(session_date);
-        self.earnings_repo
-            .load_earnings(start, end, self.config.symbols.as_deref())
-            .await
-            .map_err(|e| BacktestError::Repository(e.to_string()))
-    }
-
-    fn filter_for_entry(
-        &self,
-        events: &[EarningsEvent],
-        session_date: NaiveDate,
-        timing: &crate::timing_strategy::TimingStrategy,
-    ) -> Vec<EarningsEvent> {
-        events
-            .iter()
-            .filter(|e| timing.entry_date(e) == session_date)
-            .filter(|e| self.passes_market_cap_filter(e))
-            .cloned()
-            .collect()
-    }
-
     fn passes_market_cap_filter(&self, event: &EarningsEvent) -> bool {
         match (self.config.min_market_cap, event.market_cap) {
             (Some(min), Some(cap)) => cap >= min,
@@ -1208,64 +611,127 @@ where
         }
     }
 
-    /// Check if option chain meets minimum daily notional threshold
-    /// Calculates: sum(all option volumes) × 100 × stock_price
-    fn passes_notional_filter(
-        &self,
-        chain_df: &polars::frame::DataFrame,
-        spot_price: rust_decimal::Decimal,
-        event: &EarningsEvent,
-    ) -> Result<bool, TradeGenerationError> {
-        use polars::prelude::*;
+    // ========================================================================
+    // Legacy API - Kept for backwards compatibility
+    // These methods delegate to execute_with_strategy with specific strategies
+    // ========================================================================
 
-        // If no filter configured, pass
-        let Some(min_notional) = self.config.min_notional else {
-            return Ok(true);
+    /// Execute calendar spread backtest (legacy API)
+    pub async fn execute_calendar_spread(
+        &self,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        option_type: finq_core::OptionType,
+        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
+    ) -> Result<BacktestResult<CalendarSpreadResult>, BacktestError> {
+        let mut config = self.config.clone();
+        config.start_date = start_date;
+        config.end_date = end_date;
+
+        let strategy = CalendarSpreadStrategy::new(&config)
+            .with_option_type(option_type);
+
+        // Create a temporary use case with updated config
+        let temp_use_case = BacktestUseCase {
+            earnings_repo: Arc::clone(&self.earnings_repo),
+            options_repo: Arc::clone(&self.options_repo),
+            equity_repo: Arc::clone(&self.equity_repo),
+            config,
         };
 
-        // Sum all volumes in the option chain
-        let volume_col = chain_df
-            .column("volume")
-            .map_err(|e| TradeGenerationError {
-                symbol: event.symbol.clone(),
-                earnings_date: event.earnings_date,
-                earnings_time: event.earnings_time,
-                reason: "NOTIONAL_FILTER_ERROR".into(),
-                details: Some(format!("Failed to read volume column: {}", e)),
-                phase: "notional_filter".into(),
-            })?;
+        temp_use_case.execute_with_strategy(&strategy, on_progress).await
+    }
 
-        let total_volume: i64 = volume_col
-            .i64()
-            .map_err(|e| TradeGenerationError {
-                symbol: event.symbol.clone(),
-                earnings_date: event.earnings_date,
-                earnings_time: event.earnings_time,
-                reason: "NOTIONAL_FILTER_ERROR".into(),
-                details: Some(format!("Failed to cast volume to i64: {}", e)),
-                phase: "notional_filter".into(),
-            })?
-            .sum()
-            .unwrap_or(0);
+    /// Execute iron butterfly backtest (legacy API)
+    pub async fn execute_iron_butterfly(
+        &self,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
+    ) -> Result<BacktestResult<IronButterflyResult>, BacktestError> {
+        let mut config = self.config.clone();
+        config.start_date = start_date;
+        config.end_date = end_date;
 
-        // Calculate total notional: volume × 100 shares × stock price
-        // Convert Decimal to f64 using string conversion (safe for display values)
-        let spot_f64: f64 = spot_price.to_string().parse().unwrap_or(0.0);
-        let daily_notional = (total_volume as f64) * 100.0 * spot_f64;
+        let strategy = IronButterflyStrategy::new(&config);
 
-        if daily_notional < min_notional {
-            debug!(
-                symbol = %event.symbol,
-                spot = %spot_price,
-                total_volume = total_volume,
-                daily_notional = daily_notional,
-                min_required = min_notional,
-                "Rejected: daily option notional below minimum"
-            );
-            return Ok(false);
-        }
+        let temp_use_case = BacktestUseCase {
+            earnings_repo: Arc::clone(&self.earnings_repo),
+            options_repo: Arc::clone(&self.options_repo),
+            equity_repo: Arc::clone(&self.equity_repo),
+            config,
+        };
 
-        Ok(true)
+        temp_use_case.execute_with_strategy(&strategy, on_progress).await
+    }
+
+    /// Execute straddle backtest (legacy API)
+    pub async fn execute_straddle(
+        &self,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
+    ) -> Result<BacktestResult<StraddleResult>, BacktestError> {
+        let mut config = self.config.clone();
+        config.start_date = start_date;
+        config.end_date = end_date;
+
+        let strategy = StraddleStrategy::new(&config);
+
+        let temp_use_case = BacktestUseCase {
+            earnings_repo: Arc::clone(&self.earnings_repo),
+            options_repo: Arc::clone(&self.options_repo),
+            equity_repo: Arc::clone(&self.equity_repo),
+            config,
+        };
+
+        temp_use_case.execute_with_strategy(&strategy, on_progress).await
+    }
+
+    /// Execute post-earnings straddle backtest (legacy API)
+    pub async fn execute_post_earnings_straddle(
+        &self,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
+    ) -> Result<BacktestResult<StraddleResult>, BacktestError> {
+        let mut config = self.config.clone();
+        config.start_date = start_date;
+        config.end_date = end_date;
+
+        let strategy = PostEarningsStraddleStrategy::new(&config);
+
+        let temp_use_case = BacktestUseCase {
+            earnings_repo: Arc::clone(&self.earnings_repo),
+            options_repo: Arc::clone(&self.options_repo),
+            equity_repo: Arc::clone(&self.equity_repo),
+            config,
+        };
+
+        temp_use_case.execute_with_strategy(&strategy, on_progress).await
+    }
+
+    /// Execute calendar straddle backtest (legacy API)
+    pub async fn execute_calendar_straddle(
+        &self,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
+    ) -> Result<BacktestResult<CalendarStraddleResult>, BacktestError> {
+        let mut config = self.config.clone();
+        config.start_date = start_date;
+        config.end_date = end_date;
+
+        let strategy = CalendarStraddleStrategy::new(&config);
+
+        let temp_use_case = BacktestUseCase {
+            earnings_repo: Arc::clone(&self.earnings_repo),
+            options_repo: Arc::clone(&self.options_repo),
+            equity_repo: Arc::clone(&self.equity_repo),
+            config,
+        };
+
+        temp_use_case.execute_with_strategy(&strategy, on_progress).await
     }
 }
 

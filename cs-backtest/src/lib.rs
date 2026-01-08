@@ -21,6 +21,7 @@ pub mod session_executor;  // Session-based executor for campaign execution
 pub mod trade_factory_impl;
 pub mod hedging_analytics;
 pub mod timing_strategy;
+pub mod trade_strategy;
 pub mod backtest_use_case;
 pub mod campaign_use_case;
 mod backtest_use_case_helpers;
@@ -43,6 +44,11 @@ pub use earnings_analysis_use_case::{EarningsAnalysisUseCase, EarningsAnalysisRe
 // Generic execution framework
 pub use execution::{ExecutableTrade, TradePricer, ExecutionConfig, ExecutionContext, ExecutionError, execute_trade};
 pub use timing_strategy::TimingStrategy;
+pub use trade_strategy::{
+    TradeStrategy, StrategyDispatch,
+    CalendarSpreadStrategy, IronButterflyStrategy, StraddleStrategy,
+    PostEarningsStraddleStrategy, CalendarStraddleStrategy,
+};
 pub use trade_executor::TradeExecutor;
 pub use trade_executor_factory::TradeExecutorFactory;
 
