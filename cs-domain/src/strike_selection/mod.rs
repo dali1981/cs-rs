@@ -2,6 +2,7 @@ pub mod atm;
 pub mod delta;
 pub mod iron_butterfly;
 pub mod straddle;
+pub mod multi_leg;
 
 use crate::entities::*;
 use crate::value_objects::*;
@@ -15,6 +16,7 @@ pub use atm::ATMStrategy;
 pub use delta::{DeltaStrategy, DeltaScanMode};
 pub use iron_butterfly::IronButterflyStrategy;
 pub use straddle::StraddleStrategy;
+pub use multi_leg::SymmetricMultiLegSelector;
 
 /// Error type for strike selection
 #[derive(Error, Debug)]
@@ -141,6 +143,19 @@ pub struct ExpirationCriteria {
     pub max_long_dte: i32,
 }
 
+/// Strike selection result for multi-leg strategies
+#[derive(Debug, Clone)]
+pub struct MultiLegStrikeSelection {
+    /// Center strikes (1 for Strangle, 2 for Butterfly/Straddle)
+    pub center_strikes: Vec<Strike>,
+    /// Near/inner wing strikes (for Condor strategies)
+    pub near_strikes: Option<Vec<Strike>>,
+    /// Far/outer wing strikes
+    pub far_strikes: Option<Vec<Strike>>,
+    /// Selected expiration date
+    pub expiration: NaiveDate,
+}
+
 impl ExpirationCriteria {
     pub fn new(min_short_dte: i32, max_short_dte: i32, min_long_dte: i32, max_long_dte: i32) -> Self {
         Self { min_short_dte, max_short_dte, min_long_dte, max_long_dte }
@@ -226,6 +241,20 @@ pub trait StrikeSelector: Send + Sync {
     ) -> Result<IronButterfly, SelectionError> {
         Err(SelectionError::UnsupportedStrategy(
             "Advanced iron butterfly selection not supported by this selector".to_string()
+        ))
+    }
+
+    /// Select strikes for a multi-leg volatility strategy
+    fn select_multi_leg(
+        &self,
+        _spot: &SpotPrice,
+        _surface: &IVSurface,
+        _config: &crate::value_objects::MultiLegStrategyConfig,
+        _min_dte: i32,
+        _max_dte: i32,
+    ) -> Result<MultiLegStrikeSelection, SelectionError> {
+        Err(SelectionError::UnsupportedStrategy(
+            "Multi-leg selection not supported by this selector".to_string()
         ))
     }
 }

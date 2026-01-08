@@ -773,6 +773,249 @@ impl std::fmt::Display for IronButterflyConfig {
     }
 }
 
+/// How distance from center is specified (delta or moneyness percent)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DistanceSpec {
+    /// Delta-based distance (e.g., 0.25 for 25-delta)
+    Delta(f64),
+    /// Moneyness-based distance (e.g., 0.10 for 10% OTM)
+    Moneyness(f64),
+}
+
+impl DistanceSpec {
+    /// Parse distance spec from CLI argument (e.g., "delta:0.25" or "moneyness:0.10")
+    pub fn from_cli_arg(arg: &str) -> Result<Self, String> {
+        let parts: Vec<&str> = arg.split(':').collect();
+        match parts.as_slice() {
+            ["delta", val] => {
+                let delta = val.parse::<f64>()
+                    .map_err(|_| format!("Invalid delta value: {}", val))?;
+                if !(0.0..=1.0).contains(&delta) {
+                    return Err(format!("Delta must be between 0.0 and 1.0, got {}", delta));
+                }
+                Ok(DistanceSpec::Delta(delta))
+            }
+            ["moneyness", val] => {
+                let percent = val.parse::<f64>()
+                    .map_err(|_| format!("Invalid moneyness value: {}", val))?;
+                if !(0.0..=1.0).contains(&percent) {
+                    return Err(format!("Moneyness percent must be between 0.0 and 1.0, got {}", percent));
+                }
+                Ok(DistanceSpec::Moneyness(percent))
+            }
+            _ => Err(format!("Invalid distance spec format: '{}'. Use 'delta:0.25' or 'moneyness:0.10'", arg)),
+        }
+    }
+}
+
+impl std::fmt::Display for DistanceSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DistanceSpec::Delta(delta) => write!(f, "delta:{}", delta),
+            DistanceSpec::Moneyness(percent) => write!(f, "moneyness:{}", percent),
+        }
+    }
+}
+
+/// Spread type defines the wing structure for multi-leg strategies
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SpreadType {
+    /// Single distance from center (e.g., Strangle: OTM distance)
+    Simple { distance_from_center: DistanceSpec },
+
+    /// Two distances for inner/outer strikes (e.g., Condor: near and far)
+    Double {
+        near_distance: DistanceSpec,
+        far_distance: DistanceSpec,
+    },
+}
+
+impl SpreadType {
+    /// Parse spread type from CLI arguments
+    /// Format: "simple:delta:0.25" or "double:delta:0.20,0.10"
+    pub fn from_cli_arg(arg: &str) -> Result<Self, String> {
+        let parts: Vec<&str> = arg.split(':').collect();
+        match parts.as_slice() {
+            ["simple", _] => {
+                let distance = DistanceSpec::from_cli_arg(&format!("{}:{}", parts[1], parts.get(2).unwrap_or(&"")))?;
+                Ok(SpreadType::Simple { distance_from_center: distance })
+            }
+            ["double", _] => {
+                let distances: Vec<&str> = parts.get(2).unwrap_or(&"").split(',').collect();
+                if distances.len() != 2 {
+                    return Err("Double spread requires two distances (near,far)".to_string());
+                }
+                let near = DistanceSpec::from_cli_arg(&format!("{}:{}", parts[1], distances[0]))?;
+                let far = DistanceSpec::from_cli_arg(&format!("{}:{}", parts[1], distances[1]))?;
+                Ok(SpreadType::Double { near_distance: near, far_distance: far })
+            }
+            _ => Err(format!("Invalid spread type format: '{}'", arg)),
+        }
+    }
+}
+
+/// Center strike configuration for the strategy
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CenterConfig {
+    /// Number of legs at center (1 for Strangle, 2 for Butterfly, etc.)
+    pub multiplicity: u32,
+    /// Whether center is a straddle (both call and put) or spread
+    pub is_straddle: bool,
+}
+
+impl CenterConfig {
+    pub fn new(multiplicity: u32, is_straddle: bool) -> Self {
+        Self { multiplicity, is_straddle }
+    }
+}
+
+/// Multi-leg strategy type enumeration
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MultiLegStrategyType {
+    Strangle,
+    Butterfly,
+    IronButterfly,
+    Condor,
+    IronCondor,
+}
+
+impl std::fmt::Display for MultiLegStrategyType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MultiLegStrategyType::Strangle => write!(f, "strangle"),
+            MultiLegStrategyType::Butterfly => write!(f, "butterfly"),
+            MultiLegStrategyType::IronButterfly => write!(f, "iron-butterfly"),
+            MultiLegStrategyType::Condor => write!(f, "condor"),
+            MultiLegStrategyType::IronCondor => write!(f, "iron-condor"),
+        }
+    }
+}
+
+impl std::str::FromStr for MultiLegStrategyType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "strangle" => Ok(MultiLegStrategyType::Strangle),
+            "butterfly" => Ok(MultiLegStrategyType::Butterfly),
+            "iron-butterfly" | "ironbutterfly" => Ok(MultiLegStrategyType::IronButterfly),
+            "condor" => Ok(MultiLegStrategyType::Condor),
+            "iron-condor" | "ironcondor" => Ok(MultiLegStrategyType::IronCondor),
+            _ => Err(format!("Unknown strategy type: {}", s)),
+        }
+    }
+}
+
+/// Wing configuration for symmetric multi-leg strategies
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SymmetricWingConfig {
+    pub spread_type: SpreadType,
+    pub symmetric: bool,
+}
+
+impl SymmetricWingConfig {
+    pub fn new(spread_type: SpreadType, symmetric: bool) -> Self {
+        Self { spread_type, symmetric }
+    }
+}
+
+/// Unified configuration for all multi-leg volatility strategies
+#[derive(Debug, Clone)]
+pub struct MultiLegStrategyConfig {
+    pub strategy_type: MultiLegStrategyType,
+    pub center: CenterConfig,
+    pub wings: SymmetricWingConfig,
+    pub direction: TradeDirection,
+}
+
+impl MultiLegStrategyConfig {
+    pub fn new(
+        strategy_type: MultiLegStrategyType,
+        center: CenterConfig,
+        wings: SymmetricWingConfig,
+        direction: TradeDirection,
+    ) -> Self {
+        Self { strategy_type, center, wings, direction }
+    }
+
+    /// Create a Strangle configuration (25-delta, short direction)
+    pub fn strangle_delta(wing_delta: f64) -> Self {
+        Self {
+            strategy_type: MultiLegStrategyType::Strangle,
+            center: CenterConfig::new(1, false),
+            wings: SymmetricWingConfig::new(
+                SpreadType::Simple { distance_from_center: DistanceSpec::Delta(wing_delta) },
+                true,
+            ),
+            direction: TradeDirection::Short,
+        }
+    }
+
+    /// Create a Butterfly configuration (25-delta, short direction)
+    pub fn butterfly_delta(wing_delta: f64) -> Self {
+        Self {
+            strategy_type: MultiLegStrategyType::Butterfly,
+            center: CenterConfig::new(2, true),
+            wings: SymmetricWingConfig::new(
+                SpreadType::Simple { distance_from_center: DistanceSpec::Delta(wing_delta) },
+                true,
+            ),
+            direction: TradeDirection::Short,
+        }
+    }
+
+    /// Create an IronCondor configuration (20-delta near, 10-delta far, short direction)
+    pub fn iron_condor_delta(near_delta: f64, far_delta: f64) -> Self {
+        Self {
+            strategy_type: MultiLegStrategyType::IronCondor,
+            center: CenterConfig::new(2, false),
+            wings: SymmetricWingConfig::new(
+                SpreadType::Double {
+                    near_distance: DistanceSpec::Delta(near_delta),
+                    far_distance: DistanceSpec::Delta(far_delta),
+                },
+                true,
+            ),
+            direction: TradeDirection::Short,
+        }
+    }
+
+    /// Create a Condor configuration (25-delta near, 35-delta far, short direction)
+    pub fn condor_delta(near_delta: f64, far_delta: f64) -> Self {
+        Self {
+            strategy_type: MultiLegStrategyType::Condor,
+            center: CenterConfig::new(1, true),
+            wings: SymmetricWingConfig::new(
+                SpreadType::Double {
+                    near_distance: DistanceSpec::Delta(near_delta),
+                    far_distance: DistanceSpec::Delta(far_delta),
+                },
+                true,
+            ),
+            direction: TradeDirection::Short,
+        }
+    }
+
+    /// Create an IronButterfly configuration (25-delta, short direction)
+    pub fn iron_butterfly_delta(wing_delta: f64) -> Self {
+        Self {
+            strategy_type: MultiLegStrategyType::IronButterfly,
+            center: CenterConfig::new(1, true),
+            wings: SymmetricWingConfig::new(
+                SpreadType::Simple { distance_from_center: DistanceSpec::Delta(wing_delta) },
+                true,
+            ),
+            direction: TradeDirection::Short,
+        }
+    }
+
+    /// Set direction and return self for builder pattern
+    pub fn with_direction(mut self, direction: TradeDirection) -> Self {
+        self.direction = direction;
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
