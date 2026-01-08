@@ -1,0 +1,153 @@
+{
+  "end_date": "2025-11-03",
+  "num_trades": 1,
+  "start_date": "2025-11-03",
+  "successful_trades": 1,
+  "symbol": "RHP",
+  "total_hedge_pnl": "638.8399999999982",
+  "total_option_pnl": "-611.240872432412700",
+  "total_pnl": "24.639127567585500",
+  "total_transaction_cost": "2.96",
+  "trade_type": "straddle",
+  "trades": [
+    {
+      "call_entry_price": "755.28842724862500",
+      "call_exit_price": "341.00",
+      "delta_pnl": "-23.67113708310223",
+      "earnings_date": "2025-11-03",
+      "earnings_time": "AfterMarketClose",
+      "entry_debit": "1152.240872432412700",
+      "entry_surface_time": "2025-10-14T14:08:00Z",
+      "entry_time": "2025-10-14T13:35:00Z",
+      "exit_credit": "541.00",
+      "exit_pricing_method": "Market",
+      "exit_surface_time": "2025-10-31T19:55:00Z",
+      "exit_time": "2025-10-31T19:55:00Z",
+      "expected_move_pct": 13.090671125112618,
+      "expiration": "2025-11-21",
+      "failure_reason": null,
+      "gamma_pnl": "2.235470377347185",
+      "hedge_pnl": "638.8399999999982",
+      "hedge_position": {
+        "avg_hedge_price": 80.44541666666669,
+        "cumulative_shares": 96,
+        "hedges": [
+          {
+            "cost": "1.00",
+            "delta_after": 0.0,
+            "delta_before": 1.0,
+            "shares": -100,
+            "spot_price": 88.02,
+            "timestamp": "2025-10-14T13:35:00Z"
+          },
+          {
+            "cost": "1.96",
+            "delta_after": 0.001225869971464455,
+            "delta_before": -1.9587741300285355,
+            "shares": 196,
+            "spot_price": 84.31,
+            "timestamp": "2025-10-31T13:35:00Z"
+          }
+        ],
+        "peak_long_shares": 96,
+        "peak_short_shares": 100,
+        "realized_pnl": "0",
+        "realized_vol_metrics": {
+          "entry_hv": 0.010764924688137566,
+          "entry_iv": 0.5021439299822976,
+          "exit_iv": 0.3072298840136557,
+          "iv_premium_at_entry": 4564.630218320396,
+          "num_observations": 15,
+          "realized_vol": 0.1648340499896038,
+          "realized_vs_implied": -67.17394353538938
+        },
+        "spot_history": [
+          [
+            "2026-01-08T04:48:44.234578Z",
+            88.02
+          ],
+          [
+            "2025-10-14T13:35:00Z",
+            88.02
+          ],
+          [
+            "2025-10-15T13:35:00Z",
+            90.0
+          ],
+          [
+            "2025-10-16T13:35:00Z",
+            89.795
+          ],
+          [
+            "2025-10-17T13:35:00Z",
+            88.735
+          ],
+          [
+            "2025-10-20T13:35:00Z",
+            88.875
+          ],
+          [
+            "2025-10-21T13:35:00Z",
+            88.1485
+          ],
+          [
+            "2025-10-22T13:35:00Z",
+            89.195
+          ],
+          [
+            "2025-10-23T13:35:00Z",
+            88.66
+          ],
+          [
+            "2025-10-24T13:35:00Z",
+            88.06
+          ],
+          [
+            "2025-10-27T13:35:00Z",
+            87.585
+          ],
+          [
+            "2025-10-28T13:35:00Z",
+            87.2
+          ],
+          [
+            "2025-10-29T13:35:00Z",
+            86.32
+          ],
+          [
+            "2025-10-30T13:35:00Z",
+            86.325
+          ],
+          [
+            "2025-10-31T13:35:00Z",
+            84.31
+          ]
+        ],
+        "total_cost": "2.96",
+        "unrealized_pnl": "638.8399999999982"
+      },
+      "iv_change": -0.19491404596864192,
+      "iv_entry": 0.5021439299822976,
+      "iv_exit": 0.3072298840136557,
+      "net_delta": 0.257294968294589,
+      "net_gamma": 0.052823024039394526,
+      "net_theta": -0.1428664867594998,
+      "net_vega": 0.2155140781362095,
+      "pnl": "-611.240872432412700",
+      "pnl_pct": "-53.048011666351162073446735760",
+      "put_entry_price": "396.952445183787700",
+      "put_exit_price": "200",
+      "spot_at_entry": 88.02,
+      "spot_at_exit": 87.1,
+      "spot_move": -0.9200000000000017,
+      "spot_move_pct": -1.0452169961372435,
+      "strike": "85",
+      "success": true,
+      "symbol": "RHP",
+      "theta_pnl": "-246.4446896601372",
+      "total_pnl_with_hedge": "24.639127567585500",
+      "unexplained_pnl": "76.7922616768972",
+      "vega_pnl": "-420.1527777434176"
+    }
+  ]
+}

@@ -1,0 +1,177 @@
+{
+  "end_date": "2025-11-03",
+  "num_trades": 1,
+  "start_date": "2025-11-03",
+  "successful_trades": 1,
+  "symbol": "FNV",
+  "total_hedge_pnl": "-1409.6399999999971",
+  "total_option_pnl": "432.15964328864600",
+  "total_pnl": "-980.22035671135110",
+  "total_transaction_cost": "2.74",
+  "trade_type": "straddle",
+  "trades": [
+    {
+      "call_entry_price": "1080.84035671135400",
+      "call_exit_price": "113.00",
+      "delta_pnl": "-146.5268980576012",
+      "earnings_date": "2025-11-03",
+      "earnings_time": "AfterMarketClose",
+      "entry_debit": "2110.84035671135400",
+      "entry_surface_time": "2025-10-14T19:56:00Z",
+      "entry_time": "2025-10-14T13:35:00Z",
+      "exit_credit": "2543.00",
+      "exit_pricing_method": "Market",
+      "exit_surface_time": "2025-10-31T19:55:00Z",
+      "exit_time": "2025-10-31T19:55:00Z",
+      "expected_move_pct": 10.079940579300674,
+      "expiration": "2025-11-21",
+      "failure_reason": null,
+      "gamma_pnl": "745.418795417761",
+      "hedge_pnl": "-1409.6399999999971",
+      "hedge_position": {
+        "avg_hedge_price": 201.2164,
+        "cumulative_shares": 100,
+        "hedges": [
+          {
+            "cost": "0.55",
+            "delta_after": 0.00028453246348902894,
+            "delta_before": 0.5502845324634891,
+            "shares": -55,
+            "spot_price": 209.41,
+            "timestamp": "2025-10-14T13:35:00Z"
+          },
+          {
+            "cost": "0.30",
+            "delta_after": -0.0024134714254689937,
+            "delta_before": 0.29758652857453094,
+            "shares": -30,
+            "spot_price": 209.875,
+            "timestamp": "2025-10-15T13:35:00Z"
+          },
+          {
+            "cost": "0.02",
+            "delta_after": 0.0020237326575519576,
+            "delta_before": 0.022023732657551975,
+            "shares": -2,
+            "spot_price": 209.95,
+            "timestamp": "2025-10-16T13:35:00Z"
+          },
+          {
+            "cost": "0.13",
+            "delta_after": -0.0015044605095186903,
+            "delta_before": -0.1315044605095187,
+            "shares": 13,
+            "spot_price": 209.71,
+            "timestamp": "2025-10-17T13:35:00Z"
+          },
+          {
+            "cost": "1.74",
+            "delta_after": 7.65609797781508e-13,
+            "delta_before": -1.7399999999992344,
+            "shares": 174,
+            "spot_price": 204.765,
+            "timestamp": "2025-10-20T13:35:00Z"
+          }
+        ],
+        "peak_long_shares": 100,
+        "peak_short_shares": 87,
+        "realized_pnl": "0",
+        "realized_vol_metrics": {
+          "entry_hv": 0.009828103729218619,
+          "entry_iv": 0.3907506225961356,
+          "exit_iv": 0.44165910277708387,
+          "iv_premium_at_entry": 3875.849597867463,
+          "num_observations": 15,
+          "realized_vol": 0.2829869796027084,
+          "realized_vs_implied": -27.578623490718634
+        },
+        "spot_history": [
+          [
+            "2026-01-08T04:48:21.272101Z",
+            209.41
+          ],
+          [
+            "2025-10-14T13:35:00Z",
+            209.41
+          ],
+          [
+            "2025-10-15T13:35:00Z",
+            209.875
+          ],
+          [
+            "2025-10-16T13:35:00Z",
+            209.95
+          ],
+          [
+            "2025-10-17T13:35:00Z",
+            209.71
+          ],
+          [
+            "2025-10-20T13:35:00Z",
+            204.765
+          ],
+          [
+            "2025-10-21T13:35:00Z",
+            195.6
+          ],
+          [
+            "2025-10-22T13:35:00Z",
+            194.14
+          ],
+          [
+            "2025-10-23T13:35:00Z",
+            192.925
+          ],
+          [
+            "2025-10-24T13:35:00Z",
+            190.94
+          ],
+          [
+            "2025-10-27T13:35:00Z",
+            187.13
+          ],
+          [
+            "2025-10-28T13:35:00Z",
+            182.07
+          ],
+          [
+            "2025-10-29T13:35:00Z",
+            188.49
+          ],
+          [
+            "2025-10-30T13:35:00Z",
+            186.865
+          ],
+          [
+            "2025-10-31T13:35:00Z",
+            187.51
+          ]
+        ],
+        "total_cost": "2.74",
+        "unrealized_pnl": "-1409.6399999999971"
+      },
+      "iv_change": 0.05090848018094829,
+      "iv_entry": 0.3907506225961356,
+      "iv_exit": 0.44165910277708387,
+      "net_delta": 0.06573660747312748,
+      "net_gamma": 0.030006144600197994,
+      "net_theta": -0.27421515272178276,
+      "net_vega": 0.539281616433186,
+      "pnl": "432.15964328864600",
+      "pnl_pct": "20.473345694505380039659815890",
+      "put_entry_price": "1030.0",
+      "put_exit_price": "2430.0",
+      "spot_at_entry": 209.41,
+      "spot_at_exit": 187.12,
+      "spot_move": -22.289999999999992,
+      "spot_move_pct": -10.644190821832765,
+      "strike": "210",
+      "success": true,
+      "symbol": "FNV",
+      "theta_pnl": "-473.021138445075",
+      "total_pnl_with_hedge": "-980.22035671135110",
+      "unexplained_pnl": "31.7488095521752",
+      "vega_pnl": "274.5400748213862"
+    }
+  ]
+}

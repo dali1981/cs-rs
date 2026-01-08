@@ -29,7 +29,10 @@ mod handlers;
 mod commands;
 
 use cli_args::*;
-use parsing::{parse_roll_policy, parse_campaign_roll_policy, load_earnings_from_file, load_earnings_for_symbols};
+use parsing::{
+    parse_roll_policy, parse_campaign_roll_policy, load_earnings_from_file, load_earnings_for_symbols,
+    parse_time, parse_delta_range,
+};
 use display::ResultRow;
 use handlers::{save_earnings_parquet, save_earnings_csv, save_earnings_json};
 
@@ -1041,19 +1044,7 @@ fn build_cli_overrides(
     attribution_snapshots: Option<String>,
 ) -> Result<CliOverrides> {
     // Parse delta range if provided
-    let delta_range = if let Some(ref range_str) = delta_range_str {
-        let parts: Vec<&str> = range_str.split(',').collect();
-        if parts.len() != 2 {
-            anyhow::bail!("Invalid delta range format. Use: --delta-range '0.25,0.75'");
-        }
-        let min: f64 = parts[0].trim().parse()
-            .with_context(|| format!("Invalid delta range min: {}", parts[0]))?;
-        let max: f64 = parts[1].trim().parse()
-            .with_context(|| format!("Invalid delta range max: {}", parts[1]))?;
-        Some((min, max))
-    } else {
-        None
-    };
+    let delta_range = parse_delta_range(delta_range_str)?;
 
     Ok(CliOverrides {
         paths: if data_dir.is_some() || earnings_dir.is_some() {
@@ -1328,31 +1319,6 @@ async fn run_backtest(
     };
 
     // Parse time strings (HH:MM format)
-    let parse_time = |time_str: Option<String>| -> Result<(Option<u32>, Option<u32>)> {
-        match time_str {
-            None => Ok((None, None)),
-            Some(s) => {
-                let parts: Vec<&str> = s.split(':').collect();
-                if parts.len() != 2 {
-                    anyhow::bail!("Invalid time format '{}'. Expected HH:MM (e.g., 09:35)", s);
-                }
-                let hour: u32 = parts[0].parse()
-                    .map_err(|_| anyhow::anyhow!("Invalid hour in time '{}'", s))?;
-                let minute: u32 = parts[1].parse()
-                    .map_err(|_| anyhow::anyhow!("Invalid minute in time '{}'", s))?;
-
-                if hour > 23 {
-                    anyhow::bail!("Hour must be 0-23, got {}", hour);
-                }
-                if minute > 59 {
-                    anyhow::bail!("Minute must be 0-59, got {}", minute);
-                }
-
-                Ok((Some(hour), Some(minute)))
-            }
-        }
-    };
-
     let (entry_hour, entry_minute) = parse_time(entry_time)?;
     let (exit_hour, exit_minute) = parse_time(exit_time)?;
 

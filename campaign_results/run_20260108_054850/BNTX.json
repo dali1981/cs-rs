@@ -1,0 +1,217 @@
+{
+  "end_date": "2025-11-03",
+  "num_trades": 1,
+  "start_date": "2025-11-03",
+  "successful_trades": 1,
+  "symbol": "BNTX",
+  "total_hedge_pnl": "816.895000000002219",
+  "total_option_pnl": "-266.07982164432400",
+  "total_pnl": "545.155178355678219",
+  "total_transaction_cost": "5.66",
+  "trade_type": "straddle",
+  "trades": [
+    {
+      "call_entry_price": "450.0",
+      "call_exit_price": "420.0",
+      "delta_pnl": "-24.49916424183904",
+      "earnings_date": "2025-11-03",
+      "earnings_time": "BeforeMarketOpen",
+      "entry_debit": "1196.07982164432400",
+      "entry_surface_time": "2025-10-14T19:56:00Z",
+      "entry_time": "2025-10-14T13:35:00Z",
+      "exit_credit": "930.0",
+      "exit_pricing_method": "Market",
+      "exit_surface_time": "2025-10-31T19:55:00Z",
+      "exit_time": "2025-10-31T19:55:00Z",
+      "expected_move_pct": 11.785198754993834,
+      "expiration": "2025-11-21",
+      "failure_reason": null,
+      "gamma_pnl": "15.3289099759899",
+      "hedge_pnl": "816.895000000002219",
+      "hedge_position": {
+        "avg_hedge_price": 95.69104999999998,
+        "cumulative_shares": 100,
+        "hedges": [
+          {
+            "cost": "1.00",
+            "delta_after": 3.368967327332939e-10,
+            "delta_before": -0.9999999996631033,
+            "shares": 100,
+            "spot_price": 101.49,
+            "timestamp": "2025-10-14T13:35:00Z"
+          },
+          {
+            "cost": "1.10",
+            "delta_after": -0.0017134332470426783,
+            "delta_before": 1.0982865667529573,
+            "shares": -110,
+            "spot_price": 104.54,
+            "timestamp": "2025-10-16T13:35:00Z"
+          },
+          {
+            "cost": "0.09",
+            "delta_after": -0.004391943056531558,
+            "delta_before": -0.09439194305653156,
+            "shares": 9,
+            "spot_price": 104.5,
+            "timestamp": "2025-10-17T13:35:00Z"
+          },
+          {
+            "cost": "0.21",
+            "delta_after": 0.0026669389195531634,
+            "delta_before": -0.20733306108044686,
+            "shares": 21,
+            "spot_price": 104.43,
+            "timestamp": "2025-10-20T13:35:00Z"
+          },
+          {
+            "cost": "1.20",
+            "delta_after": -3.59749404488241e-7,
+            "delta_before": 1.1999996402505955,
+            "shares": -120,
+            "spot_price": 106.78,
+            "timestamp": "2025-10-21T13:35:00Z"
+          },
+          {
+            "cost": "0.01",
+            "delta_after": -0.0037087014025016796,
+            "delta_before": -0.013708701402501688,
+            "shares": 1,
+            "spot_price": 105.62,
+            "timestamp": "2025-10-23T13:35:00Z"
+          },
+          {
+            "cost": "0.01",
+            "delta_after": -0.00014835364571941234,
+            "delta_before": 0.009851646354280597,
+            "shares": -1,
+            "spot_price": 106.17,
+            "timestamp": "2025-10-24T13:35:00Z"
+          },
+          {
+            "cost": "0.03",
+            "delta_after": -0.004195951337292225,
+            "delta_before": -0.03419595133729225,
+            "shares": 3,
+            "spot_price": 105.465,
+            "timestamp": "2025-10-28T13:35:00Z"
+          },
+          {
+            "cost": "0.02",
+            "delta_after": 0.00039707577843550723,
+            "delta_before": 0.020397075778435525,
+            "shares": -2,
+            "spot_price": 105.64,
+            "timestamp": "2025-10-29T13:35:00Z"
+          },
+          {
+            "cost": "1.99",
+            "delta_after": 2.912220141038091e-6,
+            "delta_before": -1.989997087779859,
+            "shares": 199,
+            "spot_price": 102.99,
+            "timestamp": "2025-10-30T13:35:00Z"
+          }
+        ],
+        "peak_long_shares": 100,
+        "peak_short_shares": 100,
+        "realized_pnl": "0",
+        "realized_vol_metrics": {
+          "entry_hv": 0.014203463228061913,
+          "entry_iv": 0.44101299110508035,
+          "exit_iv": 0.46469352281936693,
+          "iv_premium_at_entry": 3004.9680209948156,
+          "num_observations": 15,
+          "realized_vol": 0.18449076590988073,
+          "realized_vs_implied": -58.166591544709846
+        },
+        "spot_history": [
+          [
+            "2026-01-08T04:48:14.121852Z",
+            101.49
+          ],
+          [
+            "2025-10-14T13:35:00Z",
+            101.49
+          ],
+          [
+            "2025-10-15T13:35:00Z",
+            102.59
+          ],
+          [
+            "2025-10-16T13:35:00Z",
+            104.54
+          ],
+          [
+            "2025-10-17T13:35:00Z",
+            104.5
+          ],
+          [
+            "2025-10-20T13:35:00Z",
+            104.43
+          ],
+          [
+            "2025-10-21T13:35:00Z",
+            106.78
+          ],
+          [
+            "2025-10-22T13:35:00Z",
+            106.23
+          ],
+          [
+            "2025-10-23T13:35:00Z",
+            105.62
+          ],
+          [
+            "2025-10-24T13:35:00Z",
+            106.17
+          ],
+          [
+            "2025-10-27T13:35:00Z",
+            106.75
+          ],
+          [
+            "2025-10-28T13:35:00Z",
+            105.465
+          ],
+          [
+            "2025-10-29T13:35:00Z",
+            105.64
+          ],
+          [
+            "2025-10-30T13:35:00Z",
+            102.99
+          ],
+          [
+            "2025-10-31T13:35:00Z",
+            103.69
+          ]
+        ],
+        "total_cost": "5.66",
+        "unrealized_pnl": "816.895000000002219"
+      },
+      "iv_change": 0.02368053171428658,
+      "iv_entry": 0.44101299110508035,
+      "iv_exit": 0.46469352281936693,
+      "net_delta": -0.10337200102041771,
+      "net_gamma": 0.05458138822478533,
+      "net_theta": -0.14671029942418387,
+      "net_vega": 0.2600479119792063,
+      "pnl": "-266.07982164432400",
+      "pnl_pct": "-22.245992017366183322143473650",
+      "put_entry_price": "746.07982164432400",
+      "put_exit_price": "510.0",
+      "spot_at_entry": 101.49,
+      "spot_at_exit": 103.86,
+      "spot_move": 2.3700000000000045,
+      "spot_move_pct": 2.335205438959508,
+      "strike": "105",
+      "success": true,
+      "symbol": "BNTX",
+      "theta_pnl": "-253.0752665067172",
+      "total_pnl_with_hedge": "545.155178355678219",
+      "unexplained_pnl": "-65.4150291403337",
+      "vega_pnl": "61.580728268576"
+    }
+  ]
+}
