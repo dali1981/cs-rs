@@ -312,12 +312,7 @@ impl ExecutableTrade for IronButterfly {
         ctx: &ExecutionContext,
         error: ExecutionError,
     ) -> IronButterflyResult {
-        let failure_reason = match error {
-            ExecutionError::NoSpotPrice => FailureReason::NoSpotPrice,
-            ExecutionError::Repository(_) => FailureReason::NoOptionsData,
-            ExecutionError::Pricing(_) => FailureReason::PricingError(error.to_string()),
-            ExecutionError::InvalidSpread(_) => FailureReason::DegenerateSpread,
-        };
+        let failure_reason = super::helpers::error_to_failure_reason(&error);
 
         IronButterflyResult {
             symbol: self.symbol().to_string(),

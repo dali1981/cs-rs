@@ -35,6 +35,7 @@
 mod traits;
 mod types;
 mod generic_executor;
+pub(crate) mod helpers;
 
 // Trade implementations (ExecutableTrade impls - these don't export the types themselves)
 pub(crate) mod straddle_impl;

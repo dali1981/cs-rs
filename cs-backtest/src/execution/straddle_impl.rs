@@ -146,12 +146,7 @@ impl ExecutableTrade for Straddle {
         ctx: &ExecutionContext,
         error: ExecutionError,
     ) -> StraddleResult {
-        let failure_reason = match error {
-            ExecutionError::NoSpotPrice => FailureReason::NoSpotPrice,
-            ExecutionError::Repository(_) => FailureReason::NoOptionsData,
-            ExecutionError::Pricing(_) => FailureReason::PricingError(error.to_string()),
-            ExecutionError::InvalidSpread(_) => FailureReason::DegenerateSpread,
-        };
+        let failure_reason = super::helpers::error_to_failure_reason(&error);
 
         StraddleResult {
             symbol: self.symbol().to_string(),
