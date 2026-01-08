@@ -124,9 +124,7 @@ pub struct CalendarSpreadStrategy {
 
 impl CalendarSpreadStrategy {
     pub fn new(config: &BacktestConfig) -> Self {
-        let timing = TimingStrategy::Earnings(
-            EarningsTradeTiming::new(config.timing)
-        );
+        let timing = TimingStrategy::for_earnings(config.timing);
         let exec_config = ExecutionConfig::for_calendar_spread(config.max_entry_iv);
         Self {
             timing,
@@ -213,9 +211,7 @@ pub struct IronButterflyStrategy {
 
 impl IronButterflyStrategy {
     pub fn new(config: &BacktestConfig) -> Self {
-        let timing = TimingStrategy::Earnings(
-            EarningsTradeTiming::new(config.timing)
-        );
+        let timing = TimingStrategy::for_earnings(config.timing);
         let exec_config = ExecutionConfig::for_iron_butterfly(config.max_entry_iv);
         Self {
             timing,
@@ -289,10 +285,11 @@ pub struct StraddleStrategy {
 
 impl StraddleStrategy {
     pub fn new(config: &BacktestConfig) -> Self {
-        let timing_impl = StraddleTradeTiming::new(config.timing)
-            .with_entry_days(config.straddle_entry_days)
-            .with_exit_days(config.straddle_exit_days);
-        let timing = TimingStrategy::Straddle(timing_impl);
+        let timing = TimingStrategy::for_straddle(
+            config.timing,
+            config.straddle_entry_days,
+            config.straddle_exit_days,
+        );
         let exec_config = ExecutionConfig::for_straddle(config.max_entry_iv);
         Self { timing, exec_config }
     }
@@ -352,9 +349,10 @@ pub struct PostEarningsStraddleStrategy {
 
 impl PostEarningsStraddleStrategy {
     pub fn new(config: &BacktestConfig) -> Self {
-        let timing_impl = PostEarningsStraddleTiming::new(config.timing)
-            .with_holding_days(config.post_earnings_holding_days);
-        let timing = TimingStrategy::PostEarnings(timing_impl);
+        let timing = TimingStrategy::for_post_earnings(
+            config.timing,
+            config.post_earnings_holding_days,
+        );
         let exec_config = ExecutionConfig::for_straddle(config.max_entry_iv);
         Self { timing, exec_config }
     }
@@ -415,9 +413,7 @@ pub struct CalendarStraddleStrategy {
 
 impl CalendarStraddleStrategy {
     pub fn new(config: &BacktestConfig) -> Self {
-        let timing = TimingStrategy::Earnings(
-            EarningsTradeTiming::new(config.timing)
-        );
+        let timing = TimingStrategy::for_earnings(config.timing);
         let exec_config = ExecutionConfig::for_calendar_straddle(config.max_entry_iv);
         Self {
             timing,

@@ -17,6 +17,41 @@ pub enum TimingStrategy {
     PostEarnings(PostEarningsStraddleTiming),
 }
 
+// Factory functions for creating timing strategies
+//
+// These extract the hardcoded timing defaults from strategy structs,
+// making timing composable and independent of trade type.
+impl TimingStrategy {
+    /// Create earnings-based timing (default for calendar spreads, iron butterflies, calendar straddles)
+    ///
+    /// Entry: Day before earnings (BMO) or on earnings day (AMC)
+    /// Exit: Day after earnings
+    pub fn for_earnings(config: cs_domain::TimingConfig) -> Self {
+        TimingStrategy::Earnings(EarningsTradeTiming::new(config))
+    }
+
+    /// Create straddle timing (enter N days before earnings)
+    ///
+    /// Entry: N trading days before earnings
+    /// Exit: M trading days before earnings (or on earnings day if M=0)
+    pub fn for_straddle(config: cs_domain::TimingConfig, entry_days: usize, exit_days: usize) -> Self {
+        let timing = StraddleTradeTiming::new(config)
+            .with_entry_days(entry_days)
+            .with_exit_days(exit_days);
+        TimingStrategy::Straddle(timing)
+    }
+
+    /// Create post-earnings straddle timing (enter after earnings)
+    ///
+    /// Entry: Day after earnings announcement
+    /// Exit: N trading days after entry
+    pub fn for_post_earnings(config: cs_domain::TimingConfig, holding_days: usize) -> Self {
+        let timing = PostEarningsStraddleTiming::new(config)
+            .with_holding_days(holding_days);
+        TimingStrategy::PostEarnings(timing)
+    }
+}
+
 impl TimingStrategy {
     /// Get entry datetime for the trade
     pub fn entry_datetime(&self, event: &EarningsEvent) -> DateTime<Utc> {
