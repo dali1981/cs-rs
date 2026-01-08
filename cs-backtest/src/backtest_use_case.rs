@@ -20,6 +20,16 @@ pub struct BacktestResult<R> {
     pub dropped_events: Vec<TradeGenerationError>,
 }
 
+/// Unified backtest result that can hold any strategy result type
+#[derive(Debug)]
+pub enum UnifiedBacktestResult {
+    CalendarSpread(BacktestResult<CalendarSpreadResult>),
+    IronButterfly(BacktestResult<IronButterflyResult>),
+    Straddle(BacktestResult<StraddleResult>),
+    CalendarStraddle(BacktestResult<CalendarStraddleResult>),
+    PostEarningsStraddle(BacktestResult<StraddleResult>),
+}
+
 // Trait to unify result types for BacktestResult
 pub trait TradeResultMethods {
     fn is_winner(&self) -> bool;
@@ -317,13 +327,59 @@ where
         }
     }
 
-    // NOTE: execute() dispatcher removed - CLI should call specific execute_* methods based on strategy type
-    // Each method returns its own typed BacktestResult<R>:
-    // - execute_calendar_spread() -> BacktestResult<CalendarSpreadResult>
-    // - execute_straddle() -> BacktestResult<StraddleResult>
-    // - execute_iron_butterfly() -> BacktestResult<IronButterflyResult>
-    // - execute_calendar_straddle() -> BacktestResult<CalendarStraddleResult>
-    // - execute_post_earnings_straddle() -> BacktestResult<StraddleResult>
+    /// Execute backtest based on config.spread type
+    /// Uses config.start_date and config.end_date from the config
+    pub async fn execute(
+        &self,
+    ) -> Result<UnifiedBacktestResult, BacktestError> {
+        let start_date = self.config.start_date;
+        let end_date = self.config.end_date;
+
+        match self.config.spread {
+            SpreadType::Calendar => {
+                // Default to Call for calendar spreads
+                let result = self.execute_calendar_spread(
+                    start_date,
+                    end_date,
+                    finq_core::OptionType::Call,
+                    None,
+                ).await?;
+                Ok(UnifiedBacktestResult::CalendarSpread(result))
+            }
+            SpreadType::IronButterfly => {
+                let result = self.execute_iron_butterfly(
+                    start_date,
+                    end_date,
+                    None,
+                ).await?;
+                Ok(UnifiedBacktestResult::IronButterfly(result))
+            }
+            SpreadType::Straddle => {
+                let result = self.execute_straddle(
+                    start_date,
+                    end_date,
+                    None,
+                ).await?;
+                Ok(UnifiedBacktestResult::Straddle(result))
+            }
+            SpreadType::CalendarStraddle => {
+                let result = self.execute_calendar_straddle(
+                    start_date,
+                    end_date,
+                    None,
+                ).await?;
+                Ok(UnifiedBacktestResult::CalendarStraddle(result))
+            }
+            SpreadType::PostEarningsStraddle => {
+                let result = self.execute_post_earnings_straddle(
+                    start_date,
+                    end_date,
+                    None,
+                ).await?;
+                Ok(UnifiedBacktestResult::PostEarningsStraddle(result))
+            }
+        }
+    }
 
     pub async fn execute_calendar_spread(
         &self,

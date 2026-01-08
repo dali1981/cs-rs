@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
+use chrono::NaiveDate;
 use cs_analytics::{PricingModel, InterpolationMode};
 use cs_domain::{TimingConfig, TradeSelectionCriteria, StrikeMatchMode, HedgeConfig, AttributionConfig};
 
@@ -7,6 +8,13 @@ use cs_domain::{TimingConfig, TradeSelectionCriteria, StrikeMatchMode, HedgeConf
 pub struct BacktestConfig {
     pub data_dir: PathBuf,
     pub earnings_dir: PathBuf,
+    /// Optional earnings file (takes precedence over earnings_dir)
+    #[serde(default)]
+    pub earnings_file: Option<PathBuf>,
+    /// Backtest start date
+    pub start_date: NaiveDate,
+    /// Backtest end date
+    pub end_date: NaiveDate,
     pub timing: TimingConfig,
     pub selection: TradeSelectionCriteria,
     pub spread: SpreadType,
@@ -104,15 +112,18 @@ fn default_min_straddle_dte() -> i32 {
 
 /// Trade structure - WHAT to trade
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "kebab-case")]
 pub enum SpreadType {
     #[default]
     Calendar,
+    #[serde(rename = "iron-butterfly")]
     IronButterfly,
     Straddle,
     /// Calendar straddle: short near-term straddle + long far-term straddle
+    #[serde(rename = "calendar-straddle")]
     CalendarStraddle,
     /// Post-earnings straddle: enter day after earnings, hold for ~1 week
+    #[serde(rename = "post-earnings-straddle")]
     PostEarningsStraddle,
 }
 
@@ -130,7 +141,7 @@ impl SpreadType {
 
 /// Selection method - HOW to select strikes/expirations
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "kebab-case")]
 pub enum SelectionType {
     #[default]
     #[serde(rename = "atm")]
@@ -138,6 +149,7 @@ pub enum SelectionType {
     /// Fixed delta strategy (uses target_delta)
     Delta,
     /// Scanning delta strategy (scans delta_range for best opportunity)
+    #[serde(rename = "delta-scan")]
     DeltaScan,
 }
 
@@ -158,6 +170,10 @@ impl Default for BacktestConfig {
             earnings_dir: dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("trading_project/nasdaq_earnings/data"),
+            earnings_file: None,
+            // Default to 2020-01-01 to 2020-12-31 (will be overridden by CLI)
+            start_date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            end_date: NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
             timing: TimingConfig::default(),
             selection: TradeSelectionCriteria::default(),
             spread: SpreadType::Calendar,

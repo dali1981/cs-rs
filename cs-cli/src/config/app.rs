@@ -128,7 +128,9 @@ impl Default for AppConfig {
 impl Default for PathsConfig {
     fn default() -> Self {
         Self {
-            data_dir: PathBuf::from("data"),
+            data_dir: dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("polygon/data"),
             earnings_dir: dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("trading_project/nasdaq_earnings/data"),
@@ -311,9 +313,15 @@ fn expand_tilde(path: &PathBuf) -> PathBuf {
 impl AppConfig {
     /// Convert to BacktestConfig for use by backtest use case
     pub fn to_backtest_config(&self) -> cs_backtest::BacktestConfig {
+        use chrono::NaiveDate;
+
         cs_backtest::BacktestConfig {
             data_dir: self.paths.data_dir.clone(),
             earnings_dir: self.paths.earnings_dir.clone(),
+            // These will be set by BacktestConfigBuilder from CLI args
+            earnings_file: None,
+            start_date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            end_date: NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
             timing: cs_domain::TimingConfig {
                 entry_hour: self.timing.entry_hour,
                 entry_minute: self.timing.entry_minute,

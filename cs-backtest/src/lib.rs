@@ -31,7 +31,7 @@ pub mod attribution;
 pub use config::{BacktestConfig, SpreadType, SelectionType};
 
 // Use cases
-pub use backtest_use_case::{BacktestUseCase, BacktestResult, SessionProgress, TradeGenerationError, TradeResultMethods};
+pub use backtest_use_case::{BacktestUseCase, BacktestResult, UnifiedBacktestResult, SessionProgress, TradeGenerationError, TradeResultMethods};
 pub use atm_iv_use_case::{GenerateIvTimeSeriesUseCase, IvTimeSeriesResult, IvTimeSeriesError};
 pub use minute_aligned_iv_use_case::{MinuteAlignedIvUseCase, MinuteAlignedIvResult, MinuteAlignedIvError};
 pub use earnings_analysis_use_case::{EarningsAnalysisUseCase, EarningsAnalysisResult, EarningsAnalysisError};

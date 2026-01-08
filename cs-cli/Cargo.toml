@@ -13,6 +13,7 @@ cs-domain = { workspace = true }
 cs-backtest = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
+async-trait = { workspace = true }
 tabled = { workspace = true }
 indicatif = { workspace = true }
 console = { workspace = true }
