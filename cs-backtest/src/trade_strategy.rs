@@ -34,10 +34,10 @@ use rust_decimal::Decimal;
 use cs_domain::*;
 use cs_domain::strike_selection::{StrikeSelector, ExpirationCriteria};
 use crate::config::BacktestConfig;
-use crate::execution::ExecutionConfig;
+use crate::execution::{ExecutionConfig, ExecutableTrade};
 use crate::timing_strategy::TimingStrategy;
 use crate::backtest_use_case::{TradeResultMethods, TradeGenerationError};
-use crate::backtest_use_case_helpers::TradeExecutionContext;
+use crate::backtest_use_case_helpers::TradeSimulator;
 use crate::composite_pricer::{
     CompositePricer, CalendarSpreadPricer, IronButterflyCompositePricer,
     CalendarStraddleCompositePricer,
@@ -163,13 +163,24 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
     ) -> Pin<Box<dyn Future<Output = Option<CalendarSpreadResult>> + Send + 'a>> {
         let option_type = self.option_type;
         Box::pin(async move {
-            let ctx = TradeExecutionContext::new(
-                options_repo, equity_repo, event, entry_time, exit_time, &self.exec_config,
+            let simulator = TradeSimulator::new(
+                options_repo, equity_repo, &event.symbol, entry_time, exit_time, &self.exec_config,
             );
-            ctx.execute(
-                |data| selector.select_calendar_spread(&data.spot, &data.surface, option_type, criteria).ok(),
-                CalendarSpreadPricer::new(),
-            ).await
+
+            // 1. Prepare market data
+            let data = simulator.prepare().await?;
+
+            // 2. Select trade
+            let trade = selector.select_calendar_spread(&data.spot, &data.surface, option_type, criteria).ok()?;
+
+            // 3. Simulate and convert to result
+            let pricer = CalendarSpreadPricer::new();
+            let result = match simulator.run(&trade, &pricer).await {
+                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, event),
+                Err(err) => trade.to_failed_result(&simulator.failed_output(), event, err),
+            };
+
+            Some(result)
         })
     }
 
@@ -242,19 +253,30 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
         let min_short_dte = criteria.min_short_dte;
         let max_short_dte = criteria.max_short_dte;
         Box::pin(async move {
-            let ctx = TradeExecutionContext::new(
-                options_repo, equity_repo, event, entry_time, exit_time, &self.exec_config,
+            let simulator = TradeSimulator::new(
+                options_repo, equity_repo, &event.symbol, entry_time, exit_time, &self.exec_config,
             );
-            ctx.execute(
-                |data| selector.select_iron_butterfly(
-                    &data.spot,
-                    &data.surface,
-                    wing_width,
-                    min_short_dte,
-                    max_short_dte,
-                ).ok(),
-                IronButterflyCompositePricer::new(),
-            ).await
+
+            // 1. Prepare market data
+            let data = simulator.prepare().await?;
+
+            // 2. Select trade
+            let trade = selector.select_iron_butterfly(
+                &data.spot,
+                &data.surface,
+                wing_width,
+                min_short_dte,
+                max_short_dte,
+            ).ok()?;
+
+            // 3. Simulate and convert to result
+            let pricer = IronButterflyCompositePricer::new();
+            let result = match simulator.run(&trade, &pricer).await {
+                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, event),
+                Err(err) => trade.to_failed_result(&simulator.failed_output(), event, err),
+            };
+
+            Some(result)
         })
     }
 }
@@ -297,16 +319,27 @@ impl TradeStrategy<StraddleResult> for StraddleStrategy {
     ) -> Pin<Box<dyn Future<Output = Option<StraddleResult>> + Send + 'a>> {
         let min_short_dte = criteria.min_short_dte;
         Box::pin(async move {
-            let ctx = TradeExecutionContext::new(
-                options_repo, equity_repo, event, entry_time, exit_time, &self.exec_config,
+            let simulator = TradeSimulator::new(
+                options_repo, equity_repo, &event.symbol, entry_time, exit_time, &self.exec_config,
             );
+
+            // 1. Prepare market data
+            let data = simulator.prepare().await?;
+
+            // 2. Select trade
             let entry_date = entry_time.date_naive();
             let min_expiration = (entry_date + chrono::Duration::days(min_short_dte as i64))
                 .max(entry_date);
-            ctx.execute(
-                |data| selector.select_straddle(&data.spot, &data.surface, min_expiration).ok(),
-                CompositePricer::default(),
-            ).await
+            let trade = selector.select_straddle(&data.spot, &data.surface, min_expiration).ok()?;
+
+            // 3. Simulate and convert to result
+            let pricer = CompositePricer::default();
+            let result = match simulator.run(&trade, &pricer).await {
+                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, event),
+                Err(err) => trade.to_failed_result(&simulator.failed_output(), event, err),
+            };
+
+            Some(result)
         })
     }
 }
@@ -348,16 +381,27 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
     ) -> Pin<Box<dyn Future<Output = Option<StraddleResult>> + Send + 'a>> {
         let min_short_dte = criteria.min_short_dte;
         Box::pin(async move {
-            let ctx = TradeExecutionContext::new(
-                options_repo, equity_repo, event, entry_time, exit_time, &self.exec_config,
+            let simulator = TradeSimulator::new(
+                options_repo, equity_repo, &event.symbol, entry_time, exit_time, &self.exec_config,
             );
+
+            // 1. Prepare market data
+            let data = simulator.prepare().await?;
+
+            // 2. Select trade
             let entry_date = entry_time.date_naive();
             let min_expiration = (entry_date + chrono::Duration::days(min_short_dte as i64))
                 .max(entry_date);
-            ctx.execute(
-                |data| selector.select_straddle(&data.spot, &data.surface, min_expiration).ok(),
-                CompositePricer::default(),
-            ).await
+            let trade = selector.select_straddle(&data.spot, &data.surface, min_expiration).ok()?;
+
+            // 3. Simulate and convert to result
+            let pricer = CompositePricer::default();
+            let result = match simulator.run(&trade, &pricer).await {
+                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, event),
+                Err(err) => trade.to_failed_result(&simulator.failed_output(), event, err),
+            };
+
+            Some(result)
         })
     }
 }
@@ -403,13 +447,24 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
         exit_time: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = Option<CalendarStraddleResult>> + Send + 'a>> {
         Box::pin(async move {
-            let ctx = TradeExecutionContext::new(
-                options_repo, equity_repo, event, entry_time, exit_time, &self.exec_config,
+            let simulator = TradeSimulator::new(
+                options_repo, equity_repo, &event.symbol, entry_time, exit_time, &self.exec_config,
             );
-            ctx.execute(
-                |data| selector.select_calendar_straddle(&data.spot, &data.surface, criteria).ok(),
-                CalendarStraddleCompositePricer::new(),
-            ).await
+
+            // 1. Prepare market data
+            let data = simulator.prepare().await?;
+
+            // 2. Select trade
+            let trade = selector.select_calendar_straddle(&data.spot, &data.surface, criteria).ok()?;
+
+            // 3. Simulate and convert to result
+            let pricer = CalendarStraddleCompositePricer::new();
+            let result = match simulator.run(&trade, &pricer).await {
+                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, event),
+                Err(err) => trade.to_failed_result(&simulator.failed_output(), event, err),
+            };
+
+            Some(result)
         })
     }
 

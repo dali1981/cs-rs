@@ -24,3 +24,4 @@ pub(crate) mod iron_condor_impl;
 
 pub use traits::{TradePricer, ExecutableTrade};
 pub use types::{ExecutionConfig, SimulationOutput, ExecutionError};
+pub use helpers::run_batch;

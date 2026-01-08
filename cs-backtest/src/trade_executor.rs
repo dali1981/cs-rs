@@ -22,8 +22,9 @@ use cs_domain::{
 };
 use finq_core::OptionType;
 
-use crate::execution::{ExecutableTrade, ExecutionConfig};
+use crate::execution::{ExecutableTrade, ExecutionConfig, ExecutionError};
 use crate::timing_strategy::TimingStrategy;
+use crate::backtest_use_case_helpers::TradeSimulator;
 
 /// Tracks spot prices during hedging for realized volatility computation
 struct RealizedVolatilityTracker {
@@ -156,17 +157,20 @@ where
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
     ) -> <T as ExecutableTrade>::Result {
-        // 1. Execute trade using generic executor
-        let mut result = execute_trade(
-            trade,
-            &self.pricer,
-            self.options_repo.as_ref(),
-            self.equity_repo.as_ref(),
-            &self.config,
-            event,
+        // 1. Execute trade using TradeSimulator
+        let simulator = TradeSimulator {
+            options_repo: self.options_repo.as_ref(),
+            equity_repo: self.equity_repo.as_ref(),
+            symbol: &event.symbol,
             entry_time,
             exit_time,
-        ).await;
+            config: &self.config,
+        };
+
+        let mut result = match simulator.run(trade, &self.pricer).await {
+            Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, event),
+            Err(err) => trade.to_failed_result(&simulator.failed_output(), event, err),
+        };
 
         // 2. Apply hedging if enabled and trade succeeded
         let has_hedge_config = self.hedge_config.is_some();

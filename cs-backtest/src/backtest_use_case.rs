@@ -476,42 +476,19 @@ where
         S: TradeStrategy<R> + Sync,
         R: TradeResultMethods + Send,
     {
-        if self.config.parallel {
-            let futures: Vec<_> = events
-                .iter()
-                .map(|event| {
-                    let entry_time = strategy.entry_datetime(event);
-                    let exit_time = strategy.exit_datetime(event);
-                    strategy.execute_trade(
-                        self.options_repo.as_ref(),
-                        self.equity_repo.as_ref(),
-                        selector,
-                        criteria,
-                        event,
-                        entry_time,
-                        exit_time,
-                    )
-                })
-                .collect();
-            futures::future::join_all(futures).await
-        } else {
-            let mut results = Vec::with_capacity(events.len());
-            for event in events {
-                let entry_time = strategy.entry_datetime(event);
-                let exit_time = strategy.exit_datetime(event);
-                let result = strategy.execute_trade(
-                    self.options_repo.as_ref(),
-                    self.equity_repo.as_ref(),
-                    selector,
-                    criteria,
-                    event,
-                    entry_time,
-                    exit_time,
-                ).await;
-                results.push(result);
-            }
-            results
-        }
+        crate::execution::run_batch(events, self.config.parallel, |event| {
+            let entry_time = strategy.entry_datetime(event);
+            let exit_time = strategy.exit_datetime(event);
+            strategy.execute_trade(
+                self.options_repo.as_ref(),
+                self.equity_repo.as_ref(),
+                selector,
+                criteria,
+                event,
+                entry_time,
+                exit_time,
+            )
+        }).await
     }
 
     /// Load earnings events for a strategy
