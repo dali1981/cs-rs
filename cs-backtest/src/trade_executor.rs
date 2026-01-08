@@ -22,7 +22,7 @@ use cs_domain::{
 };
 use finq_core::OptionType;
 
-use crate::execution::{ExecutableTrade, ExecutionConfig, execute_trade};
+use crate::execution::{ExecutableTrade, ExecutionConfig};
 use crate::timing_strategy::TimingStrategy;
 
 /// Tracks spot prices during hedging for realized volatility computation

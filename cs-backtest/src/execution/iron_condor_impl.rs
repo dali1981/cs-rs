@@ -1,11 +1,11 @@
 //! ExecutableTrade implementation for IronCondor
 
 use rust_decimal::Decimal;
-use cs_domain::{IronCondor, IronCondorResult, CONTRACT_MULTIPLIER};
+use cs_domain::{IronCondor, IronCondorResult, CONTRACT_MULTIPLIER, EarningsEvent};
 use crate::multi_leg_pricer::{IronCondorPricer, IronCondorPricing};
 use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
-use super::types::{ExecutionConfig, ExecutionContext};
+use super::types::{ExecutionConfig, SimulationOutput};
 
 impl ExecutableTrade for IronCondor {
     type Pricer = IronCondorPricer;
@@ -61,21 +61,22 @@ impl ExecutableTrade for IronCondor {
 
     fn to_failed_result(
         &self,
-        ctx: &ExecutionContext,
+        output: &SimulationOutput,
+        event: &EarningsEvent,
         error: ExecutionError,
     ) -> IronCondorResult {
         IronCondorResult {
             symbol: self.symbol().to_string(),
-            earnings_date: ctx.earnings_event.earnings_date,
-            earnings_time: ctx.earnings_event.earnings_time,
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
             near_call_strike: self.near_call.strike,
             near_put_strike: self.near_put.strike,
             far_call_strike: self.far_upper_call.strike,
             far_put_strike: self.far_lower_put.strike,
             expiration: self.near_call.expiration,
-            entry_time: ctx.entry_time,
+            entry_time: output.entry_time,
             entry_credit: Decimal::ZERO,
-            exit_time: ctx.exit_time,
+            exit_time: output.exit_time,
             exit_cost: Decimal::ZERO,
             pnl: Decimal::ZERO,
             pnl_pct: Decimal::ZERO,
@@ -85,8 +86,8 @@ impl ExecutableTrade for IronCondor {
             net_vega: None,
             iv_entry: None,
             iv_exit: None,
-            spot_at_entry: ctx.entry_spot,
-            spot_at_exit: ctx.exit_spot,
+            spot_at_entry: output.entry_spot,
+            spot_at_exit: output.exit_spot,
             success: false,
             failure_reason: Some(cs_domain::FailureReason::PricingError(error.to_string())),
             hedge_pnl: None,
@@ -99,7 +100,8 @@ impl ExecutableTrade for IronCondor {
         &self,
         entry_pricing: IronCondorPricing,
         exit_pricing: IronCondorPricing,
-        ctx: &ExecutionContext,
+        output: &SimulationOutput,
+        event: &EarningsEvent,
     ) -> IronCondorResult {
         // P&L for credit spread: entry_credit - exit_cost
         let pnl_per_share = entry_pricing.net_credit - exit_pricing.net_credit;
@@ -195,16 +197,16 @@ impl ExecutableTrade for IronCondor {
 
         IronCondorResult {
             symbol: self.symbol().to_string(),
-            earnings_date: ctx.earnings_event.earnings_date,
-            earnings_time: ctx.earnings_event.earnings_time,
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
             near_call_strike: self.near_call.strike,
             near_put_strike: self.near_put.strike,
             far_call_strike: self.far_upper_call.strike,
             far_put_strike: self.far_lower_put.strike,
             expiration: self.near_call.expiration,
-            entry_time: ctx.entry_time,
+            entry_time: output.entry_time,
             entry_credit: entry_pricing.net_credit,
-            exit_time: ctx.exit_time,
+            exit_time: output.exit_time,
             exit_cost: exit_pricing.net_credit,
             pnl,
             pnl_pct,
@@ -214,8 +216,8 @@ impl ExecutableTrade for IronCondor {
             net_vega,
             iv_entry,
             iv_exit,
-            spot_at_entry: ctx.entry_spot,
-            spot_at_exit: ctx.exit_spot,
+            spot_at_entry: output.entry_spot,
+            spot_at_exit: output.exit_spot,
             success: true,
             failure_reason: None,
             hedge_pnl: None,

@@ -3,12 +3,12 @@
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use cs_domain::{
-    CalendarSpread, CalendarSpreadResult, CONTRACT_MULTIPLIER,
+    CalendarSpread, CalendarSpreadResult, CONTRACT_MULTIPLIER, EarningsEvent,
 };
 use crate::composite_pricer::{CalendarSpreadPricer, CompositePricing};
 use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
-use super::types::{ExecutionConfig, ExecutionContext};
+use super::types::{ExecutionConfig, SimulationOutput};
 
 impl ExecutableTrade for CalendarSpread {
     type Pricer = CalendarSpreadPricer;
@@ -75,7 +75,8 @@ impl ExecutableTrade for CalendarSpread {
         &self,
         entry_pricing: CompositePricing,
         exit_pricing: CompositePricing,
-        ctx: &ExecutionContext,
+        output: &SimulationOutput,
+        event: &EarningsEvent,
     ) -> CalendarSpreadResult {
         // CalendarSpread legs: [0]=short_leg, [1]=long_leg
         let short_entry = &entry_pricing.legs[0].0;
@@ -97,17 +98,17 @@ impl ExecutableTrade for CalendarSpread {
             calculate_pnl_attribution(
                 &entry_pricing,
                 &exit_pricing,
-                ctx.entry_spot,
-                ctx.exit_spot,
-                ctx.entry_time,
-                ctx.exit_time,
+                output.entry_spot,
+                output.exit_spot,
+                output.entry_time,
+                output.exit_time,
                 pnl,
             );
 
         CalendarSpreadResult {
             symbol: self.symbol().to_string(),
-            earnings_date: ctx.earnings_event.earnings_date,
-            earnings_time: ctx.earnings_event.earnings_time,
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
             strike: self.strike(),
             long_strike: if self.short_leg.strike != self.long_leg.strike {
                 Some(self.long_leg.strike)
@@ -117,16 +118,16 @@ impl ExecutableTrade for CalendarSpread {
             option_type: self.option_type(),
             short_expiry: self.short_expiry(),
             long_expiry: self.long_expiry(),
-            entry_time: ctx.entry_time,
+            entry_time: output.entry_time,
             short_entry_price: short_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             long_entry_price: long_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             entry_cost: entry_pricing.net_cost * Decimal::from(CONTRACT_MULTIPLIER),
-            exit_time: ctx.exit_time,
+            exit_time: output.exit_time,
             short_exit_price: short_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             long_exit_price: long_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             exit_value: exit_pricing.net_cost * Decimal::from(CONTRACT_MULTIPLIER),
-            entry_surface_time: ctx.entry_surface_time,
-            exit_surface_time: Some(ctx.exit_surface_time),
+            entry_surface_time: output.entry_surface_time,
+            exit_surface_time: Some(output.exit_surface_time),
             pnl,
             pnl_per_contract: pnl,
             pnl_pct,
@@ -151,8 +152,8 @@ impl ExecutableTrade for CalendarSpread {
             theta_pnl,
             vega_pnl,
             unexplained_pnl,
-            spot_at_entry: ctx.entry_spot,
-            spot_at_exit: ctx.exit_spot,
+            spot_at_entry: output.entry_spot,
+            spot_at_exit: output.exit_spot,
             success: true,
             failure_reason: None,
             hedge_position: None,
@@ -164,15 +165,16 @@ impl ExecutableTrade for CalendarSpread {
 
     fn to_failed_result(
         &self,
-        ctx: &ExecutionContext,
+        output: &SimulationOutput,
+        event: &EarningsEvent,
         error: ExecutionError,
     ) -> CalendarSpreadResult {
         let failure_reason = super::helpers::error_to_failure_reason(&error);
 
         CalendarSpreadResult {
             symbol: self.symbol().to_string(),
-            earnings_date: ctx.earnings_event.earnings_date,
-            earnings_time: ctx.earnings_event.earnings_time,
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
             strike: self.strike(),
             long_strike: if self.short_leg.strike != self.long_leg.strike {
                 Some(self.long_leg.strike)
@@ -182,11 +184,11 @@ impl ExecutableTrade for CalendarSpread {
             option_type: self.option_type(),
             short_expiry: self.short_expiry(),
             long_expiry: self.long_expiry(),
-            entry_time: ctx.entry_time,
+            entry_time: output.entry_time,
             short_entry_price: Decimal::ZERO,
             long_entry_price: Decimal::ZERO,
             entry_cost: Decimal::ZERO,
-            exit_time: ctx.exit_time,
+            exit_time: output.exit_time,
             short_exit_price: Decimal::ZERO,
             long_exit_price: Decimal::ZERO,
             exit_value: Decimal::ZERO,

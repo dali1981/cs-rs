@@ -3,12 +3,12 @@
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use cs_domain::{
-    IronButterfly, IronButterflyResult, CONTRACT_MULTIPLIER,
+    IronButterfly, IronButterflyResult, CONTRACT_MULTIPLIER, EarningsEvent,
 };
 use crate::composite_pricer::{IronButterflyCompositePricer, CompositePricing};
 use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
-use super::types::{ExecutionConfig, ExecutionContext};
+use super::types::{ExecutionConfig, SimulationOutput};
 
 impl ExecutableTrade for IronButterfly {
     type Pricer = IronButterflyCompositePricer;
@@ -79,7 +79,8 @@ impl ExecutableTrade for IronButterfly {
         &self,
         entry_pricing: CompositePricing,
         exit_pricing: CompositePricing,
-        ctx: &ExecutionContext,
+        output: &SimulationOutput,
+        event: &EarningsEvent,
     ) -> IronButterflyResult {
         // IronButterfly legs: [0]=short_call, [1]=short_put, [2]=long_call, [3]=long_put
         let short_call_entry = &entry_pricing.legs[0].0;
@@ -131,10 +132,10 @@ impl ExecutableTrade for IronButterfly {
             calculate_pnl_attribution(
                 &entry_pricing,
                 &exit_pricing,
-                ctx.entry_spot,
-                ctx.exit_spot,
-                ctx.entry_time,
-                ctx.exit_time,
+                output.entry_spot,
+                output.exit_spot,
+                output.entry_time,
+                output.exit_time,
                 pnl,
             );
 
@@ -143,38 +144,38 @@ impl ExecutableTrade for IronButterfly {
         let credit_per_share = entry_credit.to_f64().unwrap_or(0.0);
         let breakeven_up = center_strike_f64 + credit_per_share;
         let breakeven_down = center_strike_f64 - credit_per_share;
-        let within_breakeven = ctx.exit_spot >= breakeven_down && ctx.exit_spot <= breakeven_up;
+        let within_breakeven = output.exit_spot >= breakeven_down && output.exit_spot <= breakeven_up;
 
-        let spot_move = ctx.exit_spot - ctx.entry_spot;
-        let spot_move_pct = if ctx.entry_spot != 0.0 {
-            (spot_move / ctx.entry_spot) * 100.0
+        let spot_move = output.exit_spot - output.entry_spot;
+        let spot_move_pct = if output.entry_spot != 0.0 {
+            (spot_move / output.entry_spot) * 100.0
         } else {
             0.0
         };
 
         IronButterflyResult {
             symbol: self.symbol().to_string(),
-            earnings_date: ctx.earnings_event.earnings_date,
-            earnings_time: ctx.earnings_event.earnings_time,
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
             center_strike: self.center_strike(),
             upper_strike: self.upper_strike(),
             lower_strike: self.lower_strike(),
             expiration: self.expiration(),
             wing_width: self.long_call.strike.value() - self.short_call.strike.value(),
-            entry_time: ctx.entry_time,
+            entry_time: output.entry_time,
             short_call_entry: short_call_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             short_put_entry: short_put_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             long_call_entry: long_call_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             long_put_entry: long_put_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             entry_credit: entry_credit * Decimal::from(CONTRACT_MULTIPLIER),
-            exit_time: ctx.exit_time,
+            exit_time: output.exit_time,
             short_call_exit: short_call_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             short_put_exit: short_put_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             long_call_exit: long_call_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             long_put_exit: long_put_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             exit_cost: exit_cost * Decimal::from(CONTRACT_MULTIPLIER),
-            entry_surface_time: ctx.entry_surface_time,
-            exit_surface_time: Some(ctx.exit_surface_time),
+            entry_surface_time: output.entry_surface_time,
+            exit_surface_time: Some(output.exit_surface_time),
             pnl,
             pnl_pct,
             max_loss,
@@ -190,8 +191,8 @@ impl ExecutableTrade for IronButterfly {
             theta_pnl,
             vega_pnl,
             unexplained_pnl,
-            spot_at_entry: ctx.entry_spot,
-            spot_at_exit: ctx.exit_spot,
+            spot_at_entry: output.entry_spot,
+            spot_at_exit: output.exit_spot,
             spot_move,
             spot_move_pct,
             breakeven_up,
@@ -208,27 +209,28 @@ impl ExecutableTrade for IronButterfly {
 
     fn to_failed_result(
         &self,
-        ctx: &ExecutionContext,
+        output: &SimulationOutput,
+        event: &EarningsEvent,
         error: ExecutionError,
     ) -> IronButterflyResult {
         let failure_reason = super::helpers::error_to_failure_reason(&error);
 
         IronButterflyResult {
             symbol: self.symbol().to_string(),
-            earnings_date: ctx.earnings_event.earnings_date,
-            earnings_time: ctx.earnings_event.earnings_time,
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
             center_strike: self.center_strike(),
             upper_strike: self.upper_strike(),
             lower_strike: self.lower_strike(),
             expiration: self.expiration(),
             wing_width: self.long_call.strike.value() - self.short_call.strike.value(),
-            entry_time: ctx.entry_time,
+            entry_time: output.entry_time,
             short_call_entry: Decimal::ZERO,
             short_put_entry: Decimal::ZERO,
             long_call_entry: Decimal::ZERO,
             long_put_entry: Decimal::ZERO,
             entry_credit: Decimal::ZERO,
-            exit_time: ctx.exit_time,
+            exit_time: output.exit_time,
             short_call_exit: Decimal::ZERO,
             short_put_exit: Decimal::ZERO,
             long_call_exit: Decimal::ZERO,

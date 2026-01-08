@@ -3,12 +3,12 @@
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use cs_domain::{
-    Straddle, StraddleResult, PricingSource, CONTRACT_MULTIPLIER,
+    Straddle, StraddleResult, PricingSource, CONTRACT_MULTIPLIER, EarningsEvent,
 };
 use crate::composite_pricer::{CompositePricer, CompositePricing};
 use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
-use super::types::{ExecutionConfig, ExecutionContext};
+use super::types::{ExecutionConfig, SimulationOutput};
 
 impl ExecutableTrade for Straddle {
     type Pricer = CompositePricer;
@@ -49,7 +49,8 @@ impl ExecutableTrade for Straddle {
         &self,
         entry_pricing: CompositePricing,
         exit_pricing: CompositePricing,
-        ctx: &ExecutionContext,
+        output: &SimulationOutput,
+        event: &EarningsEvent,
     ) -> StraddleResult {
         // Straddle legs: [0] = call (long), [1] = put (long)
         let call_entry = &entry_pricing.legs[0].0;
@@ -81,16 +82,16 @@ impl ExecutableTrade for Straddle {
         };
 
         // Expected move at entry
-        let expected_move_pct = if ctx.entry_spot > 0.0 {
-            Some((entry_pricing.net_cost.to_f64().unwrap_or(0.0) / ctx.entry_spot) * 100.0)
+        let expected_move_pct = if output.entry_spot > 0.0 {
+            Some((entry_pricing.net_cost.to_f64().unwrap_or(0.0) / output.entry_spot) * 100.0)
         } else {
             None
         };
 
         // Spot move
-        let spot_move = ctx.exit_spot - ctx.entry_spot;
-        let spot_move_pct = if ctx.entry_spot != 0.0 {
-            (spot_move / ctx.entry_spot) * 100.0
+        let spot_move = output.exit_spot - output.entry_spot;
+        let spot_move_pct = if output.entry_spot != 0.0 {
+            (spot_move / output.entry_spot) * 100.0
         } else {
             0.0
         };
@@ -100,29 +101,29 @@ impl ExecutableTrade for Straddle {
             calculate_pnl_attribution(
                 &entry_pricing,
                 &exit_pricing,
-                ctx.entry_spot,
-                ctx.exit_spot,
-                ctx.entry_time,
-                ctx.exit_time,
+                output.entry_spot,
+                output.exit_spot,
+                output.entry_time,
+                output.exit_time,
                 pnl,
             );
 
         StraddleResult {
             symbol: self.symbol().to_string(),
-            earnings_date: ctx.earnings_event.earnings_date,
-            earnings_time: ctx.earnings_event.earnings_time,
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
             strike: self.strike(),
             expiration: self.expiration(),
-            entry_time: ctx.entry_time,
+            entry_time: output.entry_time,
             call_entry_price: call_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             put_entry_price: put_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             entry_debit: entry_pricing.net_cost * Decimal::from(CONTRACT_MULTIPLIER),
-            exit_time: ctx.exit_time,
+            exit_time: output.exit_time,
             call_exit_price: call_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             put_exit_price: put_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             exit_credit: exit_pricing.net_cost * Decimal::from(CONTRACT_MULTIPLIER),
-            entry_surface_time: ctx.entry_surface_time,
-            exit_surface_time: Some(ctx.exit_surface_time),
+            entry_surface_time: output.entry_surface_time,
+            exit_surface_time: Some(output.exit_surface_time),
             exit_pricing_method: PricingSource::Market,
             pnl,
             pnl_pct,
@@ -138,8 +139,8 @@ impl ExecutableTrade for Straddle {
             theta_pnl,
             vega_pnl,
             unexplained_pnl,
-            spot_at_entry: ctx.entry_spot,
-            spot_at_exit: ctx.exit_spot,
+            spot_at_entry: output.entry_spot,
+            spot_at_exit: output.exit_spot,
             spot_move,
             spot_move_pct,
             expected_move_pct,
@@ -154,22 +155,23 @@ impl ExecutableTrade for Straddle {
 
     fn to_failed_result(
         &self,
-        ctx: &ExecutionContext,
+        output: &SimulationOutput,
+        event: &EarningsEvent,
         error: ExecutionError,
     ) -> StraddleResult {
         let failure_reason = super::helpers::error_to_failure_reason(&error);
 
         StraddleResult {
             symbol: self.symbol().to_string(),
-            earnings_date: ctx.earnings_event.earnings_date,
-            earnings_time: ctx.earnings_event.earnings_time,
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
             strike: self.strike(),
             expiration: self.expiration(),
-            entry_time: ctx.entry_time,
+            entry_time: output.entry_time,
             call_entry_price: Decimal::ZERO,
             put_entry_price: Decimal::ZERO,
             entry_debit: Decimal::ZERO,
-            exit_time: ctx.exit_time,
+            exit_time: output.exit_time,
             call_exit_price: Decimal::ZERO,
             put_exit_price: Decimal::ZERO,
             exit_credit: Decimal::ZERO,

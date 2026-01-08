@@ -1,11 +1,11 @@
 //! ExecutableTrade implementation for Condor
 
 use rust_decimal::Decimal;
-use cs_domain::{Condor, CondorResult, CONTRACT_MULTIPLIER};
+use cs_domain::{Condor, CondorResult, CONTRACT_MULTIPLIER, EarningsEvent};
 use crate::multi_leg_pricer::{CondorPricer, CondorPricing};
 use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
-use super::types::{ExecutionConfig, ExecutionContext};
+use super::types::{ExecutionConfig, SimulationOutput};
 
 impl ExecutableTrade for Condor {
     type Pricer = CondorPricer;
@@ -60,21 +60,22 @@ impl ExecutableTrade for Condor {
 
     fn to_failed_result(
         &self,
-        ctx: &ExecutionContext,
+        output: &SimulationOutput,
+        event: &EarningsEvent,
         error: ExecutionError,
     ) -> CondorResult {
         CondorResult {
             symbol: self.symbol().to_string(),
-            earnings_date: ctx.earnings_event.earnings_date,
-            earnings_time: ctx.earnings_event.earnings_time,
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
             near_call_strike: self.near_call.strike,
             near_put_strike: self.near_put.strike,
             far_call_strike: self.far_upper_call.strike,
             far_put_strike: self.far_lower_put.strike,
             expiration: self.near_call.expiration,
-            entry_time: ctx.entry_time,
+            entry_time: output.entry_time,
             entry_debit: Decimal::ZERO,
-            exit_time: ctx.exit_time,
+            exit_time: output.exit_time,
             exit_credit: Decimal::ZERO,
             pnl: Decimal::ZERO,
             pnl_pct: Decimal::ZERO,
@@ -84,8 +85,8 @@ impl ExecutableTrade for Condor {
             net_vega: None,
             iv_entry: None,
             iv_exit: None,
-            spot_at_entry: ctx.entry_spot,
-            spot_at_exit: ctx.exit_spot,
+            spot_at_entry: output.entry_spot,
+            spot_at_exit: output.exit_spot,
             success: false,
             failure_reason: Some(cs_domain::FailureReason::PricingError(error.to_string())),
             hedge_pnl: None,
@@ -98,7 +99,8 @@ impl ExecutableTrade for Condor {
         &self,
         entry_pricing: CondorPricing,
         exit_pricing: CondorPricing,
-        ctx: &ExecutionContext,
+        output: &SimulationOutput,
+        event: &EarningsEvent,
     ) -> CondorResult {
         let pnl_per_share = exit_pricing.entry_debit - entry_pricing.entry_debit;
         let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
@@ -193,16 +195,16 @@ impl ExecutableTrade for Condor {
 
         CondorResult {
             symbol: self.symbol().to_string(),
-            earnings_date: ctx.earnings_event.earnings_date,
-            earnings_time: ctx.earnings_event.earnings_time,
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
             near_call_strike: self.near_call.strike,
             near_put_strike: self.near_put.strike,
             far_call_strike: self.far_upper_call.strike,
             far_put_strike: self.far_lower_put.strike,
             expiration: self.near_call.expiration,
-            entry_time: ctx.entry_time,
+            entry_time: output.entry_time,
             entry_debit: entry_pricing.entry_debit,
-            exit_time: ctx.exit_time,
+            exit_time: output.exit_time,
             exit_credit: exit_pricing.entry_debit,
             pnl,
             pnl_pct,
@@ -212,8 +214,8 @@ impl ExecutableTrade for Condor {
             net_vega,
             iv_entry,
             iv_exit,
-            spot_at_entry: ctx.entry_spot,
-            spot_at_exit: ctx.exit_spot,
+            spot_at_entry: output.entry_spot,
+            spot_at_exit: output.exit_spot,
             success: true,
             failure_reason: None,
             hedge_pnl: None,

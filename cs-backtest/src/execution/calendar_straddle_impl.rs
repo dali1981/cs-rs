@@ -3,12 +3,12 @@
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use cs_domain::{
-    CalendarStraddle, CalendarStraddleResult, CONTRACT_MULTIPLIER,
+    CalendarStraddle, CalendarStraddleResult, CONTRACT_MULTIPLIER, EarningsEvent,
 };
 use crate::composite_pricer::{CalendarStraddleCompositePricer, CompositePricing};
 use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
-use super::types::{ExecutionConfig, ExecutionContext};
+use super::types::{ExecutionConfig, SimulationOutput};
 
 impl ExecutableTrade for CalendarStraddle {
     type Pricer = CalendarStraddleCompositePricer;
@@ -74,7 +74,8 @@ impl ExecutableTrade for CalendarStraddle {
         &self,
         entry_pricing: CompositePricing,
         exit_pricing: CompositePricing,
-        ctx: &ExecutionContext,
+        output: &SimulationOutput,
+        event: &EarningsEvent,
     ) -> CalendarStraddleResult {
         // CalendarStraddle legs: [0]=short_call, [1]=short_put, [2]=long_call, [3]=long_put
         let short_call_entry = &entry_pricing.legs[0].0;
@@ -141,35 +142,35 @@ impl ExecutableTrade for CalendarStraddle {
             calculate_pnl_attribution(
                 &entry_pricing,
                 &exit_pricing,
-                ctx.entry_spot,
-                ctx.exit_spot,
-                ctx.entry_time,
-                ctx.exit_time,
+                output.entry_spot,
+                output.exit_spot,
+                output.entry_time,
+                output.exit_time,
                 pnl,
             );
 
         CalendarStraddleResult {
             symbol: self.symbol().to_string(),
-            earnings_date: ctx.earnings_event.earnings_date,
-            earnings_time: ctx.earnings_event.earnings_time,
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
             short_strike: self.short_call.strike,
             long_strike: self.long_call.strike,
             short_expiry: self.short_call.expiration,
             long_expiry: self.long_call.expiration,
-            entry_time: ctx.entry_time,
+            entry_time: output.entry_time,
             short_call_entry: short_call_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             short_put_entry: short_put_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             long_call_entry: long_call_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             long_put_entry: long_put_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             entry_cost: entry_pricing.net_cost * Decimal::from(CONTRACT_MULTIPLIER),
-            exit_time: ctx.exit_time,
+            exit_time: output.exit_time,
             short_call_exit: short_call_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             short_put_exit: short_put_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             long_call_exit: long_call_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             long_put_exit: long_put_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             exit_value: exit_pricing.net_cost * Decimal::from(CONTRACT_MULTIPLIER),
-            entry_surface_time: ctx.entry_surface_time,
-            exit_surface_time: Some(ctx.exit_surface_time),
+            entry_surface_time: output.entry_surface_time,
+            exit_surface_time: Some(output.exit_surface_time),
             pnl,
             pnl_pct,
             net_delta,
@@ -186,8 +187,8 @@ impl ExecutableTrade for CalendarStraddle {
             theta_pnl,
             vega_pnl,
             unexplained_pnl,
-            spot_at_entry: ctx.entry_spot,
-            spot_at_exit: ctx.exit_spot,
+            spot_at_entry: output.entry_spot,
+            spot_at_exit: output.exit_spot,
             success: true,
             failure_reason: None,
             hedge_position: None,
@@ -199,26 +200,27 @@ impl ExecutableTrade for CalendarStraddle {
 
     fn to_failed_result(
         &self,
-        ctx: &ExecutionContext,
+        output: &SimulationOutput,
+        event: &EarningsEvent,
         error: ExecutionError,
     ) -> CalendarStraddleResult {
         let failure_reason = super::helpers::error_to_failure_reason(&error);
 
         CalendarStraddleResult {
             symbol: self.symbol().to_string(),
-            earnings_date: ctx.earnings_event.earnings_date,
-            earnings_time: ctx.earnings_event.earnings_time,
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
             short_strike: self.short_call.strike,
             long_strike: self.long_call.strike,
             short_expiry: self.short_call.expiration,
             long_expiry: self.long_call.expiration,
-            entry_time: ctx.entry_time,
+            entry_time: output.entry_time,
             short_call_entry: Decimal::ZERO,
             short_put_entry: Decimal::ZERO,
             long_call_entry: Decimal::ZERO,
             long_put_entry: Decimal::ZERO,
             entry_cost: Decimal::ZERO,
-            exit_time: ctx.exit_time,
+            exit_time: output.exit_time,
             short_call_exit: Decimal::ZERO,
             short_put_exit: Decimal::ZERO,
             long_call_exit: Decimal::ZERO,

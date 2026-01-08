@@ -140,13 +140,41 @@ impl BacktestOutputHandler {
         }
     }
 
-    /// Save results to file (placeholder - implement as needed)
-    pub fn save<R>(_result: &BacktestResult<R>, output: &PathBuf) -> Result<()>
+    /// Save results to file
+    pub fn save<R>(result: &BacktestResult<R>, output: &PathBuf) -> Result<()>
     where
-        R: TradeResultTrait + TradeResultMethods,
+        R: TradeResultTrait + TradeResultMethods + serde::Serialize,
     {
-        println!("Saving results to {:?}", output);
-        // TODO: Implement actual saving logic (CSV, JSON, Parquet)
+        use anyhow::Context;
+
+        // Create parent directory if needed
+        if let Some(parent) = output.parent() {
+            std::fs::create_dir_all(parent)
+                .context("Failed to create output directory")?;
+        }
+
+        // Detect output format based on extension
+        let is_json = output.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("json"))
+            .unwrap_or(false);
+
+        if is_json {
+            // Save results as JSON
+            let json_content = serde_json::to_string_pretty(&result.results)
+                .context("Failed to serialize results to JSON")?;
+            std::fs::write(output, json_content)
+                .context("Failed to write JSON file")?;
+            println!("{}", style(format!("Results saved to {:?}", output)).green());
+        } else {
+            // Default to JSON if no extension
+            let json_content = serde_json::to_string_pretty(&result.results)
+                .context("Failed to serialize results to JSON")?;
+            std::fs::write(output, json_content)
+                .context("Failed to write JSON file")?;
+            println!("{}", style(format!("Results saved to {:?} (JSON format)", output)).green());
+        }
+
         Ok(())
     }
 

@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use thiserror::Error;
-use cs_domain::{EarningsEvent, OptionStrategy, RepositoryError};
+use cs_domain::{OptionStrategy, RepositoryError};
 use crate::spread_pricer::PricingError;
 
 /// Errors that can occur during trade execution
@@ -88,22 +88,22 @@ impl ExecutionConfig {
     }
 }
 
-/// Context passed to result construction
+/// Output from trade simulation
 ///
-/// Contains all execution data needed to construct a result
+/// Contains pure simulation data: spots, times, surfaces.
+/// Does NOT contain business context (earnings events) - that's the caller's responsibility.
 #[derive(Debug)]
-pub struct ExecutionContext<'a> {
+pub struct SimulationOutput {
     pub entry_time: DateTime<Utc>,
     pub exit_time: DateTime<Utc>,
     pub entry_spot: f64,
     pub exit_spot: f64,
     pub entry_surface_time: Option<DateTime<Utc>>,
     pub exit_surface_time: DateTime<Utc>,
-    pub earnings_event: &'a EarningsEvent,
 }
 
-impl<'a> ExecutionContext<'a> {
-    /// Create a new execution context
+impl SimulationOutput {
+    /// Create a new simulation output
     pub fn new(
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
@@ -111,7 +111,6 @@ impl<'a> ExecutionContext<'a> {
         exit_spot: f64,
         entry_surface_time: Option<DateTime<Utc>>,
         exit_surface_time: DateTime<Utc>,
-        earnings_event: &'a EarningsEvent,
     ) -> Self {
         Self {
             entry_time,
@@ -120,7 +119,6 @@ impl<'a> ExecutionContext<'a> {
             exit_spot,
             entry_surface_time,
             exit_surface_time,
-            earnings_event,
         }
     }
 }

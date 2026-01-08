@@ -3,10 +3,10 @@
 use chrono::{DateTime, Utc};
 use polars::prelude::DataFrame;
 use cs_analytics::IVSurface;
-use cs_domain::TradeResult;
+use cs_domain::{EarningsEvent, TradeResult};
 use crate::spread_pricer::PricingError;
 use super::types::ExecutionError;
-use super::types::{ExecutionConfig, ExecutionContext};
+use super::types::{ExecutionConfig, SimulationOutput};
 
 /// Generic pricing interface for trade pricers
 ///
@@ -66,11 +66,14 @@ pub trait ExecutableTrade: Sized + Send + Sync {
     /// Construct success result from entry/exit pricing
     ///
     /// Called when both entry and exit pricing succeed.
+    /// The `output` contains simulation data (spots, times), while `event` provides
+    /// the business context (earnings date/time) - keeping them separate.
     fn to_result(
         &self,
         entry_pricing: Self::Pricing,
         exit_pricing: Self::Pricing,
-        ctx: &ExecutionContext,
+        output: &SimulationOutput,
+        event: &EarningsEvent,
     ) -> Self::Result;
 
     /// Construct failure result
@@ -78,7 +81,8 @@ pub trait ExecutableTrade: Sized + Send + Sync {
     /// Called when execution fails at any point.
     fn to_failed_result(
         &self,
-        ctx: &ExecutionContext,
+        output: &SimulationOutput,
+        event: &EarningsEvent,
         error: ExecutionError,
     ) -> Self::Result;
 }

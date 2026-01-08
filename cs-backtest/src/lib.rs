@@ -41,8 +41,8 @@ pub use atm_iv_use_case::{GenerateIvTimeSeriesUseCase, IvTimeSeriesResult, IvTim
 pub use minute_aligned_iv_use_case::{MinuteAlignedIvUseCase, MinuteAlignedIvResult, MinuteAlignedIvError};
 pub use earnings_analysis_use_case::{EarningsAnalysisUseCase, EarningsAnalysisResult, EarningsAnalysisError};
 
-// Generic execution framework
-pub use execution::{ExecutableTrade, TradePricer, ExecutionConfig, ExecutionContext, ExecutionError, execute_trade};
+// Execution framework
+pub use execution::{ExecutableTrade, TradePricer, ExecutionConfig, SimulationOutput, ExecutionError};
 pub use timing_strategy::TimingStrategy;
 pub use trade_strategy::{
     TradeStrategy, StrategyDispatch,
