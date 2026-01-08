@@ -2,9 +2,11 @@
 
 use anyhow::Result;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use cs_backtest::{
     BacktestUseCase, BacktestConfig,
+    CampaignUseCase, CampaignConfig,
     GenerateIvTimeSeriesUseCase,
     EarningsAnalysisUseCase,
 };
@@ -31,6 +33,28 @@ impl UseCaseFactory {
         );
 
         Ok(BacktestUseCase::new(
+            earnings_repo,
+            options_repo,
+            equity_repo,
+            config,
+        ))
+    }
+
+    /// Create a campaign use case with all dependencies
+    /// Earnings repos are constructed from config.earnings_file and config.earnings_dir
+    pub fn create_campaign(
+        config: CampaignConfig,
+    ) -> Result<CampaignUseCase> {
+        let options_repo = Arc::new(RepositoryFactory::create_options_repo(&config.data_dir));
+        let equity_repo = Arc::new(RepositoryFactory::create_equity_repo(&config.data_dir));
+
+        // Get earnings file/dir from config
+        let earnings_repo = RepositoryFactory::create_earnings_repo(
+            Some(&config.earnings_dir),
+            config.earnings_file.as_ref(),
+        );
+
+        Ok(CampaignUseCase::new(
             earnings_repo,
             options_repo,
             equity_repo,

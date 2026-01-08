@@ -3,6 +3,7 @@
 // Generic trade execution, rolling strategies, backtesting.
 
 pub mod config;
+pub mod campaign_config;
 pub mod delta_providers;  // Delta computation strategies for hedging
 pub mod execution;  // Generic execution framework
 pub mod greeks_helpers;  // Greeks computation helpers
@@ -21,6 +22,7 @@ pub mod trade_factory_impl;
 pub mod hedging_analytics;
 pub mod timing_strategy;
 pub mod backtest_use_case;
+pub mod campaign_use_case;
 mod backtest_use_case_helpers;
 pub mod atm_iv_use_case;
 pub mod minute_aligned_iv_use_case;
@@ -29,9 +31,11 @@ pub mod attribution;
 
 // Config
 pub use config::{BacktestConfig, SpreadType, SelectionType};
+pub use campaign_config::CampaignConfig;
 
 // Use cases
 pub use backtest_use_case::{BacktestUseCase, BacktestResult, UnifiedBacktestResult, SessionProgress, TradeGenerationError, TradeResultMethods};
+pub use campaign_use_case::{CampaignUseCase, CampaignError, CampaignResult};
 pub use atm_iv_use_case::{GenerateIvTimeSeriesUseCase, IvTimeSeriesResult, IvTimeSeriesError};
 pub use minute_aligned_iv_use_case::{MinuteAlignedIvUseCase, MinuteAlignedIvResult, MinuteAlignedIvError};
 pub use earnings_analysis_use_case::{EarningsAnalysisUseCase, EarningsAnalysisResult, EarningsAnalysisError};
