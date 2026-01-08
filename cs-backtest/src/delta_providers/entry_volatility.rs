@@ -6,11 +6,9 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use rust_decimal::prelude::ToPrimitive;
-use cs_analytics::bs_delta;
 use cs_domain::hedging::DeltaProvider;
 use cs_domain::trade::CompositeTrade;
-use finq_core::OptionType;
+use super::common::compute_position_delta_uniform_vol;
 
 /// Recompute delta from Black-Scholes using fixed volatility
 ///
@@ -51,31 +49,13 @@ impl<T: CompositeTrade> EntryVolatilityProvider<T> {
 #[async_trait]
 impl<T: CompositeTrade + Send + Sync> DeltaProvider for EntryVolatilityProvider<T> {
     async fn compute_delta(&mut self, spot: f64, timestamp: DateTime<Utc>) -> Result<f64, String> {
-        // Sum delta across all legs (per-share, NO multiplier)
-        let position_delta: f64 = self.trade.legs().iter().map(|(leg, position)| {
-            let tte = (leg.expiration - timestamp.date_naive()).num_days() as f64 / 365.0;
-            if tte <= 0.0 {
-                return 0.0;  // Expired
-            }
-
-            let is_call = leg.option_type == OptionType::Call;
-            let strike = leg.strike.value().to_f64().unwrap_or(0.0);
-
-            // Per-share delta from Black-Scholes
-            let leg_delta = bs_delta(
-                spot,
-                strike,
-                tte,
-                self.entry_volatility,
-                is_call,
-                self.risk_free_rate,
-            );
-
-            // Apply position sign (long = +1, short = -1)
-            // NO multiplier here - we return per-share delta
-            leg_delta * position.sign()
-        }).sum();
-
+        let position_delta = compute_position_delta_uniform_vol(
+            &self.trade,
+            spot,
+            timestamp,
+            self.entry_volatility,
+            self.risk_free_rate,
+        );
         Ok(position_delta)
     }
 

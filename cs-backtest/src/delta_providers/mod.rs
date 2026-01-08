@@ -11,6 +11,7 @@
 //! - `CurrentMarketIVProvider`: Build fresh IV surface at each rehedge
 //! - `HistoricalAverageIVProvider`: Use averaged IV over lookback period
 
+mod common;
 mod gamma_approximation;
 mod entry_volatility;
 mod current_hv;

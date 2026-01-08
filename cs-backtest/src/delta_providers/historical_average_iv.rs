@@ -6,14 +6,14 @@
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 use std::sync::Arc;
-use cs_analytics::bs_delta;
+use std::collections::HashMap;
 use cs_domain::hedging::DeltaProvider;
 use cs_domain::repositories::{EquityDataRepository, OptionsDataRepository};
 use cs_domain::trade::CompositeTrade;
 use cs_domain::TradingCalendar;
 use finq_core::OptionType;
+use super::common::compute_position_delta_with_vol_lookup;
 use crate::iv_surface_builder::build_iv_surface;
 
 /// Use historical average IV over lookback period
@@ -151,42 +151,38 @@ impl<T: CompositeTrade + Send + Sync> DeltaProvider for HistoricalAverageIVProvi
     async fn compute_delta(&mut self, spot: f64, timestamp: DateTime<Utc>) -> Result<f64, String> {
         let current_date = timestamp.date_naive();
 
-        // Compute position delta using averaged IVs (per-share, NO multiplier)
-        let mut position_delta = 0.0;
+        // Pre-compute average IVs for all legs in the trade
+        let mut leg_ivs: HashMap<(Decimal, NaiveDate, bool), f64> = HashMap::new();
 
-        for (leg, leg_position) in self.trade.legs() {
-            let tte = (leg.expiration - current_date).num_days() as f64 / 365.0;
-            if tte <= 0.0 {
-                continue;  // Skip expired legs
+        for (leg, _) in self.trade.legs() {
+            let key = (leg.strike.value(), leg.expiration, leg.option_type == OptionType::Call);
+
+            // Only compute if not already cached
+            if !leg_ivs.contains_key(&key) {
+                let avg_iv = self.compute_average_iv_for_leg(
+                    leg.strike.value(),
+                    leg.expiration,
+                    leg.option_type == OptionType::Call,
+                    current_date,
+                )
+                .await
+                .unwrap_or(0.30); // Fallback to 30% if computation fails
+
+                leg_ivs.insert(key, avg_iv);
             }
-
-            // Compute average IV for this leg over lookback window
-            let avg_iv = self.compute_average_iv_for_leg(
-                leg.strike.value(),
-                leg.expiration,
-                leg.option_type == OptionType::Call,
-                current_date,
-            )
-            .await
-            .unwrap_or(0.30);  // Fallback to 30% if computation fails
-
-            let strike_f64 = leg.strike.value().to_f64().unwrap_or(0.0);
-            let is_call = leg.option_type == OptionType::Call;
-
-            // Per-share delta from Black-Scholes
-            let leg_delta = bs_delta(
-                spot,
-                strike_f64,
-                tte,
-                avg_iv,
-                is_call,
-                self.risk_free_rate,
-            );
-
-            // Apply position sign (long = +1, short = -1)
-            // NO multiplier here - we return per-share delta
-            position_delta += leg_delta * leg_position.sign();
         }
+
+        // Compute position delta using pre-computed averaged IVs via shared helper
+        let position_delta = compute_position_delta_with_vol_lookup(
+            &self.trade,
+            spot,
+            timestamp,
+            |leg, _spot| {
+                let key = (leg.strike.value(), leg.expiration, leg.option_type == OptionType::Call);
+                *leg_ivs.get(&key).unwrap_or(&0.30)
+            },
+            self.risk_free_rate,
+        );
 
         Ok(position_delta)
     }
