@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use thiserror::Error;
-use cs_domain::{EarningsEvent, RepositoryError};
+use cs_domain::{EarningsEvent, OptionStrategy, RepositoryError};
 use crate::spread_pricer::PricingError;
 
 /// Errors that can occur during trade execution
@@ -57,6 +57,28 @@ impl ExecutionConfig {
             max_entry_iv,
             min_entry_cost: Decimal::new(10, 2), // $0.10 minimum credit for iron butterflies
             min_credit: Some(Decimal::new(10, 2)),
+        }
+    }
+
+    /// Create config for calendar straddle execution (debit spread)
+    pub fn for_calendar_straddle(max_entry_iv: Option<f64>) -> Self {
+        Self {
+            max_entry_iv,
+            min_entry_cost: Decimal::new(50, 2), // $0.50 minimum for calendar straddles (like straddles)
+            min_credit: None,
+        }
+    }
+
+    /// Create strategy-specific config based on option strategy type
+    ///
+    /// This factory method maps each OptionStrategy to its correct ExecutionConfig
+    /// with appropriate validation thresholds.
+    pub fn for_strategy(strategy: OptionStrategy, max_entry_iv: Option<f64>) -> Self {
+        match strategy {
+            OptionStrategy::CalendarSpread => Self::for_calendar_spread(max_entry_iv),
+            OptionStrategy::IronButterfly => Self::for_iron_butterfly(max_entry_iv),
+            OptionStrategy::Straddle => Self::for_straddle(max_entry_iv),
+            OptionStrategy::CalendarStraddle => Self::for_calendar_straddle(max_entry_iv),
         }
     }
 }

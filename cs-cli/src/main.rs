@@ -2287,8 +2287,8 @@ async fn run_campaign_command(
     ));
 
     // Create session executor
-    // Use calendar spread config as a reasonable default for all strategies
-    let config = ExecutionConfig::for_calendar_spread(None);
+    // Use strategy-specific config to properly validate each trade type
+    let config = ExecutionConfig::for_strategy(strategy, None);
     let mut executor = SessionExecutor::new(
         options_repo_arc,
         equity_repo_arc,
