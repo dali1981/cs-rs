@@ -13,6 +13,7 @@ pub mod composite_pricer;  // Generic pricer for CompositeTrade types
 pub mod straddle_pricer;
 pub mod iron_butterfly_pricer;
 pub mod calendar_straddle_pricer;
+pub mod multi_leg_pricer;
 pub mod trade_executor;  // Unified executor with rolling + hedging support
 pub mod trade_executor_factory;  // Factory for creating trade executors
 pub mod session_executor;  // Session-based executor for campaign execution
@@ -50,6 +51,12 @@ pub use composite_pricer::{CompositePricer, CompositePricing};
 pub use straddle_pricer::{StraddlePricer, StraddlePricing};
 pub use iron_butterfly_pricer::{IronButterflyPricer, IronButterflyPricing};
 pub use calendar_straddle_pricer::{CalendarStraddlePricer, CalendarStraddlePricing};
+pub use multi_leg_pricer::{
+    StranglePricer, StranglePricing,
+    ButterflyPricer, ButterflyPricing,
+    CondorPricer, CondorPricing,
+    IronCondorPricer, IronCondorPricing,
+};
 
 // Utilities
 pub use trade_factory_impl::DefaultTradeFactory;
