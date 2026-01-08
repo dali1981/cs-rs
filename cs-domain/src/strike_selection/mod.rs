@@ -271,6 +271,14 @@ pub enum OptionStrategy {
     Straddle,
     /// Calendar straddle (short near-term straddle + long far-term straddle)
     CalendarStraddle,
+    /// Strangle (OTM call + OTM put, symmetric wings)
+    Strangle,
+    /// Butterfly (2x ATM ± OTM wings)
+    Butterfly,
+    /// Condor (near spread ± far wings)
+    Condor,
+    /// Iron condor (near spread ± far wings)
+    IronCondor,
 }
 
 impl Default for OptionStrategy {

@@ -3,14 +3,14 @@
 //! This module provides a higher-level interface for executing trades based on TradingSession.
 //! It bridges the gap between campaign planning (TradingSession) and trade execution (TradeExecutor).
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::NaiveDate;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
 
 use cs_domain::{
     EquityDataRepository, OptionsDataRepository,
-    TradeFactory, TradingSession, SessionAction, SessionContext,
+    TradeFactory, TradingSession, SessionContext,
     OptionStrategy, RollableTrade, TradeResult, EarningsEvent, EarningsTime,
     Straddle, CalendarSpread, IronButterfly,
 };
@@ -375,6 +375,18 @@ impl SessionExecutor {
             OptionStrategy::IronButterfly => {
                 self.execute_iron_butterfly(session, &earnings_event).await
             }
+            OptionStrategy::Strangle => {
+                self.execute_strangle(session, &earnings_event).await
+            }
+            OptionStrategy::Butterfly => {
+                self.execute_butterfly(session, &earnings_event).await
+            }
+            OptionStrategy::Condor => {
+                self.execute_condor(session, &earnings_event).await
+            }
+            OptionStrategy::IronCondor => {
+                self.execute_iron_condor(session, &earnings_event).await
+            }
         }
     }
 
@@ -729,6 +741,166 @@ impl SessionExecutor {
                 "Iron butterfly execution failed".to_string(),
             )
         }
+    }
+
+    /// Execute a strangle session
+    async fn execute_strangle(
+        &self,
+        session: &TradingSession,
+        _earnings_event: &EarningsEvent,
+    ) -> SessionResult {
+        // Create trade using multi-leg config
+        let config = match &session.multi_leg_strategy_config {
+            Some(cfg) => cfg.clone(),
+            None => {
+                return SessionResult::failure(
+                    session.clone(),
+                    "Strangle strategy requires multi_leg_strategy_config".to_string(),
+                );
+            }
+        };
+
+        let _trade = match self.trade_factory.create_strangle(
+            &session.symbol,
+            session.entry_datetime,
+            session.exit_date(),
+            &config,
+        ).await {
+            Ok(t) => t,
+            Err(e) => {
+                return SessionResult::failure(
+                    session.clone(),
+                    format!("Failed to create strangle: {}", e),
+                );
+            }
+        };
+
+        // TODO: Implement ExecutableTrade for Strangle and execute
+        // For now, return a placeholder failure
+        SessionResult::failure(
+            session.clone(),
+            "Strangle execution not yet fully integrated (needs ExecutableTrade impl)".to_string(),
+        )
+    }
+
+    /// Execute a butterfly session
+    async fn execute_butterfly(
+        &self,
+        session: &TradingSession,
+        _earnings_event: &EarningsEvent,
+    ) -> SessionResult {
+        // Create trade using multi-leg config
+        let config = match &session.multi_leg_strategy_config {
+            Some(cfg) => cfg.clone(),
+            None => {
+                return SessionResult::failure(
+                    session.clone(),
+                    "Butterfly strategy requires multi_leg_strategy_config".to_string(),
+                );
+            }
+        };
+
+        let _trade = match self.trade_factory.create_butterfly(
+            &session.symbol,
+            session.entry_datetime,
+            session.exit_date(),
+            &config,
+        ).await {
+            Ok(t) => t,
+            Err(e) => {
+                return SessionResult::failure(
+                    session.clone(),
+                    format!("Failed to create butterfly: {}", e),
+                );
+            }
+        };
+
+        // TODO: Implement ExecutableTrade for Butterfly and execute
+        // For now, return a placeholder failure
+        SessionResult::failure(
+            session.clone(),
+            "Butterfly execution not yet fully integrated (needs ExecutableTrade impl)".to_string(),
+        )
+    }
+
+    /// Execute a condor session
+    async fn execute_condor(
+        &self,
+        session: &TradingSession,
+        _earnings_event: &EarningsEvent,
+    ) -> SessionResult {
+        // Create trade using multi-leg config
+        let config = match &session.multi_leg_strategy_config {
+            Some(cfg) => cfg.clone(),
+            None => {
+                return SessionResult::failure(
+                    session.clone(),
+                    "Condor strategy requires multi_leg_strategy_config".to_string(),
+                );
+            }
+        };
+
+        let _trade = match self.trade_factory.create_condor(
+            &session.symbol,
+            session.entry_datetime,
+            session.exit_date(),
+            &config,
+        ).await {
+            Ok(t) => t,
+            Err(e) => {
+                return SessionResult::failure(
+                    session.clone(),
+                    format!("Failed to create condor: {}", e),
+                );
+            }
+        };
+
+        // TODO: Implement ExecutableTrade for Condor and execute
+        // For now, return a placeholder failure
+        SessionResult::failure(
+            session.clone(),
+            "Condor execution not yet fully integrated (needs ExecutableTrade impl)".to_string(),
+        )
+    }
+
+    /// Execute an iron condor session
+    async fn execute_iron_condor(
+        &self,
+        session: &TradingSession,
+        _earnings_event: &EarningsEvent,
+    ) -> SessionResult {
+        // Create trade using multi-leg config
+        let config = match &session.multi_leg_strategy_config {
+            Some(cfg) => cfg.clone(),
+            None => {
+                return SessionResult::failure(
+                    session.clone(),
+                    "Iron condor strategy requires multi_leg_strategy_config".to_string(),
+                );
+            }
+        };
+
+        let _trade = match self.trade_factory.create_iron_condor(
+            &session.symbol,
+            session.entry_datetime,
+            session.exit_date(),
+            &config,
+        ).await {
+            Ok(t) => t,
+            Err(e) => {
+                return SessionResult::failure(
+                    session.clone(),
+                    format!("Failed to create iron condor: {}", e),
+                );
+            }
+        };
+
+        // TODO: Implement ExecutableTrade for IronCondor and execute
+        // For now, return a placeholder failure
+        SessionResult::failure(
+            session.clone(),
+            "Iron condor execution not yet fully integrated (needs ExecutableTrade impl)".to_string(),
+        )
     }
 
     // =========================================================================

@@ -79,6 +79,11 @@ impl ExecutionConfig {
             OptionStrategy::IronButterfly => Self::for_iron_butterfly(max_entry_iv),
             OptionStrategy::Straddle => Self::for_straddle(max_entry_iv),
             OptionStrategy::CalendarStraddle => Self::for_calendar_straddle(max_entry_iv),
+            // Multi-leg strategies: use iron butterfly config (credit spreads with wings)
+            OptionStrategy::Strangle => Self::for_iron_butterfly(max_entry_iv),
+            OptionStrategy::Butterfly => Self::for_iron_butterfly(max_entry_iv),
+            OptionStrategy::Condor => Self::for_iron_butterfly(max_entry_iv),
+            OptionStrategy::IronCondor => Self::for_iron_butterfly(max_entry_iv),
         }
     }
 }
