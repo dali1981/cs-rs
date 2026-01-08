@@ -5,9 +5,10 @@ use std::sync::Arc;
 
 use cs_domain::{
     EquityDataRepository, OptionsDataRepository,
-    SpotPrice, Straddle, TradeFactory, TradeFactoryError,
+    SpotPrice, Straddle, CalendarSpread, IronButterfly, TradeFactory, TradeFactoryError,
 };
-use cs_domain::strike_selection::{ATMStrategy, StrikeSelector};
+use cs_domain::strike_selection::{ATMStrategy, StrikeSelector, ExpirationCriteria};
+use finq_core::OptionType;
 
 /// Default implementation of TradeFactory using ATM selection strategy
 ///
@@ -80,6 +81,99 @@ impl TradeFactory for DefaultTradeFactory {
         self.selector
             .select_straddle(&spot_price, &surface, min_expiration)
             .map_err(|e| TradeFactoryError::SelectionError(format!("Strike selection failed: {}", e)))
+    }
+
+    async fn create_calendar_spread(
+        &self,
+        symbol: &str,
+        as_of: DateTime<Utc>,
+        min_short_dte: u32,
+        max_short_dte: u32,
+        min_long_dte: u32,
+        option_type: OptionType,
+    ) -> Result<CalendarSpread, TradeFactoryError> {
+        // 1. Get option chain
+        let chain = self.options_repo
+            .get_option_bars_at_time(symbol, as_of)
+            .await
+            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+
+        // 2. Build IV surface
+        let surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
+            &chain,
+            &*self.equity_repo,
+            symbol,
+        )
+        .await
+        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+
+        // 3. Extract spot price
+        let spot_price = SpotPrice::new(
+            Decimal::try_from(surface.spot_price())
+                .map_err(|_| TradeFactoryError::DataError("Invalid spot price".to_string()))?,
+            as_of,
+        );
+
+        // 4. Create expiration criteria from DTE parameters
+        let criteria = ExpirationCriteria::new(
+            min_short_dte as i32,
+            max_short_dte as i32,
+            min_long_dte as i32,
+            120, // max_long_dte: allow up to 120 DTE for long leg
+        );
+
+        // 5. Use selector to build calendar spread
+        self.selector
+            .select_calendar_spread(
+                &spot_price,
+                &surface,
+                option_type,
+                &criteria,
+            )
+            .map_err(|e| TradeFactoryError::SelectionError(format!("Calendar spread selection failed: {}", e)))
+    }
+
+    async fn create_iron_butterfly(
+        &self,
+        symbol: &str,
+        as_of: DateTime<Utc>,
+        min_expiration: NaiveDate,
+        wing_width: Decimal,
+    ) -> Result<IronButterfly, TradeFactoryError> {
+        // 1. Get option chain
+        let chain = self.options_repo
+            .get_option_bars_at_time(symbol, as_of)
+            .await
+            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+
+        // 2. Build IV surface
+        let surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
+            &chain,
+            &*self.equity_repo,
+            symbol,
+        )
+        .await
+        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+
+        // 3. Extract spot price
+        let spot_price = SpotPrice::new(
+            Decimal::try_from(surface.spot_price())
+                .map_err(|_| TradeFactoryError::DataError("Invalid spot price".to_string()))?,
+            as_of,
+        );
+
+        // 4. Compute DTE range from min_expiration
+        // min_expiration is the earliest acceptable expiration, compute DTE from as_of
+        let as_of_date = as_of.naive_utc().date();
+        let min_dte = (min_expiration - as_of_date).num_days() as i32;
+        // Use a typical DTE range for iron butterflies: min_dte to min_dte + 15 days
+        // This ensures we stay near the minimum required expiration
+        let max_dte = min_dte + 15;
+
+        // 5. Use selector to build iron butterfly
+        self.selector
+            .select_iron_butterfly(&spot_price, &surface, wing_width, min_dte, max_dte)
+            .map_err(|e| TradeFactoryError::SelectionError(format!("Iron butterfly selection failed: {}", e)))
     }
 
     async fn available_expirations(

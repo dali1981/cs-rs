@@ -136,11 +136,20 @@ impl RollableTrade for CalendarSpread {
         dt: DateTime<Utc>,
         min_expiration: NaiveDate,
     ) -> Result<Self, TradeConstructionError> {
-        // For now, return an error as calendar spread factory method doesn't exist yet
-        // This will be implemented in Phase 2.4
-        Err(TradeConstructionError::FactoryError(
-            "create_calendar_spread not yet implemented in TradeFactory".to_string()
-        ))
+        // Use default DTE ranges for calendar spread
+        // Short: 0-45 DTE, Long: 45+ DTE (typical pre-earnings calendar)
+        // Note: These can be parameterized in future via campaign configuration
+        factory
+            .create_calendar_spread(
+                symbol,
+                dt,
+                0,      // min_short_dte
+                45,     // max_short_dte
+                45,     // min_long_dte (must be >= max_short_dte)
+                finq_core::OptionType::Call, // Default to Call; can be parameterized
+            )
+            .await
+            .map_err(|e| TradeConstructionError::FactoryError(e.to_string()))
     }
 
     fn expiration(&self) -> NaiveDate {
@@ -247,16 +256,22 @@ impl RollableTrade for IronButterfly {
     type Result = IronButterflyResult;
 
     async fn create(
-        _factory: &dyn TradeFactory,
-        _symbol: &str,
-        _dt: DateTime<Utc>,
-        _min_expiration: NaiveDate,
+        factory: &dyn TradeFactory,
+        symbol: &str,
+        dt: DateTime<Utc>,
+        min_expiration: NaiveDate,
     ) -> Result<Self, TradeConstructionError> {
-        // For now, return an error as iron butterfly factory method doesn't exist yet
-        // This will be implemented in Phase 2.5
-        Err(TradeConstructionError::FactoryError(
-            "create_iron_butterfly not yet implemented in TradeFactory".to_string()
-        ))
+        // Use default wing width of $10 for iron butterfly
+        // Note: This can be parameterized in future via campaign configuration
+        factory
+            .create_iron_butterfly(
+                symbol,
+                dt,
+                min_expiration,
+                Decimal::new(10, 0), // $10 wing width
+            )
+            .await
+            .map_err(|e| TradeConstructionError::FactoryError(e.to_string()))
     }
 
     fn expiration(&self) -> NaiveDate {

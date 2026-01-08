@@ -1,6 +1,8 @@
-use crate::entities::Straddle;
+use crate::entities::{Straddle, CalendarSpread, IronButterfly};
 use chrono::{DateTime, NaiveDate, Utc};
+use rust_decimal::Decimal;
 use thiserror::Error;
+use finq_core::OptionType;
 
 /// Port for creating trades from market data
 ///
@@ -34,6 +36,65 @@ pub trait TradeFactory: Send + Sync {
         as_of: DateTime<Utc>,
         min_expiration: NaiveDate,
     ) -> Result<Straddle, TradeFactoryError>;
+
+    /// Create a calendar spread (short near-term + long far-term at same strike)
+    ///
+    /// Creates a calendar spread by:
+    /// 1. Finding ATM strike (closest to spot)
+    /// 2. Selecting short expiration by DTE range
+    /// 3. Selecting long expiration by DTE range (must be after short)
+    /// 4. Building legs and validating
+    ///
+    /// # Arguments
+    /// * `symbol` - Ticker symbol
+    /// * `as_of` - Date/time to query market data
+    /// * `min_short_dte` - Minimum days to short expiration
+    /// * `max_short_dte` - Maximum days to short expiration
+    /// * `min_long_dte` - Minimum days to long expiration
+    /// * `option_type` - Call or Put
+    ///
+    /// # Returns
+    /// A CalendarSpread with both legs at same strike, different expirations
+    ///
+    /// # Errors
+    /// Returns error if no suitable expirations/strikes found or selection fails
+    async fn create_calendar_spread(
+        &self,
+        symbol: &str,
+        as_of: DateTime<Utc>,
+        min_short_dte: u32,
+        max_short_dte: u32,
+        min_long_dte: u32,
+        option_type: OptionType,
+    ) -> Result<CalendarSpread, TradeFactoryError>;
+
+    /// Create an iron butterfly (short ATM straddle + long OTM wings)
+    ///
+    /// Creates an iron butterfly by:
+    /// 1. Finding ATM strike (center)
+    /// 2. Selecting expiration by DTE range
+    /// 3. Calculating upper/lower wing strikes from center ± wing_width
+    /// 4. Building 4 legs (short call, short put, long call, long put)
+    /// 5. Validating construction
+    ///
+    /// # Arguments
+    /// * `symbol` - Ticker symbol
+    /// * `as_of` - Date/time to query market data
+    /// * `min_expiration` - Minimum required expiration date
+    /// * `wing_width` - Distance from center strike to upper/lower wing (e.g., 10.0 for $10)
+    ///
+    /// # Returns
+    /// An IronButterfly with short center straddle and long OTM wings
+    ///
+    /// # Errors
+    /// Returns error if no suitable expirations/strikes found or selection fails
+    async fn create_iron_butterfly(
+        &self,
+        symbol: &str,
+        as_of: DateTime<Utc>,
+        min_expiration: NaiveDate,
+        wing_width: Decimal,
+    ) -> Result<IronButterfly, TradeFactoryError>;
 
     /// Query available expiration dates for a symbol at a given time
     ///
