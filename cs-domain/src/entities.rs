@@ -1164,6 +1164,317 @@ impl CalendarStraddleResult {
     }
 }
 
+/// Strangle trade result (long OTM call + long OTM put)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StrangleResult {
+    // Identification
+    pub symbol: String,
+    pub earnings_date: NaiveDate,
+    pub earnings_time: EarningsTime,
+    pub call_strike: Strike,
+    pub put_strike: Strike,
+    pub expiration: NaiveDate,
+
+    // Entry (debit paid)
+    pub entry_time: DateTime<Utc>,
+    pub call_entry_price: Decimal,
+    pub put_entry_price: Decimal,
+    pub entry_debit: Decimal,
+
+    // Exit (credit received)
+    pub exit_time: DateTime<Utc>,
+    pub call_exit_price: Decimal,
+    pub put_exit_price: Decimal,
+    pub exit_credit: Decimal,
+
+    // P&L
+    pub pnl: Decimal,
+    pub pnl_pct: Decimal,
+
+    // Greeks at entry
+    pub net_delta: Option<f64>,
+    pub net_gamma: Option<f64>,
+    pub net_theta: Option<f64>,
+    pub net_vega: Option<f64>,
+
+    // IV at entry/exit
+    pub iv_entry: Option<f64>,
+    pub iv_exit: Option<f64>,
+
+    // Spot prices
+    pub spot_at_entry: f64,
+    pub spot_at_exit: f64,
+
+    // Status
+    pub success: bool,
+    pub failure_reason: Option<FailureReason>,
+
+    // Optional hedging fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_pnl: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_pnl_with_hedge: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_attribution: Option<crate::position::PositionAttribution>,
+}
+
+impl StrangleResult {
+    pub fn is_winner(&self) -> bool {
+        self.success && self.pnl > Decimal::ZERO
+    }
+}
+
+impl crate::trade::TradeResult for StrangleResult {
+    fn symbol(&self) -> &str { &self.symbol }
+    fn pnl(&self) -> Decimal { self.pnl }
+    fn entry_cost(&self) -> Decimal { self.entry_debit }
+    fn exit_value(&self) -> Decimal { self.exit_credit }
+    fn success(&self) -> bool { self.success }
+    fn entry_time(&self) -> DateTime<Utc> { self.entry_time }
+    fn exit_time(&self) -> DateTime<Utc> { self.exit_time }
+    fn spot_at_entry(&self) -> f64 { self.spot_at_entry }
+    fn spot_at_exit(&self) -> f64 { self.spot_at_exit }
+    fn net_delta(&self) -> Option<f64> { self.net_delta }
+    fn net_gamma(&self) -> Option<f64> { self.net_gamma }
+    fn hedge_pnl(&self) -> Option<Decimal> { self.hedge_pnl }
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> { self.total_pnl_with_hedge }
+    fn apply_hedge_results(
+        &mut self,
+        position: crate::hedging::HedgePosition,
+        hedge_pnl: Decimal,
+        total_pnl: Decimal,
+        attribution: Option<crate::position::PositionAttribution>,
+    ) {
+        self.hedge_pnl = Some(hedge_pnl);
+        self.total_pnl_with_hedge = Some(total_pnl);
+        self.position_attribution = attribution;
+    }
+}
+
+/// Butterfly trade result (2x ATM ± OTM wings)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ButterflyResult {
+    pub symbol: String,
+    pub earnings_date: NaiveDate,
+    pub earnings_time: EarningsTime,
+    pub short_strike: Strike,
+    pub upper_strike: Strike,
+    pub lower_strike: Strike,
+    pub expiration: NaiveDate,
+
+    pub entry_time: DateTime<Utc>,
+    pub entry_debit: Decimal,
+    pub exit_time: DateTime<Utc>,
+    pub exit_credit: Decimal,
+
+    pub pnl: Decimal,
+    pub pnl_pct: Decimal,
+
+    pub net_delta: Option<f64>,
+    pub net_gamma: Option<f64>,
+    pub net_theta: Option<f64>,
+    pub net_vega: Option<f64>,
+
+    pub iv_entry: Option<f64>,
+    pub iv_exit: Option<f64>,
+
+    pub spot_at_entry: f64,
+    pub spot_at_exit: f64,
+
+    pub success: bool,
+    pub failure_reason: Option<FailureReason>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_pnl: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_pnl_with_hedge: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_attribution: Option<crate::position::PositionAttribution>,
+}
+
+impl ButterflyResult {
+    pub fn is_winner(&self) -> bool {
+        self.success && self.pnl > Decimal::ZERO
+    }
+}
+
+impl crate::trade::TradeResult for ButterflyResult {
+    fn symbol(&self) -> &str { &self.symbol }
+    fn pnl(&self) -> Decimal { self.pnl }
+    fn entry_cost(&self) -> Decimal { self.entry_debit }
+    fn exit_value(&self) -> Decimal { self.exit_credit }
+    fn success(&self) -> bool { self.success }
+    fn entry_time(&self) -> DateTime<Utc> { self.entry_time }
+    fn exit_time(&self) -> DateTime<Utc> { self.exit_time }
+    fn spot_at_entry(&self) -> f64 { self.spot_at_entry }
+    fn spot_at_exit(&self) -> f64 { self.spot_at_exit }
+    fn net_delta(&self) -> Option<f64> { self.net_delta }
+    fn net_gamma(&self) -> Option<f64> { self.net_gamma }
+    fn hedge_pnl(&self) -> Option<Decimal> { self.hedge_pnl }
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> { self.total_pnl_with_hedge }
+    fn apply_hedge_results(
+        &mut self,
+        position: crate::hedging::HedgePosition,
+        hedge_pnl: Decimal,
+        total_pnl: Decimal,
+        attribution: Option<crate::position::PositionAttribution>,
+    ) {
+        self.hedge_pnl = Some(hedge_pnl);
+        self.total_pnl_with_hedge = Some(total_pnl);
+        self.position_attribution = attribution;
+    }
+}
+
+/// Condor trade result (near spread ± far wings)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CondorResult {
+    pub symbol: String,
+    pub earnings_date: NaiveDate,
+    pub earnings_time: EarningsTime,
+    pub near_call_strike: Strike,
+    pub near_put_strike: Strike,
+    pub far_call_strike: Strike,
+    pub far_put_strike: Strike,
+    pub expiration: NaiveDate,
+
+    pub entry_time: DateTime<Utc>,
+    pub entry_debit: Decimal,
+    pub exit_time: DateTime<Utc>,
+    pub exit_credit: Decimal,
+
+    pub pnl: Decimal,
+    pub pnl_pct: Decimal,
+
+    pub net_delta: Option<f64>,
+    pub net_gamma: Option<f64>,
+    pub net_theta: Option<f64>,
+    pub net_vega: Option<f64>,
+
+    pub iv_entry: Option<f64>,
+    pub iv_exit: Option<f64>,
+
+    pub spot_at_entry: f64,
+    pub spot_at_exit: f64,
+
+    pub success: bool,
+    pub failure_reason: Option<FailureReason>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_pnl: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_pnl_with_hedge: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_attribution: Option<crate::position::PositionAttribution>,
+}
+
+impl CondorResult {
+    pub fn is_winner(&self) -> bool {
+        self.success && self.pnl > Decimal::ZERO
+    }
+}
+
+impl crate::trade::TradeResult for CondorResult {
+    fn symbol(&self) -> &str { &self.symbol }
+    fn pnl(&self) -> Decimal { self.pnl }
+    fn entry_cost(&self) -> Decimal { self.entry_debit }
+    fn exit_value(&self) -> Decimal { self.exit_credit }
+    fn success(&self) -> bool { self.success }
+    fn entry_time(&self) -> DateTime<Utc> { self.entry_time }
+    fn exit_time(&self) -> DateTime<Utc> { self.exit_time }
+    fn spot_at_entry(&self) -> f64 { self.spot_at_entry }
+    fn spot_at_exit(&self) -> f64 { self.spot_at_exit }
+    fn net_delta(&self) -> Option<f64> { self.net_delta }
+    fn net_gamma(&self) -> Option<f64> { self.net_gamma }
+    fn hedge_pnl(&self) -> Option<Decimal> { self.hedge_pnl }
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> { self.total_pnl_with_hedge }
+    fn apply_hedge_results(
+        &mut self,
+        position: crate::hedging::HedgePosition,
+        hedge_pnl: Decimal,
+        total_pnl: Decimal,
+        attribution: Option<crate::position::PositionAttribution>,
+    ) {
+        self.hedge_pnl = Some(hedge_pnl);
+        self.total_pnl_with_hedge = Some(total_pnl);
+        self.position_attribution = attribution;
+    }
+}
+
+/// Iron Condor trade result (near spread ± far wings, credit spread)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IronCondorResult {
+    pub symbol: String,
+    pub earnings_date: NaiveDate,
+    pub earnings_time: EarningsTime,
+    pub near_call_strike: Strike,
+    pub near_put_strike: Strike,
+    pub far_call_strike: Strike,
+    pub far_put_strike: Strike,
+    pub expiration: NaiveDate,
+
+    pub entry_time: DateTime<Utc>,
+    pub entry_credit: Decimal,
+    pub exit_time: DateTime<Utc>,
+    pub exit_cost: Decimal,
+
+    pub pnl: Decimal,
+    pub pnl_pct: Decimal,
+
+    pub net_delta: Option<f64>,
+    pub net_gamma: Option<f64>,
+    pub net_theta: Option<f64>,
+    pub net_vega: Option<f64>,
+
+    pub iv_entry: Option<f64>,
+    pub iv_exit: Option<f64>,
+
+    pub spot_at_entry: f64,
+    pub spot_at_exit: f64,
+
+    pub success: bool,
+    pub failure_reason: Option<FailureReason>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hedge_pnl: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_pnl_with_hedge: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_attribution: Option<crate::position::PositionAttribution>,
+}
+
+impl IronCondorResult {
+    pub fn is_winner(&self) -> bool {
+        self.success && self.pnl > Decimal::ZERO
+    }
+}
+
+impl crate::trade::TradeResult for IronCondorResult {
+    fn symbol(&self) -> &str { &self.symbol }
+    fn pnl(&self) -> Decimal { self.pnl }
+    fn entry_cost(&self) -> Decimal { self.entry_credit }
+    fn exit_value(&self) -> Decimal { self.exit_cost }
+    fn success(&self) -> bool { self.success }
+    fn entry_time(&self) -> DateTime<Utc> { self.entry_time }
+    fn exit_time(&self) -> DateTime<Utc> { self.exit_time }
+    fn spot_at_entry(&self) -> f64 { self.spot_at_entry }
+    fn spot_at_exit(&self) -> f64 { self.spot_at_exit }
+    fn net_delta(&self) -> Option<f64> { self.net_delta }
+    fn net_gamma(&self) -> Option<f64> { self.net_gamma }
+    fn hedge_pnl(&self) -> Option<Decimal> { self.hedge_pnl }
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> { self.total_pnl_with_hedge }
+    fn apply_hedge_results(
+        &mut self,
+        position: crate::hedging::HedgePosition,
+        hedge_pnl: Decimal,
+        total_pnl: Decimal,
+        attribution: Option<crate::position::PositionAttribution>,
+    ) {
+        self.hedge_pnl = Some(hedge_pnl);
+        self.total_pnl_with_hedge = Some(total_pnl);
+        self.position_attribution = attribution;
+    }
+}
+
 // ============================================================================
 // CompositeTrade Implementations
 // ============================================================================
@@ -1206,6 +1517,48 @@ impl CompositeTrade for CalendarStraddle {
             (&self.short_put, LegPosition::Short),
             (&self.long_call, LegPosition::Long),
             (&self.long_put, LegPosition::Long),
+        ]
+    }
+}
+
+impl CompositeTrade for Strangle {
+    fn legs(&self) -> Vec<(&OptionLeg, LegPosition)> {
+        vec![
+            (&self.call_leg, LegPosition::Long),
+            (&self.put_leg, LegPosition::Long),
+        ]
+    }
+}
+
+impl CompositeTrade for Butterfly {
+    fn legs(&self) -> Vec<(&OptionLeg, LegPosition)> {
+        vec![
+            (&self.short_call, LegPosition::Short),
+            (&self.short_put, LegPosition::Short),
+            (&self.long_upper_call, LegPosition::Long),
+            (&self.long_lower_put, LegPosition::Long),
+        ]
+    }
+}
+
+impl CompositeTrade for Condor {
+    fn legs(&self) -> Vec<(&OptionLeg, LegPosition)> {
+        vec![
+            (&self.near_call, LegPosition::Short),
+            (&self.near_put, LegPosition::Short),
+            (&self.far_upper_call, LegPosition::Long),
+            (&self.far_lower_put, LegPosition::Long),
+        ]
+    }
+}
+
+impl CompositeTrade for IronCondor {
+    fn legs(&self) -> Vec<(&OptionLeg, LegPosition)> {
+        vec![
+            (&self.near_call, LegPosition::Short),
+            (&self.near_put, LegPosition::Short),
+            (&self.far_upper_call, LegPosition::Long),
+            (&self.far_lower_put, LegPosition::Long),
         ]
     }
 }
