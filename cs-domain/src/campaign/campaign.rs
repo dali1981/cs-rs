@@ -4,7 +4,7 @@ use chrono::{NaiveDate, NaiveTime};
 use crate::{
     EarningsEvent, OptionStrategy, ExpirationPolicy,
     TradingCalendar, TradingPeriodSpec, RollPolicy,
-    value_objects::{IronButterflyConfig, TradeDirection},
+    value_objects::{IronButterflyConfig, TradeDirection, MultiLegStrategyConfig},
 };
 use crate::datetime::eastern_to_utc;
 use super::{TradingSession, SessionAction, SessionContext, EarningsTimingType, PeriodPolicy};
@@ -39,6 +39,9 @@ pub struct TradingCampaign {
 
     /// Iron butterfly wing configuration (optional, for IronButterfly strategy)
     pub iron_butterfly_config: Option<IronButterflyConfig>,
+
+    /// Multi-leg strategy configuration (optional, for new multi-leg strategies)
+    pub multi_leg_strategy_config: Option<MultiLegStrategyConfig>,
 
     /// Trade direction (Short by default, Long if inverted)
     pub trade_direction: TradeDirection,
@@ -130,6 +133,7 @@ impl TradingCampaign {
                         timing_type,
                     },
                     iron_butterfly_config: self.iron_butterfly_config.clone(),
+                    multi_leg_strategy_config: self.multi_leg_strategy_config.clone(),
                     trade_direction: self.trade_direction,
                 });
             }
@@ -229,6 +233,7 @@ impl TradingCampaign {
                     earnings_after,
                 },
                 iron_butterfly_config: self.iron_butterfly_config.clone(),
+                multi_leg_strategy_config: self.multi_leg_strategy_config.clone(),
                 trade_direction: self.trade_direction,
             });
 
@@ -274,6 +279,7 @@ impl TradingCampaign {
                 action,
                 context: SessionContext::Standalone { note: None },
                 iron_butterfly_config: self.iron_butterfly_config.clone(),
+                multi_leg_strategy_config: self.multi_leg_strategy_config.clone(),
                 trade_direction: self.trade_direction,
             });
 

@@ -1,7 +1,7 @@
 // cs-domain/src/campaign/session.rs
 
 use chrono::{DateTime, NaiveDate, Utc};
-use crate::{EarningsEvent, OptionStrategy, value_objects::{IronButterflyConfig, TradeDirection}};
+use crate::{EarningsEvent, OptionStrategy, value_objects::{IronButterflyConfig, TradeDirection, MultiLegStrategyConfig}};
 
 /// A session is the atomic unit of trading
 ///
@@ -29,6 +29,9 @@ pub struct TradingSession {
 
     /// Iron butterfly wing configuration (if strategy is IronButterfly)
     pub iron_butterfly_config: Option<IronButterflyConfig>,
+
+    /// Multi-leg strategy configuration (if strategy is a multi-leg strategy)
+    pub multi_leg_strategy_config: Option<MultiLegStrategyConfig>,
 
     /// Trade direction (defaults to Short)
     pub trade_direction: TradeDirection,

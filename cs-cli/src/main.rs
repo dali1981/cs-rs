@@ -359,7 +359,10 @@ enum Commands {
         /// Track realized volatility during hedging
         #[arg(long)]
         track_realized_vol: bool,
-        /// Wing selection mode for iron butterfly (delta:0.25 or moneyness:0.10)
+        /// Volatility strategy type: iron-butterfly, strangle, butterfly, condor, iron-condor
+        #[arg(long, default_value = "iron-butterfly")]
+        vol_strategy: String,
+        /// Wing selection mode for multi-leg strategies (delta:0.25 or moneyness:0.10)
         #[arg(long)]
         wing_mode: Option<String>,
         /// Trade direction (short or long) - applies to all strategies
@@ -585,6 +588,7 @@ async fn main() -> Result<()> {
             hv_window,
             attribution,
             track_realized_vol,
+            vol_strategy,
             wing_mode,
             direction,
             output,
@@ -594,6 +598,7 @@ async fn main() -> Result<()> {
                 cli.data_dir.as_ref(),
                 symbols,
                 &strategy,
+                &vol_strategy,
                 &period_policy,
                 &roll_policy,
                 &start,
@@ -2073,6 +2078,7 @@ async fn run_campaign_command(
     data_dir: Option<&PathBuf>,
     symbols: Vec<String>,
     strategy: &str,
+    vol_strategy: &str,
     period_policy: &str,
     roll_policy: &str,
     start: &str,
@@ -2104,7 +2110,7 @@ async fn run_campaign_command(
         TradingCampaign, SessionSchedule, OptionStrategy, PeriodPolicy, RollPolicy,
         ExpirationPolicy, TradingPeriodSpec,
         infrastructure::{FinqOptionsRepository, FinqEquityRepository},
-        value_objects::{IronButterflyConfig, TradeDirection},
+        value_objects::{IronButterflyConfig, TradeDirection, MultiLegStrategyConfig, MultiLegStrategyType},
     };
     use cs_backtest::{SessionExecutor, DefaultTradeFactory, ExecutionConfig};
     use chrono::NaiveDate;
@@ -2259,7 +2265,14 @@ async fn run_campaign_command(
 
     println!("Loaded {} earnings events", earnings_calendar.len());
 
-    // Parse wing mode and trade direction
+    // Parse trade direction
+    let trade_direction = match direction.to_lowercase().as_str() {
+        "long" => TradeDirection::Long,
+        "short" => TradeDirection::Short,
+        _ => anyhow::bail!("Invalid direction: {}. Use 'short' or 'long'", direction),
+    };
+
+    // Parse wing mode and multi-leg strategy config
     let iron_butterfly_config = if strategy == OptionStrategy::IronButterfly {
         if let Some(mode_str) = wing_mode {
             Some(IronButterflyConfig::from_cli_arg(mode_str)
@@ -2271,10 +2284,35 @@ async fn run_campaign_command(
         None
     };
 
-    let trade_direction = match direction.to_lowercase().as_str() {
-        "long" => TradeDirection::Long,
-        "short" => TradeDirection::Short,
-        _ => anyhow::bail!("Invalid direction: {}. Use 'short' or 'long'", direction),
+    // Parse multi-leg strategy config for new strategies
+    let multi_leg_strategy_config = if strategy == OptionStrategy::IronButterfly {
+        // For IronButterfly, we still use the legacy IronButterflyConfig
+        // TODO: Migrate to MultiLegStrategyConfig in future refactoring
+        None
+    } else {
+        // For new strategies, parse the vol_strategy and wing_mode
+        let strategy_type: MultiLegStrategyType = vol_strategy.parse()
+            .map_err(|e| anyhow::anyhow!("Failed to parse vol-strategy '{}': {}", vol_strategy, e))?;
+
+        // Create config based on strategy type with default moneyness-based wings (10% OTM)
+        let config = match strategy_type {
+            MultiLegStrategyType::Strangle => {
+                MultiLegStrategyConfig::strangle_delta(0.25).with_direction(trade_direction)
+            }
+            MultiLegStrategyType::Butterfly => {
+                MultiLegStrategyConfig::butterfly_delta(0.25).with_direction(trade_direction)
+            }
+            MultiLegStrategyType::Condor => {
+                MultiLegStrategyConfig::condor_delta(0.25, 0.35).with_direction(trade_direction)
+            }
+            MultiLegStrategyType::IronCondor => {
+                MultiLegStrategyConfig::iron_condor_delta(0.20, 0.10).with_direction(trade_direction)
+            }
+            MultiLegStrategyType::IronButterfly => {
+                MultiLegStrategyConfig::iron_butterfly_delta(0.25).with_direction(trade_direction)
+            }
+        };
+        Some(config)
     };
 
     // Create campaigns for each discovered symbol
@@ -2290,6 +2328,7 @@ async fn run_campaign_command(
                 min_date: start_date,
             },
             iron_butterfly_config: iron_butterfly_config.clone(),
+            multi_leg_strategy_config: multi_leg_strategy_config.clone(),
             trade_direction,
         })
         .collect();
