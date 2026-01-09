@@ -1,0 +1,18 @@
+# Straddle Strategy: Enter 1 month before earnings, exit 15 days later
+# Filters: Market cap > $1 billion
+#
+# Timing:
+#   - Entry: 20 trading days before earnings
+#   - Exit: 5 trading days before earnings
+#   - Hold: ~15 trading days (20 - 5)
+#
+# This captures IV expansion before earnings announcement (AMC or BMO)
+
+start_date = "2025-10-01"
+end_date = "2025-10-31"
+
+spread = "straddle"
+straddle_entry_days = 20
+straddle_exit_days = 5
+
+min_market_cap = 1_000_000_000  # $1 billion
