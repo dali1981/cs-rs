@@ -11,6 +11,7 @@
 mod traits;
 mod types;
 pub(crate) mod helpers;
+pub(crate) mod cost_helpers;
 
 // Trade implementations (ExecutableTrade impls)
 pub(crate) mod straddle_impl;

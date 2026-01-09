@@ -195,6 +195,11 @@ impl TradingCostConfig {
     pub fn fixed_per_leg(cost_per_leg: Decimal) -> Self {
         Self::FixedPerLeg { cost_per_leg }
     }
+
+    /// Check if this config will produce non-zero costs
+    pub fn has_costs(&self) -> bool {
+        !matches!(self, Self::None)
+    }
 }
 
 impl CostPreset {
@@ -214,7 +219,7 @@ impl CostPreset {
 
 impl Default for TradingCostConfig {
     fn default() -> Self {
-        Self::Preset { name: CostPreset::Normal }
+        Self::None  // Explicit opt-in for costs
     }
 }
 

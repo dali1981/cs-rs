@@ -59,4 +59,5 @@ pub use accounting::{
 pub use trading_costs::{
     TradingCost, TradingCostBreakdown, TradeSide, TradingContext, LegContext,
     TradeType, TradingCostCalculator, TradingCostConfig, CostPreset,
+    HasTradingCost, ApplyCosts,
 };

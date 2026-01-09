@@ -392,6 +392,78 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
     }
 }
 
+// Cost aggregation methods for types that implement HasTradingCost
+impl<R: TradeResultMethods + cs_domain::HasTradingCost> BacktestResult<R> {
+    /// Check if any trades have trading costs applied
+    pub fn has_trading_costs(&self) -> bool {
+        self.results.iter().any(|r| r.has_costs())
+    }
+
+    /// Total trading costs across all trades
+    pub fn total_trading_costs(&self) -> Decimal {
+        self.results.iter()
+            .filter_map(|r| r.total_costs())
+            .sum()
+    }
+
+    /// Total gross P&L before costs
+    ///
+    /// For trades with costs, uses the stored gross P&L.
+    /// For trades without costs, uses the current P&L (which is gross).
+    pub fn total_gross_pnl(&self) -> Decimal {
+        self.results.iter()
+            .map(|r| r.gross_pnl().unwrap_or_else(|| r.pnl()))
+            .sum()
+    }
+
+    /// Total slippage costs across all trades
+    pub fn total_slippage(&self) -> Decimal {
+        self.results.iter()
+            .filter_map(|r| r.cost_summary())
+            .map(|cs| cs.costs.breakdown.slippage)
+            .sum()
+    }
+
+    /// Total commission costs across all trades
+    pub fn total_commissions(&self) -> Decimal {
+        self.results.iter()
+            .filter_map(|r| r.cost_summary())
+            .map(|cs| cs.costs.breakdown.commission)
+            .sum()
+    }
+
+    /// Cost impact as percentage of gross P&L
+    ///
+    /// Shows how much of the gross P&L was consumed by trading costs.
+    /// Returns 0.0 if gross P&L is zero.
+    pub fn cost_impact_pct(&self) -> f64 {
+        use rust_decimal::prelude::ToPrimitive;
+
+        let gross = self.total_gross_pnl();
+        if gross.is_zero() {
+            return 0.0;
+        }
+
+        let costs = self.total_trading_costs();
+        (costs / gross.abs()).to_f64().unwrap_or(0.0) * 100.0
+    }
+
+    /// Number of trades that had costs applied
+    pub fn trades_with_costs(&self) -> usize {
+        self.results.iter().filter(|r| r.has_costs()).count()
+    }
+
+    /// Average cost per trade (only for trades with costs)
+    pub fn avg_cost_per_trade(&self) -> Decimal {
+        let count = self.trades_with_costs();
+        if count == 0 {
+            Decimal::ZERO
+        } else {
+            self.total_trading_costs() / Decimal::from(count)
+        }
+    }
+}
+
 /// Session progress callback
 #[derive(Debug, Clone)]
 pub struct SessionProgress {
@@ -757,13 +829,16 @@ where
     /// Create execution config based on spread type
     fn create_execution_config(&self) -> ExecutionConfig {
         use crate::config::SpreadType;
-        match self.config.spread {
+        let base_config = match self.config.spread {
             SpreadType::Calendar => ExecutionConfig::for_calendar_spread(self.config.max_entry_iv),
             SpreadType::IronButterfly => ExecutionConfig::for_iron_butterfly(self.config.max_entry_iv),
             SpreadType::Straddle => ExecutionConfig::for_straddle(self.config.max_entry_iv),
             SpreadType::CalendarStraddle => ExecutionConfig::for_calendar_straddle(self.config.max_entry_iv),
             SpreadType::PostEarningsStraddle => ExecutionConfig::for_straddle(self.config.max_entry_iv),
-        }
+        };
+
+        // Add trading costs config from backtest config
+        base_config.with_trading_costs(self.config.trading_costs.clone())
     }
 
     fn passes_market_cap_filter(&self, event: &EarningsEvent) -> bool {

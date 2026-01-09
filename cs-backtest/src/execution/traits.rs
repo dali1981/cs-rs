@@ -3,10 +3,11 @@
 use chrono::{DateTime, Utc};
 use polars::prelude::DataFrame;
 use cs_analytics::IVSurface;
-use cs_domain::{EarningsEvent, TradeResult};
+use cs_domain::{EarningsEvent, TradeResult, TradeType, ApplyCosts};
 use crate::spread_pricer::PricingError;
 use super::types::ExecutionError;
 use super::types::{ExecutionConfig, SimulationOutput};
+use super::cost_helpers::ToTradingContext;
 
 /// Generic pricing interface for trade pricers
 ///
@@ -46,13 +47,18 @@ pub trait ExecutableTrade: Sized + Send + Sync {
     type Pricer: TradePricer<Trade = Self, Pricing = Self::Pricing>;
 
     /// Pricing output from the pricer (must match Pricer::Pricing)
-    type Pricing;
+    /// Clone is needed for cost calculation (we clone pricing to keep original for costs)
+    type Pricing: Clone + ToTradingContext;
 
     /// Final execution result type
-    type Result: TradeResult;
+    /// ApplyCosts is needed for post-processing cost application
+    type Result: TradeResult + ApplyCosts;
 
     /// Get symbol (for data fetching)
     fn symbol(&self) -> &str;
+
+    /// Get the trade type (for cost calculations)
+    fn trade_type() -> TradeType;
 
     /// Validate entry pricing against config
     ///
@@ -70,6 +76,9 @@ pub trait ExecutableTrade: Sized + Send + Sync {
     /// the business context (earnings date/time) - keeping them separate.
     ///
     /// `event` is optional to support non-earnings scenarios like rolling trades.
+    ///
+    /// NOTE: Results contain GROSS P&L. Trading costs are applied separately via
+    /// the `ApplyCosts` trait at the executor level (post-processing pattern).
     fn to_result(
         &self,
         entry_pricing: Self::Pricing,

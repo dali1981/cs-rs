@@ -19,6 +19,10 @@ impl ExecutableTrade for CalendarSpread {
         self.symbol()
     }
 
+    fn trade_type() -> cs_domain::TradeType {
+        cs_domain::TradeType::CalendarSpread
+    }
+
     fn validate_entry(
         pricing: &CompositePricing,
         config: &ExecutionConfig,
@@ -84,11 +88,11 @@ impl ExecutableTrade for CalendarSpread {
         let short_exit = &exit_pricing.legs[0].0;
         let long_exit = &exit_pricing.legs[1].0;
 
-        // Calculate P&L (per-share first, then multiply by contract multiplier)
+        // Calculate GROSS P&L (trading costs applied separately via ApplyCosts trait)
         let pnl_per_share = exit_pricing.net_cost - entry_pricing.net_cost;
         let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
-        let pnl_pct = if entry_pricing.net_cost != Decimal::ZERO {
-            (pnl_per_share / entry_pricing.net_cost) * Decimal::from(100)
+        let pnl_pct = if entry_pricing.net_cost.abs() > Decimal::ZERO {
+            (pnl / (entry_pricing.net_cost.abs() * Decimal::from(CONTRACT_MULTIPLIER))) * Decimal::from(100)
         } else {
             Decimal::ZERO
         };
@@ -160,6 +164,7 @@ impl ExecutableTrade for CalendarSpread {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,  // Costs applied separately via ApplyCosts trait
         }
     }
 
@@ -223,6 +228,7 @@ impl ExecutableTrade for CalendarSpread {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,
         }
     }
 }

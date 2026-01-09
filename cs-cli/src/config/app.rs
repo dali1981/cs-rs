@@ -34,6 +34,9 @@ pub struct AppConfig {
     pub parallel: bool,
     pub max_entry_iv: Option<f64>,
     pub min_notional: Option<f64>,
+    /// Trading costs configuration (slippage + commission)
+    #[serde(default)]
+    pub trading_costs: cs_domain::TradingCostConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,6 +124,7 @@ impl Default for AppConfig {
             parallel: true,
             max_entry_iv: None,
             min_notional: None,
+            trading_costs: cs_domain::TradingCostConfig::default(),
         }
     }
 }
@@ -363,6 +367,7 @@ impl AppConfig {
             } else {
                 None
             },
+            trading_costs: self.trading_costs.clone(),
         }
     }
 

@@ -19,6 +19,10 @@ impl ExecutableTrade for IronButterfly {
         self.symbol()
     }
 
+    fn trade_type() -> cs_domain::TradeType {
+        cs_domain::TradeType::IronButterfly
+    }
+
     fn validate_entry(
         pricing: &CompositePricing,
         config: &ExecutionConfig,
@@ -97,14 +101,11 @@ impl ExecutableTrade for IronButterfly {
         let entry_credit = -entry_pricing.net_cost;
         let exit_cost = -exit_pricing.net_cost;
 
-        // P&L calculation for credit spread:
-        // Entry: receive credit (positive)
-        // Exit: pay to close (cost)
-        // P&L = entry_credit - exit_cost
+        // Calculate GROSS P&L (trading costs applied separately via ApplyCosts trait)
         let pnl_per_share = entry_credit - exit_cost;
         let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
-        let pnl_pct = if entry_credit != Decimal::ZERO {
-            (pnl_per_share / entry_credit) * Decimal::from(100)
+        let pnl_pct = if entry_credit.abs() > Decimal::ZERO {
+            (pnl / (entry_credit.abs() * Decimal::from(CONTRACT_MULTIPLIER))) * Decimal::from(100)
         } else {
             Decimal::ZERO
         };
@@ -204,6 +205,7 @@ impl ExecutableTrade for IronButterfly {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,  // Costs applied separately via ApplyCosts trait
         }
     }
 
@@ -266,6 +268,7 @@ impl ExecutableTrade for IronButterfly {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,
         }
     }
 }

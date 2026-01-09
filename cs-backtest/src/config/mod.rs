@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use cs_analytics::{PricingModel, InterpolationMode};
 use cs_domain::{
     TimingConfig, TradeSelectionCriteria, StrikeMatchMode, HedgeConfig, AttributionConfig,
-    TradingRange, TradingPeriodSpec, FilterCriteria,
+    TradingRange, TradingPeriodSpec, FilterCriteria, TradingCostConfig,
 };
 
 // Infrastructure config types (separated into submodules)
@@ -86,6 +86,9 @@ pub struct BacktestConfig {
     /// P&L attribution configuration (optional)
     #[serde(default)]
     pub attribution_config: Option<AttributionConfig>,
+    /// Trading costs configuration (slippage + commission)
+    #[serde(default)]
+    pub trading_costs: TradingCostConfig,
 }
 
 fn default_wing_width() -> f64 {
@@ -208,6 +211,7 @@ impl Default for BacktestConfig {
             post_earnings_holding_days: default_post_earnings_holding_days(),
             hedge_config: HedgeConfig::default(), // No hedging by default
             attribution_config: None, // No attribution by default
+            trading_costs: TradingCostConfig::default(), // No costs by default (explicit opt-in)
         }
     }
 }

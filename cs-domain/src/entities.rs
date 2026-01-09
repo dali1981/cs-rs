@@ -5,6 +5,27 @@ use serde::{Serialize, Deserialize};
 
 use crate::value_objects::*;
 
+/// Cost summary for a trade (encapsulates all cost-related information)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CostSummary {
+    /// Detailed trading cost breakdown (slippage + commission)
+    pub costs: crate::TradingCost,
+    /// Gross P&L before costs were deducted
+    pub gross_pnl: Decimal,
+}
+
+impl CostSummary {
+    /// Create a new cost summary
+    pub fn new(costs: crate::TradingCost, gross_pnl: Decimal) -> Self {
+        Self { costs, gross_pnl }
+    }
+
+    /// Net P&L after costs (gross_pnl - total costs)
+    pub fn net_pnl(&self) -> Decimal {
+        self.gross_pnl - self.costs.total
+    }
+}
+
 // Submodule for rolling results
 pub mod rolling_result;
 pub use rolling_result::{RollingResult, RollPeriod, RollReason};
@@ -14,6 +35,9 @@ pub mod rollable_impls;
 
 // HasAccounting trait implementations for trade results
 pub mod accounting_impls;
+
+// HasTradingCost trait implementations for trade results
+pub mod cost_impls;
 
 /// Earnings event for a symbol
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -854,6 +878,12 @@ pub struct CalendarSpreadResult {
     // Integrated position attribution (when hedging is enabled)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position_attribution: Option<crate::position::PositionAttribution>,
+
+    // Trading costs (optional)
+    /// Cost summary (gross P&L + trading costs breakdown)
+    /// When present, pnl field represents NET P&L (after costs)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_summary: Option<CostSummary>,
 }
 
 impl CalendarSpreadResult {
@@ -967,6 +997,12 @@ pub struct IronButterflyResult {
     // Integrated position attribution (when hedging is enabled)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position_attribution: Option<crate::position::PositionAttribution>,
+
+    // Trading costs (optional)
+    /// Cost summary (gross P&L + trading costs breakdown)
+    /// When present, pnl field represents NET P&L (after costs)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_summary: Option<CostSummary>,
 }
 
 impl IronButterflyResult {
@@ -1070,6 +1106,12 @@ pub struct StraddleResult {
     // Integrated position attribution (when hedging is enabled)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position_attribution: Option<crate::position::PositionAttribution>,
+
+    // Trading costs (optional)
+    /// Cost summary (gross P&L + trading costs breakdown)
+    /// When present, pnl field represents NET P&L (after costs)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_summary: Option<CostSummary>,
 }
 
 impl StraddleResult {
@@ -1160,6 +1202,12 @@ pub struct CalendarStraddleResult {
     // Integrated position attribution (when hedging is enabled)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position_attribution: Option<crate::position::PositionAttribution>,
+
+    // Trading costs (optional)
+    /// Cost summary (gross P&L + trading costs breakdown)
+    /// When present, pnl field represents NET P&L (after costs)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_summary: Option<CostSummary>,
 }
 
 impl CalendarStraddleResult {
@@ -1229,6 +1277,11 @@ pub struct StrangleResult {
     pub total_pnl_with_hedge: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position_attribution: Option<crate::position::PositionAttribution>,
+
+    /// Cost summary (gross P&L + trading costs breakdown)
+    /// When present, pnl field represents NET P&L (after costs)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_summary: Option<CostSummary>,
 }
 
 impl StrangleResult {
@@ -1305,6 +1358,11 @@ pub struct ButterflyResult {
     pub total_pnl_with_hedge: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position_attribution: Option<crate::position::PositionAttribution>,
+
+    /// Cost summary (gross P&L + trading costs breakdown)
+    /// When present, pnl field represents NET P&L (after costs)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_summary: Option<CostSummary>,
 }
 
 impl ButterflyResult {
@@ -1382,6 +1440,11 @@ pub struct CondorResult {
     pub total_pnl_with_hedge: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position_attribution: Option<crate::position::PositionAttribution>,
+
+    /// Cost summary (gross P&L + trading costs breakdown)
+    /// When present, pnl field represents NET P&L (after costs)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_summary: Option<CostSummary>,
 }
 
 impl CondorResult {
@@ -1459,6 +1522,11 @@ pub struct IronCondorResult {
     pub total_pnl_with_hedge: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position_attribution: Option<crate::position::PositionAttribution>,
+
+    /// Cost summary (gross P&L + trading costs breakdown)
+    /// When present, pnl field represents NET P&L (after costs)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_summary: Option<CostSummary>,
 }
 
 impl IronCondorResult {

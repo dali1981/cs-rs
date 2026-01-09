@@ -16,6 +16,10 @@ impl ExecutableTrade for IronCondor {
         self.symbol()
     }
 
+    fn trade_type() -> cs_domain::TradeType {
+        cs_domain::TradeType::IronCondor
+    }
+
     fn validate_entry(
         pricing: &IronCondorPricing,
         config: &ExecutionConfig,
@@ -93,6 +97,7 @@ impl ExecutableTrade for IronCondor {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,
         }
     }
 
@@ -223,6 +228,7 @@ impl ExecutableTrade for IronCondor {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,  // Costs applied separately via ApplyCosts trait
         }
     }
 }

@@ -16,6 +16,10 @@ impl ExecutableTrade for Strangle {
         self.symbol()
     }
 
+    fn trade_type() -> cs_domain::TradeType {
+        cs_domain::TradeType::Strangle
+    }
+
     fn validate_entry(
         pricing: &StranglePricing,
         config: &ExecutionConfig,
@@ -94,6 +98,7 @@ impl ExecutableTrade for Strangle {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,
         }
     }
 
@@ -104,14 +109,11 @@ impl ExecutableTrade for Strangle {
         output: &SimulationOutput,
         event: Option<&EarningsEvent>,
     ) -> StrangleResult {
-        // P&L for long strangle (debit spread):
-        // Entry: pay debit
-        // Exit: receive credit (or pay more to close)
-        // P&L = exit_credit - entry_debit
+        // Calculate GROSS P&L (trading costs applied separately via ApplyCosts trait)
         let pnl_per_share = exit_pricing.entry_debit - entry_pricing.entry_debit;
         let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
-        let pnl_pct = if entry_pricing.entry_debit != Decimal::ZERO {
-            (pnl_per_share / entry_pricing.entry_debit) * Decimal::from(100)
+        let pnl_pct = if entry_pricing.entry_debit.abs() > Decimal::ZERO {
+            (pnl / (entry_pricing.entry_debit.abs() * Decimal::from(CONTRACT_MULTIPLIER))) * Decimal::from(100)
         } else {
             Decimal::ZERO
         };
@@ -200,6 +202,7 @@ impl ExecutableTrade for Strangle {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,  // Costs applied separately via ApplyCosts trait
         }
     }
 }

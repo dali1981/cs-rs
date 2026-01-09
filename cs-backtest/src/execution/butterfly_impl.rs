@@ -16,6 +16,10 @@ impl ExecutableTrade for Butterfly {
         self.symbol()
     }
 
+    fn trade_type() -> cs_domain::TradeType {
+        cs_domain::TradeType::Butterfly
+    }
+
     fn validate_entry(
         pricing: &ButterflyPricing,
         config: &ExecutionConfig,
@@ -92,6 +96,7 @@ impl ExecutableTrade for Butterfly {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,
         }
     }
 
@@ -221,6 +226,7 @@ impl ExecutableTrade for Butterfly {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,  // Costs applied separately via ApplyCosts trait
         }
     }
 }

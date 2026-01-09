@@ -170,7 +170,26 @@ where
         };
 
         let mut result = match simulator.run(trade, &self.pricer).await {
-            Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, event),
+            Ok(raw) => {
+                let mut result = trade.to_result(raw.entry_pricing.clone(), raw.exit_pricing.clone(), &raw.output, event);
+                // Apply trading costs (post-processing pattern)
+                if self.config.has_trading_costs() {
+                    use crate::execution::cost_helpers::{apply_costs_to_result, ToTradingContext};
+                    apply_costs_to_result(
+                        &mut result,
+                        &raw.entry_pricing,
+                        &raw.exit_pricing,
+                        ExecutableTrade::symbol(trade),
+                        raw.output.entry_spot,
+                        raw.output.exit_spot,
+                        raw.output.entry_time,
+                        raw.output.exit_time,
+                        T::trade_type(),
+                        &self.config,
+                    );
+                }
+                result
+            }
             Err(err) => trade.to_failed_result(&simulator.failed_output(), event, err),
         };
 

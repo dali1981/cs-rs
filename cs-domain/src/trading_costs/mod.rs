@@ -20,9 +20,11 @@ mod cost;
 mod context;
 mod calculator;
 mod config;
+mod has_cost;
 pub mod models;
 
 pub use cost::{TradingCost, TradingCostBreakdown, TradeSide};
 pub use context::{TradingContext, TradeType, LegContext};
 pub use calculator::TradingCostCalculator;
 pub use config::{TradingCostConfig, CostPreset};
+pub use has_cost::{HasTradingCost, ApplyCosts};

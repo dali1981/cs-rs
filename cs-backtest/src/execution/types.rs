@@ -87,6 +87,11 @@ impl ExecutionConfig {
         self.trading_costs.build()
     }
 
+    /// Check if trading costs are configured (non-zero)
+    pub fn has_trading_costs(&self) -> bool {
+        self.trading_costs.has_costs()
+    }
+
     /// Create strategy-specific config based on option strategy type
     ///
     /// This factory method maps each OptionStrategy to its correct ExecutionConfig

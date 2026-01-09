@@ -6,7 +6,7 @@ use console::style;
 use tabled::{Table, Tabled};
 
 use cs_backtest::{BacktestResult, TradeResultMethods, UnifiedBacktestResult};
-use cs_domain::{TradeResult as TradeResultTrait, HasAccounting};
+use cs_domain::{TradeResult as TradeResultTrait, HasAccounting, HasTradingCost};
 
 use crate::display::ResultRow;
 
@@ -24,13 +24,14 @@ impl BacktestOutputHandler {
         Self::display_dropped_events(result);
     }
 
-    /// Display backtest results with capital-weighted metrics
+    /// Display backtest results with capital-weighted metrics and trading costs
     pub fn display_with_accounting<R>(result: &BacktestResult<R>)
     where
-        R: TradeResultTrait + TradeResultMethods + HasAccounting,
+        R: TradeResultTrait + TradeResultMethods + HasAccounting + HasTradingCost,
     {
         Self::display_summary(result);
         Self::display_capital_weighted(result);
+        Self::display_trading_costs(result);
         Self::display_sample_trades(result);
         Self::display_dropped_events(result);
     }
@@ -147,6 +148,71 @@ impl BacktestOutputHandler {
             ResultRow {
                 metric: "Total Capital Deployed".into(),
                 value: format!("${:.2}", total_capital),
+            },
+        ];
+
+        let table = Table::new(rows);
+        println!("{}", table);
+        println!();
+    }
+
+    /// Display trading costs breakdown (only if costs were applied)
+    fn display_trading_costs<R>(result: &BacktestResult<R>)
+    where
+        R: TradeResultTrait + TradeResultMethods + HasTradingCost,
+    {
+        // Only display if costs were actually applied
+        if !result.has_trading_costs() {
+            return;
+        }
+
+        println!("{}", style("Trading Costs:").bold().magenta());
+
+        let total_costs = result.total_trading_costs();
+        let gross_pnl = result.total_gross_pnl();
+        let net_pnl = result.total_pnl();
+        let slippage = result.total_slippage();
+        let commissions = result.total_commissions();
+        let cost_impact = result.cost_impact_pct();
+        let avg_cost = result.avg_cost_per_trade();
+        let trades_with_costs = result.trades_with_costs();
+
+        let rows = vec![
+            ResultRow {
+                metric: "Gross P&L".into(),
+                value: format!("${:.2}", gross_pnl),
+            },
+            ResultRow {
+                metric: "Total Costs".into(),
+                value: format!("${:.2}", total_costs),
+            },
+            ResultRow {
+                metric: "  - Slippage".into(),
+                value: format!("${:.2}", slippage),
+            },
+            ResultRow {
+                metric: "  - Commissions".into(),
+                value: format!("${:.2}", commissions),
+            },
+            ResultRow {
+                metric: "Net P&L".into(),
+                value: format!("${:.2}", net_pnl),
+            },
+            ResultRow {
+                metric: "".into(),
+                value: "".into(),
+            },
+            ResultRow {
+                metric: "Cost Impact".into(),
+                value: format!("{:.2}% of gross P&L", cost_impact),
+            },
+            ResultRow {
+                metric: "Avg Cost per Trade".into(),
+                value: format!("${:.2}", avg_cost),
+            },
+            ResultRow {
+                metric: "Trades with Costs".into(),
+                value: format!("{} of {}", trades_with_costs, result.results.len()),
             },
         ];
 

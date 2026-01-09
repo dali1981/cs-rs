@@ -19,6 +19,10 @@ impl ExecutableTrade for CalendarStraddle {
         self.symbol()
     }
 
+    fn trade_type() -> cs_domain::TradeType {
+        cs_domain::TradeType::CalendarStraddle
+    }
+
     fn validate_entry(
         pricing: &CompositePricing,
         config: &ExecutionConfig,
@@ -88,11 +92,11 @@ impl ExecutableTrade for CalendarStraddle {
         let long_call_exit = &exit_pricing.legs[2].0;
         let long_put_exit = &exit_pricing.legs[3].0;
 
-        // Calculate P&L (per-share first, then multiply by contract multiplier)
+        // Calculate GROSS P&L (trading costs applied separately via ApplyCosts trait)
         let pnl_per_share = exit_pricing.net_cost - entry_pricing.net_cost;
         let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
-        let pnl_pct = if entry_pricing.net_cost != Decimal::ZERO {
-            (pnl_per_share / entry_pricing.net_cost) * Decimal::from(100)
+        let pnl_pct = if entry_pricing.net_cost.abs() > Decimal::ZERO {
+            (pnl / (entry_pricing.net_cost.abs() * Decimal::from(CONTRACT_MULTIPLIER))) * Decimal::from(100)
         } else {
             Decimal::ZERO
         };
@@ -195,6 +199,7 @@ impl ExecutableTrade for CalendarStraddle {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,  // Costs applied separately via ApplyCosts trait
         }
     }
 
@@ -252,6 +257,7 @@ impl ExecutableTrade for CalendarStraddle {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,
         }
     }
 }

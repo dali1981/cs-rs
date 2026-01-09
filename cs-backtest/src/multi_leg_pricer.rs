@@ -9,7 +9,7 @@ use polars::prelude::*;
 use rust_decimal::Decimal;
 
 use cs_analytics::IVSurface;
-use cs_domain::{Strangle, Butterfly, Condor, IronCondor};
+use cs_domain::{Strangle, Butterfly, Condor, IronCondor, TradingContext, LegContext, TradeType};
 use crate::spread_pricer::{SpreadPricer, LegPricing, PricingError};
 use crate::execution::TradePricer;
 
@@ -23,6 +23,24 @@ pub struct StranglePricing {
     pub call: LegPricing,
     pub put: LegPricing,
     pub entry_debit: Decimal,
+}
+
+impl StranglePricing {
+    /// Create a TradingContext for cost calculations
+    pub fn to_trading_context(
+        &self,
+        symbol: &str,
+        spot: f64,
+        time: DateTime<Utc>,
+        trade_type: TradeType,
+    ) -> TradingContext {
+        // Strangle: long call + long put
+        let legs = vec![
+            LegContext::long(self.call.price, self.call.iv),
+            LegContext::long(self.put.price, self.put.iv),
+        ];
+        TradingContext::new(legs, symbol.to_string(), spot, time, trade_type)
+    }
 }
 
 /// Pricer for strangles
@@ -102,6 +120,26 @@ pub struct ButterflyPricing {
     pub long_upper_call: LegPricing,
     pub long_lower_put: LegPricing,
     pub entry_debit: Decimal,
+}
+
+impl ButterflyPricing {
+    /// Create a TradingContext for cost calculations
+    pub fn to_trading_context(
+        &self,
+        symbol: &str,
+        spot: f64,
+        time: DateTime<Utc>,
+        trade_type: TradeType,
+    ) -> TradingContext {
+        // Butterfly: short straddle + long wings
+        let legs = vec![
+            LegContext::short(self.short_call.price, self.short_call.iv),
+            LegContext::short(self.short_put.price, self.short_put.iv),
+            LegContext::long(self.long_upper_call.price, self.long_upper_call.iv),
+            LegContext::long(self.long_lower_put.price, self.long_lower_put.iv),
+        ];
+        TradingContext::new(legs, symbol.to_string(), spot, time, trade_type)
+    }
 }
 
 /// Pricer for butterflies
@@ -213,6 +251,26 @@ pub struct CondorPricing {
     pub entry_debit: Decimal,
 }
 
+impl CondorPricing {
+    /// Create a TradingContext for cost calculations
+    pub fn to_trading_context(
+        &self,
+        symbol: &str,
+        spot: f64,
+        time: DateTime<Utc>,
+        trade_type: TradeType,
+    ) -> TradingContext {
+        // Condor: short near + long far
+        let legs = vec![
+            LegContext::short(self.near_call.price, self.near_call.iv),
+            LegContext::short(self.near_put.price, self.near_put.iv),
+            LegContext::long(self.far_upper_call.price, self.far_upper_call.iv),
+            LegContext::long(self.far_lower_put.price, self.far_lower_put.iv),
+        ];
+        TradingContext::new(legs, symbol.to_string(), spot, time, trade_type)
+    }
+}
+
 /// Pricer for condors
 pub struct CondorPricer {
     inner: SpreadPricer,
@@ -320,6 +378,26 @@ pub struct IronCondorPricing {
     pub far_upper_call: LegPricing,
     pub far_lower_put: LegPricing,
     pub net_credit: Decimal,
+}
+
+impl IronCondorPricing {
+    /// Create a TradingContext for cost calculations
+    pub fn to_trading_context(
+        &self,
+        symbol: &str,
+        spot: f64,
+        time: DateTime<Utc>,
+        trade_type: TradeType,
+    ) -> TradingContext {
+        // Iron Condor: short near + long far (credit spread)
+        let legs = vec![
+            LegContext::short(self.near_call.price, self.near_call.iv),
+            LegContext::short(self.near_put.price, self.near_put.iv),
+            LegContext::long(self.far_upper_call.price, self.far_upper_call.iv),
+            LegContext::long(self.far_lower_put.price, self.far_lower_put.iv),
+        ];
+        TradingContext::new(legs, symbol.to_string(), spot, time, trade_type)
+    }
 }
 
 /// Pricer for iron condors
