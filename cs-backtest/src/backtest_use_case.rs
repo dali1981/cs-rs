@@ -387,67 +387,76 @@ where
         let criteria = self.build_expiration_criteria();
         let exec_config = self.create_execution_config();
 
-        let start_date = self.config.start_date;
-        let end_date = self.config.end_date;
+        // ===== NEW TRADE-CENTRIC APPROACH =====
+
+        // 1. Determine trading range and timing spec
+        let trading_range = self.config.trading_range();
+        let timing_spec = self.config.timing_spec();
+        let filter_criteria = self.config.filter_criteria();
 
         info!(
             spread = ?self.config.spread,
-            start = %start_date,
-            end = %end_date,
-            "Starting backtest"
+            start = %trading_range.start,
+            end = %trading_range.end,
+            "Starting trade-centric backtest"
         );
 
-        for session_date in TradingCalendar::trading_days_between(start_date, end_date) {
-            sessions_processed += 1;
+        // 2. Calculate event search range based on timing
+        let (search_start, search_end) = timing_spec.event_search_range(&trading_range);
 
-            // Load earnings events for this session
-            let events = self.load_earnings_for_strategy(session_date, strategy).await?;
+        debug!(
+            search_start = %search_start,
+            search_end = %search_end,
+            "Loading events in search range"
+        );
 
-            // Filter events where entry_date == session_date
-            let to_enter: Vec<_> = events
-                .iter()
-                .filter(|e| strategy.entry_date(e) == session_date)
-                .filter(|e| self.passes_market_cap_filter(e))
-                .cloned()
-                .collect();
+        // 3. Load all potentially relevant events
+        let all_events = self.earnings_repo
+            .load_earnings(search_start, search_end, self.config.symbols.as_deref())
+            .await
+            .map_err(|e| BacktestError::Repository(e.to_string()))?;
 
-            if to_enter.is_empty() {
-                self.report_progress(&on_progress, session_date, 0, 0);
-                continue;
-            }
+        info!(events_loaded = all_events.len(), "Events loaded");
 
-            debug!(
-                session_date = %session_date,
-                events_count = to_enter.len(),
-                "Processing session"
-            );
+        // 4. Discover tradable events (entry date in trading range)
+        let tradable_events = trading_range.discover_tradable_events(&all_events, &timing_spec);
 
-            // Execute trades (parallel or sequential)
-            let session_results = self.execute_batch(
-                &to_enter,
-                strategy,
-                &*selector,
-                &criteria,
-                &exec_config,
-            ).await;
+        info!(tradable_events = tradable_events.len(), "Tradable events discovered");
 
-            // Collect and filter results
-            let mut session_entries = 0;
-            let min_iv_ratio = self.config.selection.min_iv_ratio;
-            for (result_opt, event) in session_results.into_iter().zip(to_enter.iter()) {
-                total_opportunities += 1;
-                if let Some(result) = result_opt {
-                    if strategy.apply_filter(&result, min_iv_ratio) {
-                        all_results.push(result);
-                        session_entries += 1;
-                    } else if let Some(error) = strategy.create_filter_error(&result, event) {
-                        dropped_events.push(error);
-                    }
+        // 5. Filter by market cap and other criteria
+        let filtered_events: Vec<_> = tradable_events
+            .into_iter()
+            .filter(|te| filter_criteria.symbol_matches(te.symbol()))
+            .filter(|te| filter_criteria.market_cap_matches(te.event.market_cap))
+            .collect();
+
+        info!(filtered_events = filtered_events.len(), "Events after filtering");
+
+        total_opportunities = filtered_events.len();
+
+        // 6. Execute trades (trade-by-trade)
+        let tradable_refs: Vec<&TradableEvent> = filtered_events.iter().collect();
+        let batch_results = self.execute_tradable_batch(
+            &tradable_refs,
+            strategy,
+            &*selector,
+            &criteria,
+            &exec_config,
+        ).await;
+
+        // 7. Collect and apply post-execution filters
+        let min_iv_ratio = self.config.selection.min_iv_ratio;
+        for (result_opt, tradable) in batch_results.into_iter().zip(filtered_events.iter()) {
+            if let Some(result) = result_opt {
+                if strategy.apply_filter(&result, min_iv_ratio) {
+                    all_results.push(result);
+                } else if let Some(error) = strategy.create_filter_error(&result, &tradable.event) {
+                    dropped_events.push(error);
                 }
             }
-
-            self.report_progress(&on_progress, session_date, session_entries, to_enter.len());
         }
+
+        sessions_processed = 1; // Single pass in new model
 
         let total_entries = all_results.len();
 
@@ -468,7 +477,47 @@ where
         })
     }
 
-    /// Execute a batch of trades (parallel or sequential based on config)
+    /// Execute a batch of tradable events (NEW: trade-centric)
+    ///
+    /// Takes resolved TradableEvent objects with pre-computed entry/exit times.
+    async fn execute_tradable_batch<S, R>(
+        &self,
+        tradable_events: &[&TradableEvent],
+        strategy: &S,
+        selector: &dyn StrikeSelector,
+        criteria: &ExpirationCriteria,
+        exec_config: &ExecutionConfig,
+    ) -> Vec<Option<R>>
+    where
+        S: TradeStrategy<R> + Sync,
+        R: TradeResultMethods + Send,
+    {
+        let events: Vec<&EarningsEvent> = tradable_events.iter().map(|te| &te.event).collect();
+
+        crate::execution::run_batch(&events, self.config.parallel, |event| {
+            // Find the corresponding TradableEvent for this event
+            let tradable = tradable_events.iter()
+                .find(|te| te.symbol() == event.symbol && te.earnings_date() == event.earnings_date)
+                .expect("TradableEvent must exist for every event");
+
+            strategy.execute_trade(
+                self.options_repo.as_ref(),
+                self.equity_repo.as_ref(),
+                selector,
+                criteria,
+                exec_config,
+                event,
+                tradable.entry_datetime(),
+                tradable.exit_datetime(),
+            )
+        }).await
+    }
+
+    /// Execute a batch of trades (OLD: date-centric - deprecated)
+    ///
+    /// This is the old method kept for backwards compatibility.
+    /// New code should use execute_tradable_batch instead.
+    #[allow(dead_code)]
     async fn execute_batch<S, R>(
         &self,
         events: &[EarningsEvent],
@@ -497,12 +546,16 @@ where
         }).await
     }
 
-    /// Load earnings events for a strategy
+    /// Load earnings events for a strategy (OLD: date-centric - deprecated)
+    ///
+    /// This method is deprecated in favor of loading all events at once
+    /// and using TradingRange.discover_tradable_events() for filtering.
     ///
     /// Different strategies need different lookahead windows:
     /// - Earnings timing: small window around session date
     /// - Straddle timing: large lookahead (entry N days before earnings)
     /// - Post-earnings: lookback (entry after earnings)
+    #[allow(dead_code)]
     async fn load_earnings_for_strategy<S, R>(
         &self,
         session_date: NaiveDate,
@@ -534,7 +587,10 @@ where
             .map_err(|e| BacktestError::Repository(e.to_string()))
     }
 
-    /// Report progress to callback
+    /// Report progress to callback (OLD: date-centric - deprecated)
+    ///
+    /// This is no longer used in trade-centric execution but kept for compatibility.
+    #[allow(dead_code)]
     fn report_progress(
         &self,
         on_progress: &Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
