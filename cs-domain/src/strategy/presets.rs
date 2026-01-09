@@ -44,6 +44,7 @@ pub fn pre_earnings_straddle_hedged() -> TradeStrategy {
         contract_multiplier: CONTRACT_MULTIPLIER,
         delta_computation: crate::hedging::DeltaComputation::default(),
         track_realized_vol: false,
+        margin_rate: 0.5,
     };
     strategy
 }

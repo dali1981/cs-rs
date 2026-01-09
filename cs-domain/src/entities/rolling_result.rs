@@ -200,7 +200,10 @@ impl RollingResult {
         })
     }
 
-    /// Compute capital summary from rolls (Phase 2d)
+    /// Compute capital summary from rolls (Phase 2d + Issue C fix)
+    ///
+    /// Issue C: For short premium strategies, entry_debit is negative (credit received).
+    /// We now separate long option premium (cash outlay) from short option margin.
     fn compute_capital_summary(
         rolls: &[RollPeriod],
         total_pnl: Decimal,
@@ -211,7 +214,23 @@ impl RollingResult {
             return None;
         }
 
-        // Total option premium = sum of entry debits
+        // Issue C fix: Separate long option premium from short option margin
+        // Long option premium = sum of positive entry_debits (cash outlay)
+        let long_option_premium: Decimal = rolls.iter()
+            .map(|r| r.entry_debit)
+            .filter(|d| *d > Decimal::ZERO)
+            .sum();
+
+        // Short option margin = 3x the absolute credit received (conservative estimate)
+        // This approximates typical broker margin requirements for short premium
+        const SHORT_MARGIN_MULTIPLIER: i32 = 3;
+        let short_option_margin: Decimal = rolls.iter()
+            .map(|r| r.entry_debit)
+            .filter(|d| *d < Decimal::ZERO)
+            .map(|d| d.abs() * Decimal::from(SHORT_MARGIN_MULTIPLIER))
+            .sum();
+
+        // Legacy field: net of all entry_debits (for backward compatibility)
         let total_option_premium: Decimal = rolls.iter()
             .map(|r| r.entry_debit)
             .sum();
@@ -230,9 +249,10 @@ impl RollingResult {
             .max()
             .unwrap_or(Decimal::ZERO);
 
-        // Total capital = option premium + max(peak_long_capital, peak_short_margin)
+        // Total capital = long_option_premium + short_option_margin + max(hedge_capital, hedge_margin)
+        // This ensures credit strategies require margin, not negative capital
         let hedge_capital = peak_hedge_capital.max(peak_hedge_margin);
-        let total_capital_required = total_option_premium + hedge_capital;
+        let total_capital_required = long_option_premium + short_option_margin + hedge_capital;
 
         // Holding period in days
         let holding_days = (end_date - start_date).num_days();
@@ -254,6 +274,8 @@ impl RollingResult {
         };
 
         Some(CapitalSummary {
+            long_option_premium,
+            short_option_margin,
             total_option_premium,
             peak_hedge_capital,
             peak_hedge_margin,
@@ -428,8 +450,12 @@ pub struct HedgeCapitalMetrics {
     pub peak_long_shares: i32,
     /// Peak short shares held (absolute)
     pub peak_short_shares: i32,
-    /// Average hedge price
+    /// Average hedge price (for reporting)
     pub avg_hedge_price: f64,
+    /// Spot price at peak long shares (Issue B fix - used for capital)
+    pub peak_long_spot: f64,
+    /// Spot price at peak short shares (Issue B fix - used for margin)
+    pub peak_short_spot: f64,
     /// Capital required for long hedge
     pub long_capital: Decimal,
     /// Margin required for short hedge
@@ -437,15 +463,26 @@ pub struct HedgeCapitalMetrics {
 }
 
 /// Aggregated capital metrics across all rolls
+///
+/// Issue C fix: Separates long option premium (cash outlay) from short option
+/// margin requirement. Previously summed all entry_debits which incorrectly
+/// reduced capital for short premium strategies.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapitalSummary {
-    /// Total option premium (sum of entry_debit)
+    /// Total option premium paid (sum of positive entry_debits only)
+    /// This is the cash outlay for long option positions
+    pub long_option_premium: Decimal,
+    /// Estimated margin for short option positions
+    /// Computed as 3x the credit received (conservative estimate)
+    pub short_option_margin: Decimal,
+    /// Legacy field: net of all entry_debits (may be negative for credit strategies)
+    /// Kept for backward compatibility in reporting
     pub total_option_premium: Decimal,
     /// Peak hedge capital (max across rolls)
     pub peak_hedge_capital: Decimal,
     /// Peak hedge margin (max across rolls)
     pub peak_hedge_margin: Decimal,
-    /// Total capital required = option_premium + max(hedge_capital, hedge_margin)
+    /// Total capital required = long_option_premium + short_option_margin + hedge_capital
     pub total_capital_required: Decimal,
     /// Return on capital: total_pnl / total_capital_required
     pub return_on_capital: f64,

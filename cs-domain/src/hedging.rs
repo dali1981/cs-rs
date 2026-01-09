@@ -129,16 +129,28 @@ pub struct HedgePosition {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub realized_vol_metrics: Option<RealizedVolatilityMetrics>,
 
-    // Capital tracking (Phase 2a)
+    // Capital tracking (Phase 2a + Issue B fix)
     /// Peak long shares held during hedging
     #[serde(default)]
     pub peak_long_shares: i32,
     /// Peak short shares held during hedging (absolute value)
     #[serde(default)]
     pub peak_short_shares: i32,
-    /// Average hedge price (for capital computation)
+    /// Average hedge price (for reporting only - use peak spot for capital)
     #[serde(default)]
     pub avg_hedge_price: f64,
+    /// Spot price when peak long shares was reached (for capital calculation)
+    #[serde(default)]
+    pub peak_long_spot: f64,
+    /// Spot price when peak short shares was reached (for margin calculation)
+    #[serde(default)]
+    pub peak_short_spot: f64,
+
+    // Unwind cost tracking (Issue A fix)
+    /// Transaction cost for unwinding the hedge at exit
+    /// This is computed during finalize() and added to total_cost
+    #[serde(default)]
+    pub unwind_cost: Decimal,
 }
 
 impl HedgePosition {
@@ -151,12 +163,15 @@ impl HedgePosition {
         self.cumulative_shares += action.shares;
         self.total_cost += action.cost;
 
-        // Track peak shares (Phase 2a)
+        // Track peak shares and spot at peak (Phase 2a + Issue B fix)
+        // Using spot at peak is more robust than average price for capital
         if self.cumulative_shares > self.peak_long_shares {
             self.peak_long_shares = self.cumulative_shares;
+            self.peak_long_spot = action.spot_price;
         }
         if self.cumulative_shares < 0 && self.cumulative_shares.abs() > self.peak_short_shares {
             self.peak_short_shares = self.cumulative_shares.abs();
+            self.peak_short_spot = action.spot_price;
         }
 
         self.hedges.push(action);
@@ -179,17 +194,29 @@ impl HedgePosition {
         self.hedges.len()
     }
 
-    /// Average hedge price (for reporting)
+    /// Average hedge price (for reporting and capital calculation)
+    ///
+    /// Uses absolute value of shares for weighting to avoid sign issues.
+    /// Previously used signed shares which caused avg to explode or flip sign
+    /// when net position approached zero (Issue B fix).
     pub fn average_hedge_price(&self) -> Option<f64> {
         if self.hedges.is_empty() {
             return None;
         }
-        let total_value: f64 = self.hedges.iter().map(|h| h.shares as f64 * h.spot_price).sum();
-        let total_shares: i32 = self.hedges.iter().map(|h| h.shares).sum();
-        if total_shares == 0 {
+        // Use abs(shares) for weighting - prevents division by near-zero
+        // and nonsensical averages when buys and sells offset
+        let total_value: f64 = self.hedges
+            .iter()
+            .map(|h| h.shares.abs() as f64 * h.spot_price)
+            .sum();
+        let total_abs_shares: i32 = self.hedges
+            .iter()
+            .map(|h| h.shares.abs())
+            .sum();
+        if total_abs_shares == 0 {
             None
         } else {
-            Some(total_value / total_shares as f64)
+            Some(total_value / total_abs_shares as f64)
         }
     }
 
@@ -200,16 +227,21 @@ impl HedgePosition {
         }
     }
 
-    /// Compute capital required for long hedge position (Phase 2a)
+    /// Compute capital required for long hedge position (Phase 2a + Issue B fix)
+    ///
+    /// Uses peak_shares × spot_at_peak instead of average price.
+    /// This is more robust when hedge positions flip between long and short.
     pub fn long_hedge_capital(&self) -> Decimal {
-        Decimal::from(self.peak_long_shares) * Decimal::try_from(self.avg_hedge_price).unwrap_or_default()
+        Decimal::from(self.peak_long_shares) * Decimal::try_from(self.peak_long_spot).unwrap_or_default()
     }
 
-    /// Compute margin required for short hedge position (Phase 2a)
+    /// Compute margin required for short hedge position (Phase 2a + Issue B fix)
+    ///
+    /// Uses peak_shares × spot_at_peak instead of average price.
     /// Default margin rate is 0.5 (50%)
     pub fn short_hedge_margin(&self, margin_rate: f64) -> Decimal {
         Decimal::from(self.peak_short_shares)
-            * Decimal::try_from(self.avg_hedge_price).unwrap_or_default()
+            * Decimal::try_from(self.peak_short_spot).unwrap_or_default()
             * Decimal::try_from(margin_rate).unwrap_or(Decimal::from_str("0.5").unwrap())
     }
 
@@ -281,7 +313,7 @@ impl HedgePosition {
                 spot_price: exit_spot,
                 delta_before: 0.0, // Delta at exit (option position closing)
                 delta_after: 0.0,  // Zero after unwind
-                cost: Decimal::ZERO, // No transaction cost for unwind (already accounted)
+                cost: self.unwind_cost, // Transaction cost for unwinding (computed in finalize)
                 rv_to_date,
                 gamma_pnl,
                 cumulative_hedge_pnl: final_pnl,
@@ -333,6 +365,15 @@ pub struct HedgeConfig {
     /// Whether to compute and report realized volatility metrics
     #[serde(default)]
     pub track_realized_vol: bool,
+
+    /// Margin rate for short hedge positions (Issue D fix)
+    /// Default is 0.5 (50%). Typical broker requirements range from 25-50%.
+    #[serde(default = "default_margin_rate")]
+    pub margin_rate: f64,
+}
+
+fn default_margin_rate() -> f64 {
+    0.5
 }
 
 impl Default for HedgeConfig {
@@ -345,6 +386,7 @@ impl Default for HedgeConfig {
             contract_multiplier: CONTRACT_MULTIPLIER,
             delta_computation: DeltaComputation::default(),
             track_realized_vol: false,
+            margin_rate: default_margin_rate(),
         }
     }
 }
@@ -548,6 +590,13 @@ impl HedgeState {
     pub fn finalize(mut self, exit_spot: f64) -> HedgePosition {
         // Calculate unrealized P&L
         self.position.unrealized_pnl = self.position.calculate_pnl(exit_spot);
+
+        // Compute unwind cost for closing the hedge at exit (Issue A fix)
+        let unwind_shares = self.position.cumulative_shares.abs();
+        let unwind_cost = self.config.transaction_cost_per_share * Decimal::from(unwind_shares);
+        self.position.unwind_cost = unwind_cost;
+        self.position.total_cost += unwind_cost;
+
         self.position
     }
 }
@@ -732,6 +781,13 @@ impl<P: DeltaProvider> GenericHedgeState<P> {
     /// Finalize and compute P&L
     pub fn finalize(mut self, exit_spot: f64, entry_iv: Option<f64>, exit_iv: Option<f64>) -> HedgePosition {
         self.position.unrealized_pnl = self.position.calculate_pnl(exit_spot);
+
+        // Compute unwind cost for closing the hedge at exit (Issue A fix)
+        // The unwind trade requires selling/buying back all remaining shares
+        let unwind_shares = self.position.cumulative_shares.abs();
+        let unwind_cost = self.config.transaction_cost_per_share * Decimal::from(unwind_shares);
+        self.position.unwind_cost = unwind_cost;
+        self.position.total_cost += unwind_cost;
 
         // Compute average hedge price for capital metrics
         self.position.compute_avg_hedge_price();

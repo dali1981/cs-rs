@@ -670,17 +670,25 @@ where
             realized_vol_metrics: result.hedge_position()
                 .and_then(|hp| hp.realized_vol_metrics.clone()),
 
-            // Extract capital metrics from hedge position (Phase 2b)
-            hedge_capital: result.hedge_position().map(|hp| {
-                use cs_domain::entities::rolling_result::HedgeCapitalMetrics;
-                HedgeCapitalMetrics {
-                    peak_long_shares: hp.peak_long_shares,
-                    peak_short_shares: hp.peak_short_shares,
-                    avg_hedge_price: hp.avg_hedge_price,
-                    long_capital: hp.long_hedge_capital(),
-                    short_margin: hp.short_hedge_margin(0.5),  // 50% margin
-                }
-            }),
+            // Extract capital metrics from hedge position (Phase 2b + Issue B/D fix)
+            hedge_capital: {
+                let margin_rate = self.hedge_config
+                    .as_ref()
+                    .map(|c| c.margin_rate)
+                    .unwrap_or(0.5);
+                result.hedge_position().map(|hp| {
+                    use cs_domain::entities::rolling_result::HedgeCapitalMetrics;
+                    HedgeCapitalMetrics {
+                        peak_long_shares: hp.peak_long_shares,
+                        peak_short_shares: hp.peak_short_shares,
+                        avg_hedge_price: hp.avg_hedge_price,
+                        peak_long_spot: hp.peak_long_spot,
+                        peak_short_spot: hp.peak_short_spot,
+                        long_capital: hp.long_hedge_capital(),
+                        short_margin: hp.short_hedge_margin(margin_rate),
+                    }
+                })
+            },
 
             // Detailed hedge trades with per-trade metrics (includes unwind at exit)
             hedge_trade_details: result.hedge_position().map(|hp| {

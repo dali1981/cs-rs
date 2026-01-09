@@ -53,6 +53,13 @@ pub struct TimingConfig {
     pub entry_minute: u32,
     pub exit_hour: u32,
     pub exit_minute: u32,
+    // Generic timing specification fields
+    pub timing_strategy: Option<String>,
+    pub entry_days_before: Option<u16>,
+    pub exit_days_before: Option<u16>,
+    pub entry_offset: Option<i16>,
+    pub holding_days: Option<u16>,
+    pub exit_days_after: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +112,9 @@ pub struct HedgingConfig {
     pub delta_mode: String,  // "gamma", "entry-hv", "entry-iv", "current-hv", "current-iv", "historical-iv"
     pub hv_window: u32,  // HV lookback window in days
     pub track_realized_vol: bool,
+    /// Margin rate for short hedge positions (Issue D fix)
+    /// Default is 0.5 (50%). Typical broker requirements range from 25-50%.
+    pub margin_rate: Option<f64>,
 }
 
 // Default implementations
@@ -150,6 +160,12 @@ impl Default for TimingConfig {
             entry_minute: MarketTime::DEFAULT_ENTRY.minute,
             exit_hour: MarketTime::DEFAULT_HEDGE_CHECK.hour,
             exit_minute: MarketTime::DEFAULT_HEDGE_CHECK.minute,
+            timing_strategy: None,
+            entry_days_before: None,
+            exit_days_before: None,
+            entry_offset: None,
+            holding_days: None,
+            exit_days_after: None,
         }
     }
 }
@@ -206,6 +222,7 @@ impl Default for HedgingConfig {
             delta_mode: "gamma".to_string(),
             hv_window: 20,
             track_realized_vol: false,
+            margin_rate: None, // Will use default 0.5 (50%)
         }
     }
 }
@@ -332,6 +349,13 @@ impl AppConfig {
                 exit_hour: self.timing.exit_hour,
                 exit_minute: self.timing.exit_minute,
             },
+            // Generic timing fields
+            timing_strategy: self.timing.timing_strategy.clone(),
+            entry_days_before: self.timing.entry_days_before,
+            exit_days_before: self.timing.exit_days_before,
+            entry_offset: self.timing.entry_offset,
+            holding_days: self.timing.holding_days,
+            exit_days_after: self.timing.exit_days_after,
             selection: cs_domain::TradeSelectionCriteria {
                 min_short_dte: self.selection.min_short_dte,
                 max_short_dte: self.selection.max_short_dte,
@@ -424,6 +448,7 @@ impl AppConfig {
             delta_computation,
             // Auto-enable RV tracking when attribution is enabled (attribution needs vol data)
             track_realized_vol: self.hedging.track_realized_vol || self.attribution.enabled,
+            margin_rate: self.hedging.margin_rate.unwrap_or(0.5),
         }
     }
 }
@@ -442,6 +467,7 @@ pub fn build_hedge_config_from_args(
     hv_window: u32,
     track_realized_vol: bool,
     attribution_enabled: bool,
+    margin_rate: Option<f64>,
 ) -> Option<cs_domain::HedgeConfig> {
     use cs_domain::{HedgeConfig, HedgeStrategy};
     use chrono::Duration;
@@ -491,5 +517,6 @@ pub fn build_hedge_config_from_args(
         contract_multiplier: 100,
         delta_computation,
         track_realized_vol: track_realized_vol || attribution_enabled,
+        margin_rate: margin_rate.unwrap_or(0.5),
     })
 }
