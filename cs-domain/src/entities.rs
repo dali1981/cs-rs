@@ -770,8 +770,10 @@ pub struct TradeOpportunity {
 pub struct CalendarSpreadResult {
     // Identification
     pub symbol: String,
-    pub earnings_date: NaiveDate,
-    pub earnings_time: EarningsTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_date: Option<NaiveDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_time: Option<EarningsTime>,
     pub strike: Strike,
     /// Long leg strike if different from short (diagonal spread)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -879,8 +881,10 @@ impl CalendarSpreadResult {
 pub struct IronButterflyResult {
     // Identification
     pub symbol: String,
-    pub earnings_date: NaiveDate,
-    pub earnings_time: EarningsTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_date: Option<NaiveDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_time: Option<EarningsTime>,
     pub center_strike: Strike,
     pub upper_strike: Strike,
     pub lower_strike: Strike,
@@ -987,8 +991,10 @@ pub enum PricingSource {
 pub struct StraddleResult {
     // Identification
     pub symbol: String,
-    pub earnings_date: NaiveDate,
-    pub earnings_time: EarningsTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_date: Option<NaiveDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_time: Option<EarningsTime>,
     pub strike: Strike,
     pub expiration: NaiveDate,
 
@@ -1075,8 +1081,10 @@ impl StraddleResult {
 pub struct CalendarStraddleResult {
     // Identification
     pub symbol: String,
-    pub earnings_date: NaiveDate,
-    pub earnings_time: EarningsTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_date: Option<NaiveDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_time: Option<EarningsTime>,
     pub short_strike: Strike,
     pub long_strike: Strike,
     pub short_expiry: NaiveDate,
@@ -1169,8 +1177,10 @@ impl CalendarStraddleResult {
 pub struct StrangleResult {
     // Identification
     pub symbol: String,
-    pub earnings_date: NaiveDate,
-    pub earnings_time: EarningsTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_date: Option<NaiveDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_time: Option<EarningsTime>,
     pub call_strike: Strike,
     pub put_strike: Strike,
     pub expiration: NaiveDate,
@@ -1255,8 +1265,10 @@ impl crate::trade::TradeResult for StrangleResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ButterflyResult {
     pub symbol: String,
-    pub earnings_date: NaiveDate,
-    pub earnings_time: EarningsTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_date: Option<NaiveDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_time: Option<EarningsTime>,
     pub short_strike: Strike,
     pub upper_strike: Strike,
     pub lower_strike: Strike,
@@ -1329,8 +1341,10 @@ impl crate::trade::TradeResult for ButterflyResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CondorResult {
     pub symbol: String,
-    pub earnings_date: NaiveDate,
-    pub earnings_time: EarningsTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_date: Option<NaiveDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_time: Option<EarningsTime>,
     pub near_call_strike: Strike,
     pub near_put_strike: Strike,
     pub far_call_strike: Strike,
@@ -1404,8 +1418,10 @@ impl crate::trade::TradeResult for CondorResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IronCondorResult {
     pub symbol: String,
-    pub earnings_date: NaiveDate,
-    pub earnings_time: EarningsTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_date: Option<NaiveDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub earnings_time: Option<EarningsTime>,
     pub near_call_strike: Strike,
     pub near_put_strike: Strike,
     pub far_call_strike: Strike,

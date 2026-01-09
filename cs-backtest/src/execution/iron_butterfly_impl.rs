@@ -80,7 +80,7 @@ impl ExecutableTrade for IronButterfly {
         entry_pricing: CompositePricing,
         exit_pricing: CompositePricing,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
     ) -> IronButterflyResult {
         // IronButterfly legs: [0]=short_call, [1]=short_put, [2]=long_call, [3]=long_put
         let short_call_entry = &entry_pricing.legs[0].0;
@@ -155,8 +155,8 @@ impl ExecutableTrade for IronButterfly {
 
         IronButterflyResult {
             symbol: self.symbol().to_string(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
+            earnings_date: event.map(|e| e.earnings_date),
+            earnings_time: event.map(|e| e.earnings_time),
             center_strike: self.center_strike(),
             upper_strike: self.upper_strike(),
             lower_strike: self.lower_strike(),
@@ -210,15 +210,15 @@ impl ExecutableTrade for IronButterfly {
     fn to_failed_result(
         &self,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
         error: ExecutionError,
     ) -> IronButterflyResult {
         let failure_reason = super::helpers::error_to_failure_reason(&error);
 
         IronButterflyResult {
             symbol: self.symbol().to_string(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
+            earnings_date: event.map(|e| e.earnings_date),
+            earnings_time: event.map(|e| e.earnings_time),
             center_strike: self.center_strike(),
             upper_strike: self.upper_strike(),
             lower_strike: self.lower_strike(),

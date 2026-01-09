@@ -62,13 +62,13 @@ impl ExecutableTrade for IronCondor {
     fn to_failed_result(
         &self,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
         error: ExecutionError,
     ) -> IronCondorResult {
         IronCondorResult {
             symbol: self.symbol().to_string(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
+            earnings_date: event.map(|e| e.earnings_date),
+            earnings_time: event.map(|e| e.earnings_time),
             near_call_strike: self.near_call.strike,
             near_put_strike: self.near_put.strike,
             far_call_strike: self.far_upper_call.strike,
@@ -101,7 +101,7 @@ impl ExecutableTrade for IronCondor {
         entry_pricing: IronCondorPricing,
         exit_pricing: IronCondorPricing,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
     ) -> IronCondorResult {
         // P&L for credit spread: entry_credit - exit_cost
         let pnl_per_share = entry_pricing.net_credit - exit_pricing.net_credit;
@@ -197,8 +197,8 @@ impl ExecutableTrade for IronCondor {
 
         IronCondorResult {
             symbol: self.symbol().to_string(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
+            earnings_date: event.map(|e| e.earnings_date),
+            earnings_time: event.map(|e| e.earnings_time),
             near_call_strike: self.near_call.strike,
             near_put_strike: self.near_put.strike,
             far_call_strike: self.far_upper_call.strike,

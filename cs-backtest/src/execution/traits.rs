@@ -68,21 +68,25 @@ pub trait ExecutableTrade: Sized + Send + Sync {
     /// Called when both entry and exit pricing succeed.
     /// The `output` contains simulation data (spots, times), while `event` provides
     /// the business context (earnings date/time) - keeping them separate.
+    ///
+    /// `event` is optional to support non-earnings scenarios like rolling trades.
     fn to_result(
         &self,
         entry_pricing: Self::Pricing,
         exit_pricing: Self::Pricing,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
     ) -> Self::Result;
 
     /// Construct failure result
     ///
     /// Called when execution fails at any point.
+    ///
+    /// `event` is optional to support non-earnings scenarios like rolling trades.
     fn to_failed_result(
         &self,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
         error: ExecutionError,
     ) -> Self::Result;
 }

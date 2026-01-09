@@ -168,8 +168,8 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
             // 3. Simulate and convert to result
             let pricer = CalendarSpreadPricer::new();
             let result = match simulator.run(&trade, &pricer).await {
-                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, event),
-                Err(err) => trade.to_failed_result(&simulator.failed_output(), event, err),
+                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, Some(event)),
+                Err(err) => trade.to_failed_result(&simulator.failed_output(), Some(event), err),
             };
 
             Some(result)
@@ -184,11 +184,11 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
         }
     }
 
-    fn create_filter_error(&self, result: &CalendarSpreadResult, _event: &EarningsEvent) -> Option<TradeGenerationError> {
+    fn create_filter_error(&self, result: &CalendarSpreadResult, event: &EarningsEvent) -> Option<TradeGenerationError> {
         Some(TradeGenerationError {
             symbol: result.symbol.clone(),
-            earnings_date: result.earnings_date,
-            earnings_time: result.earnings_time,
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
             reason: "IV_RATIO_FILTER".into(),
             details: result.iv_ratio().map(|r| format!("IV ratio: {:.2}", r)),
             phase: "filter".into(),
@@ -256,8 +256,8 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
             // 3. Simulate and convert to result
             let pricer = IronButterflyCompositePricer::new();
             let result = match simulator.run(&trade, &pricer).await {
-                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, event),
-                Err(err) => trade.to_failed_result(&simulator.failed_output(), event, err),
+                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, Some(event)),
+                Err(err) => trade.to_failed_result(&simulator.failed_output(), Some(event), err),
             };
 
             Some(result)
@@ -315,8 +315,8 @@ impl TradeStrategy<StraddleResult> for StraddleStrategy {
             // 3. Simulate and convert to result
             let pricer = CompositePricer::default();
             let result = match simulator.run(&trade, &pricer).await {
-                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, event),
-                Err(err) => trade.to_failed_result(&simulator.failed_output(), event, err),
+                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, Some(event)),
+                Err(err) => trade.to_failed_result(&simulator.failed_output(), Some(event), err),
             };
 
             Some(result)
@@ -373,8 +373,8 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
             // 3. Simulate and convert to result
             let pricer = CompositePricer::default();
             let result = match simulator.run(&trade, &pricer).await {
-                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, event),
-                Err(err) => trade.to_failed_result(&simulator.failed_output(), event, err),
+                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, Some(event)),
+                Err(err) => trade.to_failed_result(&simulator.failed_output(), Some(event), err),
             };
 
             Some(result)
@@ -424,8 +424,8 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
             // 3. Simulate and convert to result
             let pricer = CalendarStraddleCompositePricer::new();
             let result = match simulator.run(&trade, &pricer).await {
-                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, event),
-                Err(err) => trade.to_failed_result(&simulator.failed_output(), event, err),
+                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, Some(event)),
+                Err(err) => trade.to_failed_result(&simulator.failed_output(), Some(event), err),
             };
 
             Some(result)
@@ -440,11 +440,11 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
         }
     }
 
-    fn create_filter_error(&self, result: &CalendarStraddleResult, _event: &EarningsEvent) -> Option<TradeGenerationError> {
+    fn create_filter_error(&self, result: &CalendarStraddleResult, event: &EarningsEvent) -> Option<TradeGenerationError> {
         Some(TradeGenerationError {
             symbol: result.symbol.clone(),
-            earnings_date: result.earnings_date,
-            earnings_time: result.earnings_time,
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
             reason: "IV_RATIO_FILTER".into(),
             details: result.iv_ratio().map(|r| format!("IV ratio: {:.2}", r)),
             phase: "filter".into(),

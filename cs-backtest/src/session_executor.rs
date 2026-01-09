@@ -493,7 +493,7 @@ impl SessionExecutor {
         // Execute
         let result = executor.execute(
             &trade,
-            earnings_event,
+            Some(earnings_event),
             session.entry_datetime,
             session.exit_datetime,
         ).await;
@@ -584,7 +584,7 @@ impl SessionExecutor {
         // Execute
         let result = executor.execute(
             &trade,
-            earnings_event,
+            Some(earnings_event),
             session.entry_datetime,
             session.exit_datetime,
         ).await;
@@ -696,7 +696,7 @@ impl SessionExecutor {
         // Execute
         let result = executor.execute(
             &trade,
-            earnings_event,
+            Some(earnings_event),
             session.entry_datetime,
             session.exit_datetime,
         ).await;
@@ -799,7 +799,7 @@ impl SessionExecutor {
         // Execute
         let result = executor.execute(
             &trade,
-            earnings_event,
+            Some(earnings_event),
             session.entry_datetime,
             session.exit_datetime,
         ).await;
@@ -902,7 +902,7 @@ impl SessionExecutor {
         // Execute
         let result = executor.execute(
             &trade,
-            earnings_event,
+            Some(earnings_event),
             session.entry_datetime,
             session.exit_datetime,
         ).await;
@@ -1005,7 +1005,7 @@ impl SessionExecutor {
         // Execute
         let result = executor.execute(
             &trade,
-            earnings_event,
+            Some(earnings_event),
             session.entry_datetime,
             session.exit_datetime,
         ).await;
@@ -1108,7 +1108,7 @@ impl SessionExecutor {
         // Execute
         let result = executor.execute(
             &trade,
-            earnings_event,
+            Some(earnings_event),
             session.entry_datetime,
             session.exit_datetime,
         ).await;

@@ -61,13 +61,13 @@ impl ExecutableTrade for Strangle {
     fn to_failed_result(
         &self,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
         error: ExecutionError,
     ) -> StrangleResult {
         StrangleResult {
             symbol: self.symbol().to_string(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
+            earnings_date: event.map(|e| e.earnings_date),
+            earnings_time: event.map(|e| e.earnings_time),
             call_strike: self.call_leg.strike,
             put_strike: self.put_leg.strike,
             expiration: self.call_leg.expiration,
@@ -102,7 +102,7 @@ impl ExecutableTrade for Strangle {
         entry_pricing: StranglePricing,
         exit_pricing: StranglePricing,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
     ) -> StrangleResult {
         // P&L for long strangle (debit spread):
         // Entry: pay debit
@@ -172,8 +172,8 @@ impl ExecutableTrade for Strangle {
 
         StrangleResult {
             symbol: self.symbol().to_string(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
+            earnings_date: event.map(|e| e.earnings_date),
+            earnings_time: event.map(|e| e.earnings_time),
             call_strike: self.call_leg.strike,
             put_strike: self.put_leg.strike,
             expiration: self.call_leg.expiration,

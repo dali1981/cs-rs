@@ -150,10 +150,12 @@ where
     /// Execute a single trade with optional hedging
     ///
     /// Works for ANY trade implementing ExecutableTrade
+    ///
+    /// `event` is optional to support non-earnings scenarios like rolling trades.
     pub async fn execute(
         &self,
         trade: &T,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
     ) -> <T as ExecutableTrade>::Result {
@@ -161,7 +163,7 @@ where
         let simulator = TradeSimulator {
             options_repo: self.options_repo.as_ref(),
             equity_repo: self.equity_repo.as_ref(),
-            symbol: &event.symbol,
+            symbol: ExecutableTrade::symbol(trade),
             entry_time,
             exit_time,
             config: &self.config,
@@ -261,15 +263,8 @@ where
 
             let exit_dt = self.to_datetime(exit_date, exit_time);
 
-            // Create dummy earnings event for rolling (no actual earnings)
-            let event = EarningsEvent::new(
-                symbol.to_string(),
-                exit_dt.date_naive(),
-                EarningsTime::AfterMarketClose,
-            );
-
-            // Execute WITH HEDGING (the key fix!)
-            let result = self.execute(&trade, &event, entry_dt, exit_dt).await;
+            // Execute WITH HEDGING (no earnings event for rolling trades)
+            let result = self.execute(&trade, None, entry_dt, exit_dt).await;
 
             // Convert to roll period (now includes hedge data!)
             let roll_period = self.to_roll_period(&trade, result, roll_reason);

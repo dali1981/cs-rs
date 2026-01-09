@@ -62,13 +62,13 @@ impl ExecutableTrade for Butterfly {
     fn to_failed_result(
         &self,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
         error: ExecutionError,
     ) -> ButterflyResult {
         ButterflyResult {
             symbol: self.symbol().to_string(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
+            earnings_date: event.map(|e| e.earnings_date),
+            earnings_time: event.map(|e| e.earnings_time),
             short_strike: self.short_call.strike,
             upper_strike: self.long_upper_call.strike,
             lower_strike: self.long_lower_put.strike,
@@ -100,7 +100,7 @@ impl ExecutableTrade for Butterfly {
         entry_pricing: ButterflyPricing,
         exit_pricing: ButterflyPricing,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
     ) -> ButterflyResult {
         let pnl_per_share = exit_pricing.entry_debit - entry_pricing.entry_debit;
         let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
@@ -196,8 +196,8 @@ impl ExecutableTrade for Butterfly {
 
         ButterflyResult {
             symbol: self.symbol().to_string(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
+            earnings_date: event.map(|e| e.earnings_date),
+            earnings_time: event.map(|e| e.earnings_time),
             short_strike: self.short_call.strike,
             upper_strike: self.long_upper_call.strike,
             lower_strike: self.long_lower_put.strike,

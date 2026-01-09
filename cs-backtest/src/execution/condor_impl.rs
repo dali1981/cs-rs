@@ -61,13 +61,13 @@ impl ExecutableTrade for Condor {
     fn to_failed_result(
         &self,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
         error: ExecutionError,
     ) -> CondorResult {
         CondorResult {
             symbol: self.symbol().to_string(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
+            earnings_date: event.map(|e| e.earnings_date),
+            earnings_time: event.map(|e| e.earnings_time),
             near_call_strike: self.near_call.strike,
             near_put_strike: self.near_put.strike,
             far_call_strike: self.far_upper_call.strike,
@@ -100,7 +100,7 @@ impl ExecutableTrade for Condor {
         entry_pricing: CondorPricing,
         exit_pricing: CondorPricing,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
     ) -> CondorResult {
         let pnl_per_share = exit_pricing.entry_debit - entry_pricing.entry_debit;
         let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
@@ -195,8 +195,8 @@ impl ExecutableTrade for Condor {
 
         CondorResult {
             symbol: self.symbol().to_string(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
+            earnings_date: event.map(|e| e.earnings_date),
+            earnings_time: event.map(|e| e.earnings_time),
             near_call_strike: self.near_call.strike,
             near_put_strike: self.near_put.strike,
             far_call_strike: self.far_upper_call.strike,

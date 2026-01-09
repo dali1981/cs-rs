@@ -76,7 +76,7 @@ impl ExecutableTrade for CalendarSpread {
         entry_pricing: CompositePricing,
         exit_pricing: CompositePricing,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
     ) -> CalendarSpreadResult {
         // CalendarSpread legs: [0]=short_leg, [1]=long_leg
         let short_entry = &entry_pricing.legs[0].0;
@@ -107,8 +107,8 @@ impl ExecutableTrade for CalendarSpread {
 
         CalendarSpreadResult {
             symbol: self.symbol().to_string(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
+            earnings_date: event.map(|e| e.earnings_date),
+            earnings_time: event.map(|e| e.earnings_time),
             strike: self.strike(),
             long_strike: if self.short_leg.strike != self.long_leg.strike {
                 Some(self.long_leg.strike)
@@ -166,15 +166,15 @@ impl ExecutableTrade for CalendarSpread {
     fn to_failed_result(
         &self,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
         error: ExecutionError,
     ) -> CalendarSpreadResult {
         let failure_reason = super::helpers::error_to_failure_reason(&error);
 
         CalendarSpreadResult {
             symbol: self.symbol().to_string(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
+            earnings_date: event.map(|e| e.earnings_date),
+            earnings_time: event.map(|e| e.earnings_time),
             strike: self.strike(),
             long_strike: if self.short_leg.strike != self.long_leg.strike {
                 Some(self.long_leg.strike)

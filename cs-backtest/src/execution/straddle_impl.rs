@@ -50,7 +50,7 @@ impl ExecutableTrade for Straddle {
         entry_pricing: CompositePricing,
         exit_pricing: CompositePricing,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
     ) -> StraddleResult {
         // Straddle legs: [0] = call (long), [1] = put (long)
         let call_entry = &entry_pricing.legs[0].0;
@@ -110,8 +110,8 @@ impl ExecutableTrade for Straddle {
 
         StraddleResult {
             symbol: self.symbol().to_string(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
+            earnings_date: event.map(|e| e.earnings_date),
+            earnings_time: event.map(|e| e.earnings_time),
             strike: self.strike(),
             expiration: self.expiration(),
             entry_time: output.entry_time,
@@ -156,15 +156,15 @@ impl ExecutableTrade for Straddle {
     fn to_failed_result(
         &self,
         output: &SimulationOutput,
-        event: &EarningsEvent,
+        event: Option<&EarningsEvent>,
         error: ExecutionError,
     ) -> StraddleResult {
         let failure_reason = super::helpers::error_to_failure_reason(&error);
 
         StraddleResult {
             symbol: self.symbol().to_string(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
+            earnings_date: event.map(|e| e.earnings_date),
+            earnings_time: event.map(|e| e.earnings_time),
             strike: self.strike(),
             expiration: self.expiration(),
             entry_time: output.entry_time,
