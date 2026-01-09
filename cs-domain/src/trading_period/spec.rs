@@ -302,10 +302,18 @@ impl TradingPeriodSpec {
                 //   event_date - N_trading = entry_date ∈ [range.start, range.end]
                 //   event_date ∈ [range.start + N_trading, range.end + N_trading]
                 //
-                // Convert trading days to calendar days (approx: trading * 7/5)
-                let trading_to_calendar = (*entry_days_before as i64 * 7 / 5) + 5; // buffer
-                let search_start = range.start + Duration::days(trading_to_calendar);
-                let search_end = range.end + Duration::days(trading_to_calendar + 30); // extra buffer
+                // Use TradingCalendar for exact calculation
+                let search_start_calc = TradingCalendar::n_trading_days_after(
+                    range.start,
+                    *entry_days_before as usize
+                );
+                let search_end_calc = TradingCalendar::n_trading_days_after(
+                    range.end,
+                    *entry_days_before as usize
+                );
+                // Buffer: previous/next trading day for edge cases
+                let search_start = TradingCalendar::previous_trading_day(search_start_calc);
+                let search_end = TradingCalendar::next_trading_day(search_end_calc);
                 (search_start, search_end)
             }
 
@@ -323,9 +331,17 @@ impl TradingPeriodSpec {
             Self::CrossEarnings { entry_days_before, .. } => {
                 // Entry is before event, exit is after
                 // Similar to PreEarnings for event search
-                let trading_to_calendar = (*entry_days_before as i64 * 7 / 5) + 5;
-                let search_start = range.start + Duration::days(trading_to_calendar);
-                let search_end = range.end + Duration::days(trading_to_calendar + 30);
+                let search_start_calc = TradingCalendar::n_trading_days_after(
+                    range.start,
+                    *entry_days_before as usize
+                );
+                let search_end_calc = TradingCalendar::n_trading_days_after(
+                    range.end,
+                    *entry_days_before as usize
+                );
+                // Buffer: previous/next trading day for edge cases
+                let search_start = TradingCalendar::previous_trading_day(search_start_calc);
+                let search_end = TradingCalendar::next_trading_day(search_end_calc);
                 (search_start, search_end)
             }
 
