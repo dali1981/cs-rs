@@ -43,6 +43,7 @@ parquet = { version = "53", features = ["async"] }
 
 # Math & numerics
 rust_decimal = { version = "1.33", features = ["serde", "serde-with-str"] }
+rust_decimal_macros = "1.33"
 statrs = "0.16"
 roots = "0.0.8"
 nalgebra = "0.33"
@@ -56,6 +57,7 @@ chrono-tz = "0.10"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+toml = "0.8"
 
 # Error handling
 thiserror = "1.0"

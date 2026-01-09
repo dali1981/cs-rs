@@ -9,6 +9,7 @@ finq-core = { workspace = true }
 finq-flatfiles = { workspace = true }
 earnings-rs = { workspace = true }
 rust_decimal = { workspace = true }
+rust_decimal_macros = { workspace = true }
 chrono = { workspace = true }
 chrono-tz = { workspace = true }
 polars = { workspace = true }
@@ -21,3 +22,5 @@ arrow = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+toml = { workspace = true }
+tempfile = "3.10"

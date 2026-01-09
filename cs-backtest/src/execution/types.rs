@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use thiserror::Error;
-use cs_domain::{OptionStrategy, RepositoryError};
+use cs_domain::{OptionStrategy, RepositoryError, TradingCostConfig, TradingCostCalculator};
 use crate::spread_pricer::PricingError;
 
 /// Errors that can occur during trade execution
@@ -30,6 +30,9 @@ pub struct ExecutionConfig {
 
     /// Minimum credit for credit spreads (optional)
     pub min_credit: Option<Decimal>,
+
+    /// Trading costs configuration (slippage + commission)
+    pub trading_costs: TradingCostConfig,
 }
 
 impl ExecutionConfig {
@@ -39,6 +42,7 @@ impl ExecutionConfig {
             max_entry_iv,
             min_entry_cost: Decimal::new(50, 2), // $0.50 minimum for straddles
             min_credit: None,
+            trading_costs: TradingCostConfig::default(),
         }
     }
 
@@ -48,6 +52,7 @@ impl ExecutionConfig {
             max_entry_iv,
             min_entry_cost: Decimal::new(5, 2), // $0.05 minimum for calendar spreads
             min_credit: None,
+            trading_costs: TradingCostConfig::default(),
         }
     }
 
@@ -57,6 +62,7 @@ impl ExecutionConfig {
             max_entry_iv,
             min_entry_cost: Decimal::new(10, 2), // $0.10 minimum credit for iron butterflies
             min_credit: Some(Decimal::new(10, 2)),
+            trading_costs: TradingCostConfig::default(),
         }
     }
 
@@ -66,7 +72,19 @@ impl ExecutionConfig {
             max_entry_iv,
             min_entry_cost: Decimal::new(50, 2), // $0.50 minimum for calendar straddles (like straddles)
             min_credit: None,
+            trading_costs: TradingCostConfig::default(),
         }
+    }
+
+    /// Set custom trading costs configuration
+    pub fn with_trading_costs(mut self, trading_costs: TradingCostConfig) -> Self {
+        self.trading_costs = trading_costs;
+        self
+    }
+
+    /// Build the trading cost calculator from config
+    pub fn cost_calculator(&self) -> Box<dyn TradingCostCalculator> {
+        self.trading_costs.build()
     }
 
     /// Create strategy-specific config based on option strategy type

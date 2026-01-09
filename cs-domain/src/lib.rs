@@ -5,6 +5,8 @@
 /// Standard options contract multiplier (100 shares per contract)
 pub const CONTRACT_MULTIPLIER: i32 = 100;
 
+pub mod accounting;
+pub mod trading_costs;
 pub mod datetime;
 pub mod value_objects;
 pub mod entities;
@@ -50,3 +52,11 @@ pub use campaign::{
     EarningsTimingType, SessionSchedule, PeriodPolicy
 };
 pub use config::{FilterCriteria, PositionSpec, PositionStructure, StrikeSelection};
+pub use accounting::{
+    TradeAccounting, TradeStatistics, CapitalRequirement, CapitalBreakdown,
+    CapitalCalculationMethod, MarginCalculator, HasAccounting,
+};
+pub use trading_costs::{
+    TradingCost, TradingCostBreakdown, TradeSide, TradingContext, LegContext,
+    TradeType, TradingCostCalculator, TradingCostConfig, CostPreset,
+};

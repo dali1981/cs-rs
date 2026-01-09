@@ -127,6 +127,7 @@ impl CampaignUseCase {
             max_entry_iv: None,
             min_entry_cost: Decimal::new(50, 2), // $0.50 minimum
             min_credit: None,
+            trading_costs: cs_domain::TradingCostConfig::default(),
         };
 
         Ok(SessionExecutor::new(

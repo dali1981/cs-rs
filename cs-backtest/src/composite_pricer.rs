@@ -5,6 +5,7 @@ use polars::prelude::DataFrame;
 use rust_decimal::Decimal;
 use cs_analytics::IVSurface;
 use cs_domain::trade::{CompositeTrade, LegPosition};
+use cs_domain::{TradingContext, LegContext, TradeType};
 
 use crate::spread_pricer::{SpreadPricer, PricingError, LegPricing};
 
@@ -144,6 +145,35 @@ impl CompositePricing {
         } else {
             self.avg_iv_from_legs()
         }
+    }
+
+    /// Create a TradingContext from this pricing for cost calculations
+    ///
+    /// This bridges the gap between pricing (pure mid-price) and cost calculations.
+    pub fn to_trading_context(
+        &self,
+        symbol: &str,
+        spot: f64,
+        time: DateTime<Utc>,
+        trade_type: TradeType,
+    ) -> TradingContext {
+        // Build leg contexts from pricing
+        let legs: Vec<LegContext> = self.legs.iter()
+            .map(|(leg_pricing, position)| {
+                match position {
+                    LegPosition::Long => LegContext::long(leg_pricing.price, leg_pricing.iv),
+                    LegPosition::Short => LegContext::short(leg_pricing.price, leg_pricing.iv),
+                }
+            })
+            .collect();
+
+        TradingContext::new(
+            legs,
+            symbol.to_string(),
+            spot,
+            time,
+            trade_type,
+        )
     }
 }
 
