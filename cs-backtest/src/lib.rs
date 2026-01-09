@@ -20,6 +20,8 @@ pub mod trade_executor_factory;  // Factory for creating trade executors
 pub mod session_executor;  // Session-based executor for campaign execution
 pub mod trade_factory_impl;
 pub mod hedging_analytics;
+pub mod hedging_executor;  // Hedging support for BacktestUseCase strategies
+pub mod hedging_simulator; // Trade simulation with integrated hedging
 pub mod timing_strategy;
 pub mod trade_strategy;
 pub mod backtest_use_case;
@@ -76,6 +78,7 @@ pub use calendar_straddle_pricer::{CalendarStraddlePricer, CalendarStraddlePrici
 // Utilities
 pub use trade_factory_impl::DefaultTradeFactory;
 pub use hedging_analytics::{HedgingComparison, HedgingStats};
+pub use hedging_simulator::{simulate_with_hedging, HedgedSimulationOutput, HasDelta, HasGamma, HasIV};
 pub use greeks_helpers::{
     compute_straddle_greeks, compute_spread_net_greeks, compute_iron_butterfly_net_greeks,
     compute_calendar_straddle_net_greeks, compute_iv_change, average_iv,

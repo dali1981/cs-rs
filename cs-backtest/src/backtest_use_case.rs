@@ -837,8 +837,15 @@ where
             SpreadType::PostEarningsStraddle => ExecutionConfig::for_straddle(self.config.max_entry_iv),
         };
 
-        // Add trading costs config from backtest config
-        base_config.with_trading_costs(self.config.trading_costs.clone())
+        // Add trading costs and hedging config from backtest config
+        let config = base_config.with_trading_costs(self.config.trading_costs.clone());
+
+        // Add hedging if enabled
+        if self.config.hedge_config.is_enabled() {
+            config.with_hedging(self.config.hedge_config.clone())
+        } else {
+            config
+        }
     }
 
     fn passes_market_cap_filter(&self, event: &EarningsEvent) -> bool {

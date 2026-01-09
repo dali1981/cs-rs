@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use thiserror::Error;
-use cs_domain::{OptionStrategy, RepositoryError, TradingCostConfig, TradingCostCalculator};
+use cs_domain::{OptionStrategy, RepositoryError, TradingCostConfig, TradingCostCalculator, HedgeConfig};
 use crate::spread_pricer::PricingError;
 
 /// Errors that can occur during trade execution
@@ -33,6 +33,9 @@ pub struct ExecutionConfig {
 
     /// Trading costs configuration (slippage + commission)
     pub trading_costs: TradingCostConfig,
+
+    /// Delta hedging configuration (None = hedging disabled)
+    pub hedge_config: Option<HedgeConfig>,
 }
 
 impl ExecutionConfig {
@@ -43,6 +46,7 @@ impl ExecutionConfig {
             min_entry_cost: Decimal::new(50, 2), // $0.50 minimum for straddles
             min_credit: None,
             trading_costs: TradingCostConfig::default(),
+            hedge_config: None,
         }
     }
 
@@ -53,6 +57,7 @@ impl ExecutionConfig {
             min_entry_cost: Decimal::new(5, 2), // $0.05 minimum for calendar spreads
             min_credit: None,
             trading_costs: TradingCostConfig::default(),
+            hedge_config: None,
         }
     }
 
@@ -63,6 +68,7 @@ impl ExecutionConfig {
             min_entry_cost: Decimal::new(10, 2), // $0.10 minimum credit for iron butterflies
             min_credit: Some(Decimal::new(10, 2)),
             trading_costs: TradingCostConfig::default(),
+            hedge_config: None,
         }
     }
 
@@ -73,7 +79,19 @@ impl ExecutionConfig {
             min_entry_cost: Decimal::new(50, 2), // $0.50 minimum for calendar straddles (like straddles)
             min_credit: None,
             trading_costs: TradingCostConfig::default(),
+            hedge_config: None,
         }
+    }
+
+    /// Enable hedging on this config (builder pattern)
+    pub fn with_hedging(mut self, hedge_config: HedgeConfig) -> Self {
+        self.hedge_config = Some(hedge_config);
+        self
+    }
+
+    /// Check if hedging is enabled
+    pub fn has_hedging(&self) -> bool {
+        self.hedge_config.as_ref().map_or(false, |h| !matches!(h.strategy, cs_domain::HedgeStrategy::None))
     }
 
     /// Set custom trading costs configuration

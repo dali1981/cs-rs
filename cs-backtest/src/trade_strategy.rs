@@ -38,6 +38,7 @@ use crate::execution::{ExecutionConfig, ExecutableTrade};
 use crate::timing_strategy::TimingStrategy;
 use crate::backtest_use_case::{TradeResultMethods, TradeGenerationError};
 use crate::backtest_use_case_helpers::TradeSimulator;
+use crate::hedging_simulator::simulate_with_hedging;
 use crate::composite_pricer::{
     CompositePricer, CalendarSpreadPricer, IronButterflyCompositePricer,
     CalendarStraddleCompositePricer,
@@ -154,6 +155,7 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
         exit_time: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = Option<CalendarSpreadResult>> + Send + 'a>> {
         let option_type = self.option_type;
+        let timing = self.timing.clone();
         Box::pin(async move {
             let simulator = TradeSimulator::new(
                 options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
@@ -165,12 +167,45 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
             // 2. Select trade
             let trade = selector.select_calendar_spread(&data.spot, &data.surface, option_type, criteria).ok()?;
 
-            // 3. Simulate and convert to result
+            // 3. Simulate WITH HEDGING
             let pricer = CalendarSpreadPricer::new();
-            let result = match simulator.run(&trade, &pricer).await {
-                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, Some(event)),
-                Err(err) => trade.to_failed_result(&simulator.failed_output(), Some(event), err),
+            let sim = match simulate_with_hedging(
+                &trade,
+                &pricer,
+                options_repo,
+                equity_repo,
+                entry_time,
+                exit_time,
+                exec_config.hedge_config.as_ref(),
+                &timing,
+            ).await {
+                Ok(s) => s,
+                Err(err) => {
+                    return Some(trade.to_failed_result(&simulator.failed_output(), Some(event), err));
+                }
             };
+
+            // 4. Build result with hedge data
+            let mut result = trade.to_result(
+                sim.entry_pricing,
+                sim.exit_pricing,
+                &crate::execution::SimulationOutput::new(
+                    sim.entry_time,
+                    sim.exit_time,
+                    sim.entry_spot,
+                    sim.exit_spot,
+                    sim.entry_surface_time,
+                    sim.exit_surface_time,
+                ),
+                Some(event),
+            );
+
+            // 5. Apply hedge results if present
+            if let Some(pos) = sim.hedge_position {
+                let hedge_pnl = pos.calculate_pnl(sim.exit_spot);
+                let total_pnl = result.pnl + hedge_pnl - pos.total_cost;
+                result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
+            }
 
             Some(result)
         })
@@ -236,6 +271,7 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
         let wing_width = self.wing_width;
         let min_short_dte = criteria.min_short_dte;
         let max_short_dte = criteria.max_short_dte;
+        let timing = self.timing.clone();
         Box::pin(async move {
             let simulator = TradeSimulator::new(
                 options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
@@ -253,12 +289,45 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
                 max_short_dte,
             ).ok()?;
 
-            // 3. Simulate and convert to result
+            // 3. Simulate WITH HEDGING
             let pricer = IronButterflyCompositePricer::new();
-            let result = match simulator.run(&trade, &pricer).await {
-                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, Some(event)),
-                Err(err) => trade.to_failed_result(&simulator.failed_output(), Some(event), err),
+            let sim = match simulate_with_hedging(
+                &trade,
+                &pricer,
+                options_repo,
+                equity_repo,
+                entry_time,
+                exit_time,
+                exec_config.hedge_config.as_ref(),
+                &timing,
+            ).await {
+                Ok(s) => s,
+                Err(err) => {
+                    return Some(trade.to_failed_result(&simulator.failed_output(), Some(event), err));
+                }
             };
+
+            // 4. Build result with hedge data
+            let mut result = trade.to_result(
+                sim.entry_pricing,
+                sim.exit_pricing,
+                &crate::execution::SimulationOutput::new(
+                    sim.entry_time,
+                    sim.exit_time,
+                    sim.entry_spot,
+                    sim.exit_spot,
+                    sim.entry_surface_time,
+                    sim.exit_surface_time,
+                ),
+                Some(event),
+            );
+
+            // 5. Apply hedge results if present
+            if let Some(pos) = sim.hedge_position {
+                let hedge_pnl = pos.calculate_pnl(sim.exit_spot);
+                let total_pnl = result.pnl + hedge_pnl - pos.total_cost;
+                result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
+            }
 
             Some(result)
         })
@@ -298,6 +367,7 @@ impl TradeStrategy<StraddleResult> for StraddleStrategy {
         exit_time: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = Option<StraddleResult>> + Send + 'a>> {
         let min_short_dte = criteria.min_short_dte;
+        let timing = self.timing.clone();
         Box::pin(async move {
             let simulator = TradeSimulator::new(
                 options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
@@ -312,12 +382,45 @@ impl TradeStrategy<StraddleResult> for StraddleStrategy {
                 .max(entry_date);
             let trade = selector.select_straddle(&data.spot, &data.surface, min_expiration).ok()?;
 
-            // 3. Simulate and convert to result
+            // 3. Simulate WITH HEDGING (integrated into execution loop)
             let pricer = CompositePricer::default();
-            let result = match simulator.run(&trade, &pricer).await {
-                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, Some(event)),
-                Err(err) => trade.to_failed_result(&simulator.failed_output(), Some(event), err),
+            let sim = match simulate_with_hedging(
+                &trade,
+                &pricer,
+                options_repo,
+                equity_repo,
+                entry_time,
+                exit_time,
+                exec_config.hedge_config.as_ref(),
+                &timing,
+            ).await {
+                Ok(s) => s,
+                Err(err) => {
+                    return Some(trade.to_failed_result(&simulator.failed_output(), Some(event), err));
+                }
             };
+
+            // 4. Build result with hedge data
+            let mut result = trade.to_result(
+                sim.entry_pricing,
+                sim.exit_pricing,
+                &crate::execution::SimulationOutput::new(
+                    sim.entry_time,
+                    sim.exit_time,
+                    sim.entry_spot,
+                    sim.exit_spot,
+                    sim.entry_surface_time,
+                    sim.exit_surface_time,
+                ),
+                Some(event),
+            );
+
+            // 5. Apply hedge results if present
+            if let Some(pos) = sim.hedge_position {
+                let hedge_pnl = pos.calculate_pnl(sim.exit_spot);
+                let total_pnl = result.pnl + hedge_pnl - pos.total_cost;
+                result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
+            }
 
             Some(result)
         })
@@ -356,6 +459,7 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
         exit_time: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = Option<StraddleResult>> + Send + 'a>> {
         let min_short_dte = criteria.min_short_dte;
+        let timing = self.timing.clone();
         Box::pin(async move {
             let simulator = TradeSimulator::new(
                 options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
@@ -370,12 +474,45 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
                 .max(entry_date);
             let trade = selector.select_straddle(&data.spot, &data.surface, min_expiration).ok()?;
 
-            // 3. Simulate and convert to result
+            // 3. Simulate WITH HEDGING
             let pricer = CompositePricer::default();
-            let result = match simulator.run(&trade, &pricer).await {
-                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, Some(event)),
-                Err(err) => trade.to_failed_result(&simulator.failed_output(), Some(event), err),
+            let sim = match simulate_with_hedging(
+                &trade,
+                &pricer,
+                options_repo,
+                equity_repo,
+                entry_time,
+                exit_time,
+                exec_config.hedge_config.as_ref(),
+                &timing,
+            ).await {
+                Ok(s) => s,
+                Err(err) => {
+                    return Some(trade.to_failed_result(&simulator.failed_output(), Some(event), err));
+                }
             };
+
+            // 4. Build result with hedge data
+            let mut result = trade.to_result(
+                sim.entry_pricing,
+                sim.exit_pricing,
+                &crate::execution::SimulationOutput::new(
+                    sim.entry_time,
+                    sim.exit_time,
+                    sim.entry_spot,
+                    sim.exit_spot,
+                    sim.entry_surface_time,
+                    sim.exit_surface_time,
+                ),
+                Some(event),
+            );
+
+            // 5. Apply hedge results if present
+            if let Some(pos) = sim.hedge_position {
+                let hedge_pnl = pos.calculate_pnl(sim.exit_spot);
+                let total_pnl = result.pnl + hedge_pnl - pos.total_cost;
+                result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
+            }
 
             Some(result)
         })
@@ -410,6 +547,7 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = Option<CalendarStraddleResult>> + Send + 'a>> {
+        let timing = self.timing.clone();
         Box::pin(async move {
             let simulator = TradeSimulator::new(
                 options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
@@ -421,12 +559,45 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
             // 2. Select trade
             let trade = selector.select_calendar_straddle(&data.spot, &data.surface, criteria).ok()?;
 
-            // 3. Simulate and convert to result
+            // 3. Simulate WITH HEDGING
             let pricer = CalendarStraddleCompositePricer::new();
-            let result = match simulator.run(&trade, &pricer).await {
-                Ok(raw) => trade.to_result(raw.entry_pricing, raw.exit_pricing, &raw.output, Some(event)),
-                Err(err) => trade.to_failed_result(&simulator.failed_output(), Some(event), err),
+            let sim = match simulate_with_hedging(
+                &trade,
+                &pricer,
+                options_repo,
+                equity_repo,
+                entry_time,
+                exit_time,
+                exec_config.hedge_config.as_ref(),
+                &timing,
+            ).await {
+                Ok(s) => s,
+                Err(err) => {
+                    return Some(trade.to_failed_result(&simulator.failed_output(), Some(event), err));
+                }
             };
+
+            // 4. Build result with hedge data
+            let mut result = trade.to_result(
+                sim.entry_pricing,
+                sim.exit_pricing,
+                &crate::execution::SimulationOutput::new(
+                    sim.entry_time,
+                    sim.exit_time,
+                    sim.entry_spot,
+                    sim.exit_spot,
+                    sim.entry_surface_time,
+                    sim.exit_surface_time,
+                ),
+                Some(event),
+            );
+
+            // 5. Apply hedge results if present
+            if let Some(pos) = sim.hedge_position {
+                let hedge_pnl = pos.calculate_pnl(sim.exit_spot);
+                let total_pnl = result.pnl + hedge_pnl - pos.total_cost;
+                result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
+            }
 
             Some(result)
         })
