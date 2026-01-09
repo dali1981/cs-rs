@@ -280,6 +280,118 @@ impl<R: TradeResultMethods> BacktestResult<R> {
     }
 }
 
+// Additional methods for types that implement HasAccounting
+impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
+    /// Capital-weighted return (THE CORRECT METRIC)
+    ///
+    /// This weights each trade's return by the capital deployed, ensuring that
+    /// trades with larger positions contribute proportionally more to the
+    /// overall return calculation.
+    ///
+    /// Formula: sum(capital_i * return_i) / sum(capital_i)
+    ///
+    /// This fixes the issue where simple mean return can show positive returns
+    /// while total P&L is negative (when larger positions have losses).
+    pub fn capital_weighted_return(&self) -> f64 {
+        use rust_decimal::prelude::ToPrimitive;
+
+        let weighted_sum: f64 = self.results.iter()
+            .map(|r| {
+                let capital = r.capital_required().to_f64().unwrap_or(0.0);
+                let return_pct = r.return_on_capital();
+                capital * return_pct
+            })
+            .sum();
+
+        let total_capital: f64 = self.results.iter()
+            .map(|r| r.capital_required().to_f64().unwrap_or(0.0))
+            .sum();
+
+        if total_capital > 0.0 {
+            weighted_sum / total_capital
+        } else {
+            0.0
+        }
+    }
+
+    /// Total capital deployed across all trades
+    pub fn total_capital_deployed(&self) -> Decimal {
+        self.results.iter()
+            .map(|r| r.capital_required())
+            .sum()
+    }
+
+    /// Return on total capital (total P&L / total capital)
+    pub fn return_on_capital(&self) -> f64 {
+        use rust_decimal::prelude::ToPrimitive;
+        let total_capital = self.total_capital_deployed();
+        if total_capital.is_zero() {
+            return 0.0;
+        }
+        let total_pnl = self.total_pnl_with_hedge();
+        (total_pnl / total_capital).to_f64().unwrap_or(0.0)
+    }
+
+    /// Profit factor (gross profit / gross loss)
+    pub fn profit_factor(&self) -> f64 {
+        use rust_decimal::prelude::ToPrimitive;
+        let gross_profit: Decimal = self.results.iter()
+            .filter(|r| r.is_winner())
+            .map(|r| r.pnl())
+            .sum();
+        let gross_loss: Decimal = self.results.iter()
+            .filter(|r| r.pnl() < Decimal::ZERO)
+            .map(|r| r.pnl().abs())
+            .sum();
+
+        if gross_loss.is_zero() {
+            if gross_profit > Decimal::ZERO {
+                f64::INFINITY
+            } else {
+                0.0
+            }
+        } else {
+            (gross_profit / gross_loss).to_f64().unwrap_or(0.0)
+        }
+    }
+
+    /// Sharpe ratio using capital-weighted returns (more accurate)
+    pub fn capital_weighted_sharpe(&self) -> f64 {
+        use rust_decimal::prelude::ToPrimitive;
+
+        let returns: Vec<f64> = self.results.iter()
+            .map(|r| r.return_on_capital())
+            .collect();
+
+        if returns.len() < 2 {
+            return 0.0;
+        }
+
+        let mean = self.capital_weighted_return();
+        let variance = returns.iter()
+            .map(|r| (r - mean).powi(2))
+            .sum::<f64>() / (returns.len() - 1) as f64;
+        let std = variance.sqrt();
+
+        if std > 0.0 {
+            mean / std * 16.0 // sqrt(252)
+        } else {
+            0.0
+        }
+    }
+
+    /// Get comprehensive statistics using the accounting module
+    pub fn accounting_statistics(&self) -> cs_domain::TradeStatistics {
+        use cs_domain::HasAccounting;
+
+        let accountings: Vec<_> = self.results.iter()
+            .map(|r| r.to_accounting())
+            .collect();
+
+        cs_domain::TradeStatistics::from_trades(&accountings)
+    }
+}
+
 /// Session progress callback
 #[derive(Debug, Clone)]
 pub struct SessionProgress {

@@ -6,7 +6,7 @@ use console::style;
 use tabled::{Table, Tabled};
 
 use cs_backtest::{BacktestResult, TradeResultMethods, UnifiedBacktestResult};
-use cs_domain::TradeResult as TradeResultTrait;
+use cs_domain::{TradeResult as TradeResultTrait, HasAccounting};
 
 use crate::display::ResultRow;
 
@@ -20,6 +20,17 @@ impl BacktestOutputHandler {
         R: TradeResultTrait + TradeResultMethods,
     {
         Self::display_summary(result);
+        Self::display_sample_trades(result);
+        Self::display_dropped_events(result);
+    }
+
+    /// Display backtest results with capital-weighted metrics
+    pub fn display_with_accounting<R>(result: &BacktestResult<R>)
+    where
+        R: TradeResultTrait + TradeResultMethods + HasAccounting,
+    {
+        Self::display_summary(result);
+        Self::display_capital_weighted(result);
         Self::display_sample_trades(result);
         Self::display_dropped_events(result);
     }
@@ -84,13 +95,60 @@ impl BacktestOutputHandler {
 
         rows.extend(vec![
             ResultRow { metric: "".into(), value: "".into() },
-            ResultRow { metric: "Mean Return".into(), value: format!("{:.2}%", mean_return) },
+            ResultRow { metric: "Mean Return (simple)".into(), value: format!("{:.2}%", mean_return) },
             ResultRow { metric: "Std Dev".into(), value: format!("{:.2}%", std_return) },
-            ResultRow { metric: "Sharpe Ratio".into(), value: format!("{:.2}", sharpe) },
+            ResultRow { metric: "Sharpe Ratio (simple)".into(), value: format!("{:.2}", sharpe) },
             ResultRow { metric: "".into(), value: "".into() },
             ResultRow { metric: "Avg Winner".into(), value: format!("${:.2} ({:.2}%)", avg_winner, avg_winner_pct) },
             ResultRow { metric: "Avg Loser".into(), value: format!("${:.2} ({:.2}%)", avg_loser, avg_loser_pct) },
         ]);
+
+        let table = Table::new(rows);
+        println!("{}", table);
+        println!();
+    }
+
+    /// Display capital-weighted metrics (more accurate for varying position sizes)
+    fn display_capital_weighted<R>(result: &BacktestResult<R>)
+    where
+        R: TradeResultTrait + TradeResultMethods + HasAccounting,
+    {
+        use rust_decimal::prelude::ToPrimitive;
+
+        println!("{}", style("Capital-Weighted Metrics:").bold().cyan());
+
+        let cw_return = result.capital_weighted_return() * 100.0;
+        let cw_sharpe = result.capital_weighted_sharpe();
+        let profit_factor = result.profit_factor();
+        let total_capital = result.total_capital_deployed();
+        let roc = result.return_on_capital() * 100.0;
+
+        let rows = vec![
+            ResultRow {
+                metric: "Return on Capital".into(),
+                value: format!("{:.2}%", roc),
+            },
+            ResultRow {
+                metric: "Capital-Weighted Return".into(),
+                value: format!("{:.2}%", cw_return),
+            },
+            ResultRow {
+                metric: "Capital-Weighted Sharpe".into(),
+                value: format!("{:.2}", cw_sharpe),
+            },
+            ResultRow {
+                metric: "Profit Factor".into(),
+                value: if profit_factor.is_infinite() {
+                    "∞ (no losses)".into()
+                } else {
+                    format!("{:.2}", profit_factor)
+                },
+            },
+            ResultRow {
+                metric: "Total Capital Deployed".into(),
+                value: format!("${:.2}", total_capital),
+            },
+        ];
 
         let table = Table::new(rows);
         println!("{}", table);
@@ -179,13 +237,14 @@ impl BacktestOutputHandler {
     }
 
     /// Display unified backtest results (dispatches to appropriate display method)
+    /// Uses capital-weighted metrics for all supported trade types
     pub fn display_unified(result: &UnifiedBacktestResult) {
         match result {
-            UnifiedBacktestResult::CalendarSpread(r) => Self::display(r),
-            UnifiedBacktestResult::IronButterfly(r) => Self::display(r),
-            UnifiedBacktestResult::Straddle(r) => Self::display(r),
-            UnifiedBacktestResult::CalendarStraddle(r) => Self::display(r),
-            UnifiedBacktestResult::PostEarningsStraddle(r) => Self::display(r),
+            UnifiedBacktestResult::CalendarSpread(r) => Self::display_with_accounting(r),
+            UnifiedBacktestResult::IronButterfly(r) => Self::display_with_accounting(r),
+            UnifiedBacktestResult::Straddle(r) => Self::display_with_accounting(r),
+            UnifiedBacktestResult::CalendarStraddle(r) => Self::display_with_accounting(r),
+            UnifiedBacktestResult::PostEarningsStraddle(r) => Self::display_with_accounting(r),
         }
     }
 

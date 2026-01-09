@@ -12,6 +12,9 @@ pub use rolling_result::{RollingResult, RollPeriod, RollReason};
 // RollableTrade trait implementations
 pub mod rollable_impls;
 
+// HasAccounting trait implementations for trade results
+pub mod accounting_impls;
+
 /// Earnings event for a symbol
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EarningsEvent {
