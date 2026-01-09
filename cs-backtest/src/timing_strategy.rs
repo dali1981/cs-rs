@@ -155,6 +155,7 @@ impl TimingStrategy {
     /// Generate times to check delta (for threshold strategies)
     ///
     /// Checks every hour during market hours (14:30 - 21:00 UTC = 9:30 - 16:00 ET)
+    /// on trading days only (skips weekends/holidays).
     /// Includes entry_time as first check to ensure delta-neutral entry.
     fn generate_check_times(
         &self,
@@ -169,8 +170,9 @@ impl TimingStrategy {
 
         while current < exit_time {
             // Only include times during market hours (14:30 - 21:00 UTC = 9:30 - 16:00 ET)
+            // and on trading days (skip weekends/holidays)
             let hour = current.hour();
-            if hour >= 14 && hour < 21 {
+            if hour >= 14 && hour < 21 && TradingCalendar::is_trading_day(current.date_naive()) {
                 times.push(current);
             }
             current = current + check_interval;
