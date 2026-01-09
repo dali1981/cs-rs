@@ -5,6 +5,10 @@
 
 mod period;
 mod spec;
+mod range;
+mod tradable_event;
 
 pub use period::TradingPeriod;
 pub use spec::{TradingPeriodSpec, TimingError};
+pub use range::TradingRange;
+pub use tradable_event::TradableEvent;

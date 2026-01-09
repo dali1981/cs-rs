@@ -21,6 +21,7 @@ pub mod roll;
 pub mod strategy;
 pub mod trade;
 pub mod campaign;
+pub mod config;
 
 // Re-exports for convenience
 pub use datetime::{TradingDate, TradingTimestamp, MarketTime, eastern_to_utc};
@@ -40,7 +41,7 @@ pub use timing::*;
 pub use hedging::*;
 pub use position::{PositionGreeks, PositionSnapshot, DailyAttribution, PositionAttribution};
 pub use expiration::{ExpirationCycle, ExpirationPolicy};
-pub use trading_period::{TradingPeriod, TradingPeriodSpec, TimingError};
+pub use trading_period::{TradingPeriod, TradingPeriodSpec, TimingError, TradingRange, TradableEvent};
 pub use roll::{RollPolicy, RollEvent};
 pub use strategy::{TradeStrategy, TradeStructureConfig, TradeFilters, TradeStructure, FailedTrade};
 pub use trade::{RollableTrade, TradeResult, TradeConstructionError, CompositeTrade, LegPosition};
@@ -48,3 +49,4 @@ pub use campaign::{
     TradingCampaign, TradingSession, SessionAction, SessionContext,
     EarningsTimingType, SessionSchedule, PeriodPolicy
 };
+pub use config::{FilterCriteria, PositionSpec, PositionStructure, StrikeSelection};

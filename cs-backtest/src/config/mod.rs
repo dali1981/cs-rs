@@ -2,7 +2,17 @@ use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 use chrono::NaiveDate;
 use cs_analytics::{PricingModel, InterpolationMode};
-use cs_domain::{TimingConfig, TradeSelectionCriteria, StrikeMatchMode, HedgeConfig, AttributionConfig};
+use cs_domain::{
+    TimingConfig, TradeSelectionCriteria, StrikeMatchMode, HedgeConfig, AttributionConfig,
+    TradingRange, TradingPeriodSpec, FilterCriteria,
+};
+
+// Infrastructure config types (separated into submodules)
+mod data_source;
+mod execution;
+
+pub use data_source::DataSourceConfig;
+pub use execution::ExecutionConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestConfig {
@@ -198,6 +208,109 @@ impl Default for BacktestConfig {
             post_earnings_holding_days: default_post_earnings_holding_days(),
             hedge_config: HedgeConfig::default(), // No hedging by default
             attribution_config: None, // No attribution by default
+        }
+    }
+}
+
+impl BacktestConfig {
+    /// Extract TradingRange (when to initiate trades)
+    pub fn trading_range(&self) -> TradingRange {
+        TradingRange::new(self.start_date, self.end_date)
+    }
+
+    /// Extract DataSourceConfig (infrastructure)
+    pub fn data_source(&self) -> DataSourceConfig {
+        DataSourceConfig {
+            data_dir: self.data_dir.clone(),
+            earnings_dir: self.earnings_dir.clone(),
+            earnings_file: self.earnings_file.clone(),
+        }
+    }
+
+    /// Extract ExecutionConfig (runtime)
+    pub fn execution(&self) -> ExecutionConfig {
+        ExecutionConfig {
+            parallel: self.parallel,
+        }
+    }
+
+    /// Extract FilterCriteria (event/trade filtering)
+    pub fn filter_criteria(&self) -> FilterCriteria {
+        FilterCriteria {
+            symbols: self.symbols.clone(),
+            min_market_cap: self.min_market_cap,
+            max_entry_iv: self.max_entry_iv,
+            min_notional: self.min_notional,
+            min_entry_price: self.min_entry_price,
+            max_entry_price: self.max_entry_price,
+            min_iv_ratio: self.selection.min_iv_ratio,
+        }
+    }
+
+    /// Build TradingPeriodSpec based on spread type and config
+    ///
+    /// This converts spread-specific timing parameters into a unified spec.
+    pub fn timing_spec(&self) -> TradingPeriodSpec {
+        use chrono::NaiveTime;
+
+        match self.spread {
+            SpreadType::Straddle => {
+                // Pre-earnings straddle
+                TradingPeriodSpec::PreEarnings {
+                    entry_days_before: self.straddle_entry_days as u16,
+                    exit_days_before: self.straddle_exit_days as u16,
+                    entry_time: NaiveTime::from_hms_opt(
+                        self.timing.entry_hour,
+                        self.timing.entry_minute,
+                        0,
+                    )
+                    .unwrap(),
+                    exit_time: NaiveTime::from_hms_opt(
+                        self.timing.exit_hour,
+                        self.timing.exit_minute,
+                        0,
+                    )
+                    .unwrap(),
+                }
+            }
+
+            SpreadType::PostEarningsStraddle => {
+                // Post-earnings straddle
+                TradingPeriodSpec::PostEarnings {
+                    entry_offset: 0,
+                    holding_days: self.post_earnings_holding_days as u16,
+                    entry_time: NaiveTime::from_hms_opt(
+                        self.timing.entry_hour,
+                        self.timing.entry_minute,
+                        0,
+                    )
+                    .unwrap(),
+                    exit_time: NaiveTime::from_hms_opt(
+                        self.timing.exit_hour,
+                        self.timing.exit_minute,
+                        0,
+                    )
+                    .unwrap(),
+                }
+            }
+
+            // Calendar, IronButterfly, CalendarStraddle - all cross earnings
+            _ => TradingPeriodSpec::CrossEarnings {
+                entry_days_before: 1,
+                exit_days_after: 1,
+                entry_time: NaiveTime::from_hms_opt(
+                    self.timing.entry_hour,
+                    self.timing.entry_minute,
+                    0,
+                )
+                .unwrap(),
+                exit_time: NaiveTime::from_hms_opt(
+                    self.timing.exit_hour,
+                    self.timing.exit_minute,
+                    0,
+                )
+                .unwrap(),
+            },
         }
     }
 }

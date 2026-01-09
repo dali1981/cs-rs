@@ -270,6 +270,71 @@ impl TradingPeriodSpec {
     pub fn requires_earnings(&self) -> bool {
         !matches!(self, Self::FixedDates { .. } | Self::HoldingPeriod { .. })
     }
+
+    /// Calculate the event date range to search given a trading range
+    ///
+    /// Returns (search_start, search_end) for events whose resolved entry date
+    /// would fall within the trading range.
+    ///
+    /// This is critical for efficient event loading: we only load events whose
+    /// timing would result in trades starting within our desired range.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Trading range: Jan 1-31, 2025
+    /// let range = TradingRange::new(jan_1, jan_31);
+    ///
+    /// // Pre-earnings: enter 14 trading days before event
+    /// let spec = TradingPeriodSpec::PreEarnings { entry_days_before: 14, ... };
+    ///
+    /// // For entry to be in January, event must be in mid-late January
+    /// // (14 trading days ≈ 20 calendar days forward)
+    /// // search_range ≈ (Jan 21, Feb 20)
+    /// ```
+    pub fn event_search_range(&self, range: &super::TradingRange) -> (NaiveDate, NaiveDate) {
+        use chrono::Duration;
+
+        match self {
+            Self::PreEarnings { entry_days_before, .. } => {
+                // Entry is N trading days BEFORE event
+                // To have entry in range:
+                //   event_date - N_trading = entry_date ∈ [range.start, range.end]
+                //   event_date ∈ [range.start + N_trading, range.end + N_trading]
+                //
+                // Convert trading days to calendar days (approx: trading * 7/5)
+                let trading_to_calendar = (*entry_days_before as i64 * 7 / 5) + 5; // buffer
+                let search_start = range.start + Duration::days(trading_to_calendar);
+                let search_end = range.end + Duration::days(trading_to_calendar + 30); // extra buffer
+                (search_start, search_end)
+            }
+
+            Self::PostEarnings { entry_offset, .. } => {
+                // Entry is day(s) AFTER event (accounting for BMO/AMC)
+                // To have entry in range:
+                //   event_date + offset = entry_date ∈ range
+                //   event_date ∈ [range.start - offset - buffer, range.end]
+                let offset_days = (*entry_offset as i64).max(0) + 2; // +2 for AMC events
+                let search_start = range.start - Duration::days(offset_days + 5); // buffer
+                let search_end = range.end;
+                (search_start, search_end)
+            }
+
+            Self::CrossEarnings { entry_days_before, .. } => {
+                // Entry is before event, exit is after
+                // Similar to PreEarnings for event search
+                let trading_to_calendar = (*entry_days_before as i64 * 7 / 5) + 5;
+                let search_start = range.start + Duration::days(trading_to_calendar);
+                let search_end = range.end + Duration::days(trading_to_calendar + 30);
+                (search_start, search_end)
+            }
+
+            Self::FixedDates { .. } | Self::HoldingPeriod { .. } => {
+                // No event dependency, return the range itself
+                (range.start, range.end)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
