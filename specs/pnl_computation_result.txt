@@ -1,0 +1,127 @@
+The Bug
+
+  The entry_cost and pnl fields are already per-contract (×100 multiplied in execution code at calendar_spread_impl.rs:89,124). My implementation was multiplying by 100 again, inflating capital by 100×.
+
+  Corrected Calculations
+
+  Trade Data (from JSON):
+  ┌───────┬────────────┬──────┬──────────┐
+  │ Trade │ entry_cost │ pnl  │ pnl_pct  │
+  ├───────┼────────────┼──────┼──────────┤
+  │ STZ   │ $60        │ +$80 │ +133.33% │
+  ├───────┼────────────┼──────┼──────────┤
+  │ CRML  │ $69        │ -$12 │ -17.39%  │
+  └───────┴────────────┴──────┴──────────┘
+  Metrics:
+  ┌─────────────────────────┬──────────────────────────────────┬───────────────────────────────────┬────────┐
+  │         Metric          │             Formula              │            Calculation            │ Result │
+  ├─────────────────────────┼──────────────────────────────────┼───────────────────────────────────┼────────┤
+  │ Total P&L               │ sum(pnl)                         │ $80 - $12                         │ $68    │
+  ├─────────────────────────┼──────────────────────────────────┼───────────────────────────────────┼────────┤
+  │ Total Capital           │ sum(entry_cost)                  │ $60 + $69                         │ $129   │
+  ├─────────────────────────┼──────────────────────────────────┼───────────────────────────────────┼────────┤
+  │ Return on Capital       │ total_pnl / total_capital        │ $68 / $129                        │ 52.7%  │
+  ├─────────────────────────┼──────────────────────────────────┼───────────────────────────────────┼────────┤
+  │ Capital-Weighted Return │ Σ(capital × return) / Σ(capital) │ ($60×1.333 + $69×(-0.174)) / $129 │ 52.7%  │
+  ├─────────────────────────┼──────────────────────────────────┼───────────────────────────────────┼────────┤
+  │ Simple Mean Return      │ avg(pnl_pct)                     │ (133.33% - 17.39%) / 2            │ 57.97% │
+  ├─────────────────────────┼──────────────────────────────────┼───────────────────────────────────┼────────┤
+  │ Profit Factor           │ gross_profit / gross_loss        │ $80 / $12                         │ 6.67   │
+  └─────────────────────────┴──────────────────────────────────┴───────────────────────────────────┴────────┘
+  Key Insight
+
+  Capital-Weighted Return ≈ Return on Capital when calculated correctly. They should match because:
+
+  CW Return = Σ(capital_i × return_i) / Σ(capital_i)
+            = Σ(capital_i × pnl_i/capital_i) / Σ(capital_i)
+            = Σ(pnl_i) / Σ(capital_i)
+            = Total P&L / Total Capital
+            = ROC
+
+  Why Simple Mean was Different
+
+  Simple mean treats both trades equally regardless of capital:
+  - STZ: +133.33% on $60 capital
+  - CRML: -17.39% on $69 capital
+  - Simple mean: (133.33 - 17.39) / 2 = 57.97%
+
+  But CRML had more capital at risk ($69 > $60), so its loss should weigh more. The capital-weighted return correctly accounts for this.
+
+  After the Fix
+
+  Running the same backtest should now show:
+  - Total Capital Deployed: $129 (not $12,900)
+  - Return on Capital: ~52.7% (not 0.53%)
+  - These should match the Capital-Weighted Return
+
+
+
+
+$ target/debug/cs backtest -c straddle_1m_before_15d_cap1b.toml --start 2025-10-01 --end 2025-10-03 --output test_accounting.json
+Calendar Spread Backtest - Rust Edition
+
+Running backtest...
+  Data directory: /Users/mohamedali/polygon/data (from default (~/polygon/data))
+  Earnings directory: /Users/mohamedali/trading_project/nasdaq_earnings/data
+  Strategy: Calendar
+  Selection: ATM
+  Period: 2025-10-01 to 2025-10-03
+
+2026-01-09T12:35:04.854659Z  INFO Starting trade-centric backtest spread=Calendar start=2025-10-01 end=2025-10-03
+2026-01-09T12:35:04.862619Z  INFO Events loaded events_loaded=40
+2026-01-09T12:35:04.862657Z  INFO Tradable events discovered tradable_events=15
+2026-01-09T12:35:04.862670Z  INFO Events after filtering filtered_events=7
+2026-01-09T12:35:07.640962Z  INFO Backtest completed sessions_processed=1 total_opportunities=7 results_count=2 dropped_count=0
+Results:
++-----------------------+-------------------+
+| Metric                | Value             |
++-----------------------+-------------------+
+| Sessions Processed    | 1                 |
++-----------------------+-------------------+
+| Total Opportunities   | 7                 |
++-----------------------+-------------------+
+| Trades Entered        | 2                 |
++-----------------------+-------------------+
+| Trades Dropped        | 0                 |
++-----------------------+-------------------+
+|                       |                   |
++-----------------------+-------------------+
+| Win Rate              | 50.00%            |
++-----------------------+-------------------+
+| Total P&L             | $68.00            |
++-----------------------+-------------------+
+| Avg P&L per Trade     | $34.00            |
++-----------------------+-------------------+
+|                       |                   |
++-----------------------+-------------------+
+| Mean Return (simple)  | 57.97%            |
++-----------------------+-------------------+
+| Std Dev               | 106.58%           |
++-----------------------+-------------------+
+| Sharpe Ratio (simple) | 8.70              |
++-----------------------+-------------------+
+|                       |                   |
++-----------------------+-------------------+
+| Avg Winner            | $80.00 (133.33%)  |
++-----------------------+-------------------+
+| Avg Loser             | $-12.00 (-17.39%) |
++-----------------------+-------------------+
+
+Capital-Weighted Metrics:
++-------------------------+-----------+
+| Metric                  | Value     |
++-------------------------+-----------+
+| Return on Capital       | 0.53%     |
++-------------------------+-----------+
+| Capital-Weighted Return | 52.71%    |
++-------------------------+-----------+
+| Capital-Weighted Sharpe | 7.89      |
++-------------------------+-----------+
+| Profit Factor           | 6.67      |
++-------------------------+-----------+
+| Total Capital Deployed  | $12900.00 |
++-------------------------+-----------+
+
+Sample Trades:
+  1. CRML | P&L: $-12.00 (-17.39%)
+  2. STZ | P&L: $80.00 (133.33%)
