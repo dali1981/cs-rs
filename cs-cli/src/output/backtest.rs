@@ -6,7 +6,7 @@ use console::style;
 use tabled::{Table, Tabled};
 
 use cs_backtest::{BacktestResult, TradeResultMethods, UnifiedBacktestResult};
-use cs_domain::{TradeResult as TradeResultTrait, HasAccounting, HasTradingCost};
+use cs_domain::{TradeResult as TradeResultTrait, HasAccounting, HasTradingCost, ToPnlRecord};
 
 use crate::display::ResultRow;
 
@@ -27,10 +27,11 @@ impl BacktestOutputHandler {
     /// Display backtest results with capital-weighted metrics and trading costs
     pub fn display_with_accounting<R>(result: &BacktestResult<R>)
     where
-        R: TradeResultTrait + TradeResultMethods + HasAccounting + HasTradingCost,
+        R: TradeResultTrait + TradeResultMethods + HasAccounting + HasTradingCost + ToPnlRecord,
     {
         Self::display_summary(result);
         Self::display_capital_weighted(result);
+        Self::display_pnl_statistics(result);
         Self::display_trading_costs(result);
         Self::display_sample_trades(result);
         Self::display_dropped_events(result);
@@ -153,6 +154,71 @@ impl BacktestOutputHandler {
 
         let table = Table::new(rows);
         println!("{}", table);
+        println!();
+    }
+
+    /// Display normalized PnL statistics (time-adjusted metrics from spec)
+    fn display_pnl_statistics<R>(result: &BacktestResult<R>)
+    where
+        R: TradeResultTrait + TradeResultMethods + ToPnlRecord,
+    {
+        let Some(stats) = result.pnl_statistics() else {
+            return;
+        };
+
+        println!("{}", style("Normalized PnL Metrics:").bold().blue());
+
+        let mut rows = vec![
+            ResultRow {
+                metric: "Daily-Normalized Sharpe".into(),
+                value: format!("{:.2}", stats.sharpe_ratio),
+            },
+            ResultRow {
+                metric: "Mean Daily Return".into(),
+                value: format!("{:.4}%", stats.mean_daily_return * 100.0),
+            },
+            ResultRow {
+                metric: "Std Daily Return".into(),
+                value: format!("{:.4}%", stats.std_daily_return * 100.0),
+            },
+            ResultRow {
+                metric: "Avg Trade Duration".into(),
+                value: format!("{:.1} days", stats.avg_duration_days),
+            },
+        ];
+
+        // Add hedge cost metrics if hedging was used
+        if stats.mean_hedge_cost_ratio > 0.0 {
+            rows.push(ResultRow {
+                metric: "".into(),
+                value: "".into(),
+            });
+            rows.push(ResultRow {
+                metric: "Mean Hedge Cost Ratio".into(),
+                value: format!("{:.1}%", stats.mean_hedge_cost_ratio * 100.0),
+            });
+
+            if stats.trades_with_excessive_hedge_costs > 0 {
+                let warning = if stats.has_hedge_cost_problem() {
+                    format!("{} ⚠️", stats.trades_with_excessive_hedge_costs)
+                } else {
+                    stats.trades_with_excessive_hedge_costs.to_string()
+                };
+                rows.push(ResultRow {
+                    metric: "Trades with High Hedge Costs".into(),
+                    value: warning,
+                });
+            }
+        }
+
+        let table = Table::new(rows);
+        println!("{}", table);
+
+        // Warning for hedge cost problems
+        if stats.has_hedge_cost_problem() {
+            println!("{}", style("⚠️  Warning: High hedge costs may be destroying edge (>30% of premium)").yellow());
+        }
+
         println!();
     }
 

@@ -5,6 +5,7 @@ use rust_decimal::Decimal;
 
 use cs_domain::*;
 use cs_domain::strike_selection::{StrikeSelector, ATMStrategy, DeltaStrategy, ExpirationCriteria};
+use cs_domain::pnl::{TradePnlRecord, PnlStatistics, ToPnlRecord};
 use crate::config::{BacktestConfig, SelectionType};
 use crate::execution::ExecutionConfig;
 use crate::trade_strategy::{
@@ -389,6 +390,25 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
             .collect();
 
         cs_domain::TradeStatistics::from_trades(&accountings)
+    }
+}
+
+// PnL statistics methods for types that implement ToPnlRecord
+impl<R: TradeResultMethods + ToPnlRecord> BacktestResult<R> {
+    /// Convert all results to TradePnlRecords
+    pub fn to_pnl_records(&self) -> Vec<TradePnlRecord> {
+        self.results.iter().map(|r| r.to_pnl_record()).collect()
+    }
+
+    /// Get comprehensive PnL statistics using daily-normalized returns.
+    ///
+    /// This implements the spec's normalized return computation:
+    /// - Daily returns: r_daily = (1 + r)^(1/T) - 1
+    /// - Sharpe: mean(r_daily) / std(r_daily) × sqrt(252)
+    /// - Hedge cost ratio: Σ HedgeCost / C_opt
+    pub fn pnl_statistics(&self) -> Option<PnlStatistics> {
+        let records = self.to_pnl_records();
+        PnlStatistics::from_records(&records)
     }
 }
 

@@ -24,6 +24,7 @@ pub mod strategy;
 pub mod trade;
 pub mod campaign;
 pub mod config;
+pub mod pnl;
 
 // Re-exports for convenience
 pub use datetime::{TradingDate, TradingTimestamp, MarketTime, eastern_to_utc};
@@ -61,3 +62,4 @@ pub use trading_costs::{
     TradeType, TradingCostCalculator, TradingCostConfig, CostPreset,
     HasTradingCost, ApplyCosts,
 };
+pub use pnl::{TradePnlRecord, PnlStatistics, ToPnlRecord};
