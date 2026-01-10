@@ -72,6 +72,14 @@ pub struct HedgedSimulationOutput<P> {
     pub hedge_position: Option<HedgePosition>,
 }
 
+/// Precomputed entry pricing inputs for hedged simulation
+#[derive(Debug)]
+pub struct EntryPricingContext<P> {
+    pub pricing: P,
+    pub spot: f64,
+    pub surface_time: Option<DateTime<Utc>>,
+}
+
 impl<P> HedgedSimulationOutput<P> {
     /// Get hedge P&L (0 if no hedging)
     pub fn hedge_pnl(&self) -> Decimal {
@@ -136,7 +144,7 @@ pub async fn simulate_with_hedging<T, Pr>(
 where
     T: ExecutableTrade<Pricer = Pr> + CompositeTrade + Clone + Send + Sync,
     Pr: TradePricer<Trade = T>,
-    Pr::Pricing: HasDelta + HasGamma + HasIV,
+    Pr::Pricing: HasDelta + HasGamma + HasIV + Clone,
 {
     // Use fully qualified syntax to disambiguate - prefer ExecutableTrade::symbol
     let symbol = ExecutableTrade::symbol(trade);
@@ -172,6 +180,48 @@ where
         entry_time,
         entry_surface.as_ref(),
     )?;
+    let entry_context = EntryPricingContext {
+        pricing: entry_pricing,
+        spot: entry_spot_f64,
+        surface_time: entry_surface_time,
+    };
+
+    simulate_with_hedging_prepriced(
+        trade,
+        pricer,
+        options_repo,
+        equity_repo,
+        entry_time,
+        exit_time,
+        hedge_config,
+        timing,
+        entry_context,
+    ).await
+}
+
+/// Simulate with precomputed entry pricing (skips entry pricing pass).
+pub async fn simulate_with_hedging_prepriced<T, Pr>(
+    trade: &T,
+    pricer: &Pr,
+    options_repo: &dyn OptionsDataRepository,
+    equity_repo: &dyn EquityDataRepository,
+    entry_time: DateTime<Utc>,
+    exit_time: DateTime<Utc>,
+    hedge_config: Option<&HedgeConfig>,
+    timing: &TimingStrategy,
+    entry: EntryPricingContext<Pr::Pricing>,
+) -> Result<HedgedSimulationOutput<Pr::Pricing>, ExecutionError>
+where
+    T: ExecutableTrade<Pricer = Pr> + CompositeTrade + Clone + Send + Sync,
+    Pr: TradePricer<Trade = T>,
+    Pr::Pricing: HasDelta + HasGamma + HasIV + Clone,
+{
+    let symbol = ExecutableTrade::symbol(trade);
+    let EntryPricingContext {
+        pricing: entry_pricing,
+        spot: entry_spot_f64,
+        surface_time: entry_surface_time,
+    } = entry;
 
     // =========================================================================
     // PHASE 2: HEDGING LOOP (if configured)
@@ -308,6 +358,21 @@ where
     // =========================================================================
     // PHASE 3: EXIT
     // =========================================================================
+
+    if exit_time == entry_time {
+        let entry_pricing_clone = entry_pricing.clone();
+        return Ok(HedgedSimulationOutput {
+            entry_pricing: entry_pricing_clone,
+            exit_pricing: entry_pricing,
+            entry_spot: entry_spot_f64,
+            exit_spot: entry_spot_f64,
+            entry_time,
+            exit_time,
+            entry_surface_time,
+            exit_surface_time: entry_surface_time.unwrap_or(entry_time),
+            hedge_position,
+        });
+    }
 
     // Get spot at exit
     let exit_spot = equity_repo

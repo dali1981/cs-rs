@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod campaign_config;
+pub mod bpr;
 pub mod delta_providers;  // Delta computation strategies for hedging
 pub mod execution;  // Generic execution framework
 pub mod greeks_helpers;  // Greeks computation helpers
@@ -79,7 +80,15 @@ pub use calendar_straddle_pricer::{CalendarStraddlePricer, CalendarStraddlePrici
 // Utilities
 pub use trade_factory_impl::DefaultTradeFactory;
 pub use hedging_analytics::{HedgingComparison, HedgingStats};
-pub use hedging_simulator::{simulate_with_hedging, HedgedSimulationOutput, HasDelta, HasGamma, HasIV};
+pub use hedging_simulator::{
+    simulate_with_hedging,
+    simulate_with_hedging_prepriced,
+    EntryPricingContext,
+    HedgedSimulationOutput,
+    HasDelta,
+    HasGamma,
+    HasIV,
+};
 pub use greeks_helpers::{
     compute_straddle_greeks, compute_spread_net_greeks, compute_iron_butterfly_net_greeks,
     compute_calendar_straddle_net_greeks, compute_iv_change, average_iv,

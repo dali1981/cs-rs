@@ -31,16 +31,18 @@ use std::future::Future;
 use std::pin::Pin;
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use cs_domain::*;
 use cs_domain::strike_selection::{StrikeSelector, ExpirationCriteria};
 use crate::config::BacktestConfig;
-use crate::execution::{ExecutionConfig, ExecutableTrade};
+use crate::bpr::{build_bpr_timeline, BprPricingContext, HasBprTimeline};
+use crate::execution::{ExecutionConfig, ExecutableTrade, TradePricer};
 use crate::timing_strategy::TimingStrategy;
 use crate::backtest_use_case::{TradeResultMethods, TradeGenerationError};
 use crate::backtest_use_case_helpers::{PreparedData, TradeSimulator};
-use crate::hedging_simulator::simulate_with_hedging;
+use crate::hedging_simulator::{simulate_with_hedging_prepriced, EntryPricingContext, HedgedSimulationOutput};
 use crate::composite_pricer::{
-    CompositePricer, CalendarSpreadPricer, IronButterflyCompositePricer,
+    CompositePricer, CompositePricing, CalendarSpreadPricer, IronButterflyCompositePricer,
     LongIronButterflyCompositePricer, CalendarStraddleCompositePricer, ShortStraddlePricer,
 };
 use crate::rules::RuleEvaluator;
@@ -148,6 +150,121 @@ fn passes_market_rules(
     }
 }
 
+fn passes_trade_rules(
+    rule_evaluator: &RuleEvaluator,
+    event: &EarningsEvent,
+    entry_price: f64,
+) -> Result<(), TradeGenerationError> {
+    if !rule_evaluator.has_trade_rules() {
+        return Ok(());
+    }
+
+    match rule_evaluator.eval_trade_rules_with_reason(event, entry_price) {
+        None => Ok(()),
+        Some(rule_name) => Err(TradeGenerationError {
+            symbol: event.symbol.clone(),
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
+            reason: "TRADE_RULE_FAILED".into(),
+            details: Some(format!("Rule: {}, entry_price: {:.4}", rule_name, entry_price)),
+            phase: "filter".into(),
+        }),
+    }
+}
+
+fn entry_price_per_contract(pricing: &CompositePricing) -> f64 {
+    (pricing.net_cost.abs() * Decimal::from(CONTRACT_MULTIPLIER))
+        .to_f64()
+        .unwrap_or(0.0)
+}
+
+fn build_bpr_contexts(
+    entry_context: BprPricingContext,
+    sim: &HedgedSimulationOutput<CompositePricing>,
+) -> Vec<BprPricingContext> {
+    let mut contexts = Vec::with_capacity(2);
+    let entry_ts = entry_context.ts;
+    contexts.push(entry_context);
+
+    if sim.exit_time != entry_ts {
+        let fallback_spot = contexts[0].spot;
+        let exit_spot = Decimal::try_from(sim.exit_spot).unwrap_or(fallback_spot);
+        contexts.push(BprPricingContext {
+            ts: sim.exit_time,
+            spot: exit_spot,
+            pricing: sim.exit_pricing.clone(),
+        });
+    }
+
+    contexts
+}
+
+fn ensure_straddle_max_dte(
+    event: &EarningsEvent,
+    entry_date: NaiveDate,
+    expiration: NaiveDate,
+    max_short_dte: i32,
+) -> Result<(), TradeGenerationError> {
+    let dte = (expiration - entry_date).num_days() as i32;
+    if dte <= max_short_dte {
+        Ok(())
+    } else {
+        Err(TradeGenerationError {
+            symbol: event.symbol.clone(),
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
+            reason: "EXPIRATION_OUT_OF_RANGE".into(),
+            details: Some(format!("DTE {} > max_short_dte {}", dte, max_short_dte)),
+            phase: "filter".into(),
+        })
+    }
+}
+
+async fn maybe_attach_bpr_timeline<T, Pr, R>(
+    result: &mut R,
+    trade: &T,
+    pricer: &Pr,
+    options_repo: &dyn OptionsDataRepository,
+    equity_repo: &dyn EquityDataRepository,
+    entry_time: DateTime<Utc>,
+    exit_time: DateTime<Utc>,
+    timing: &TimingStrategy,
+    hedge_position: Option<&HedgePosition>,
+    pricing_contexts: Option<&[BprPricingContext]>,
+    exec_config: &ExecutionConfig,
+) where
+    T: ExecutableTrade<Pricer = Pr> + CompositeTrade + Clone + Send + Sync,
+    Pr: TradePricer<Trade = T, Pricing = CompositePricing>,
+    R: HasBprTimeline,
+{
+    if matches!(exec_config.margin_config.mode, MarginMode::Off) {
+        return;
+    }
+
+    match build_bpr_timeline(
+        trade,
+        pricer,
+        options_repo,
+        equity_repo,
+        entry_time,
+        exit_time,
+        timing,
+        hedge_position,
+        pricing_contexts,
+        &exec_config.margin_config,
+    )
+    .await
+    {
+        Ok(Some(timeline)) => {
+            result.set_bpr_timeline(Some(timeline));
+        }
+        Ok(None) => {}
+        Err(err) => {
+            tracing::debug!(error = %err, "BPR timeline build failed");
+        }
+    }
+}
+
 // ============================================================================
 // Concrete Strategy Implementations
 // ============================================================================
@@ -221,9 +338,39 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
                 None => return TradeExecutionOutcome::Skipped,
             };
 
-            // 3. Simulate WITH HEDGING
             let pricer = CalendarSpreadPricer::new();
-            let sim = match simulate_with_hedging(
+            let entry_pricing = match pricer.price_with_surface(
+                &trade,
+                &data.entry_chain,
+                data.spot.to_f64(),
+                entry_time,
+                Some(&data.surface),
+            ) {
+                Ok(pricing) => pricing,
+                Err(err) => {
+                    return TradeExecutionOutcome::Executed(
+                        trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
+                    );
+                }
+            };
+
+            let entry_price = entry_price_per_contract(&entry_pricing);
+            if let Err(error) = passes_trade_rules(&rule_evaluator, event, entry_price) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
+
+            // 3. Simulate WITH HEDGING
+            let bpr_entry_context = BprPricingContext {
+                ts: entry_time,
+                spot: data.spot.value,
+                pricing: entry_pricing.clone(),
+            };
+            let entry_context = EntryPricingContext {
+                pricing: entry_pricing,
+                spot: data.spot.to_f64(),
+                surface_time: Some(data.surface.as_of_time()),
+            };
+            let sim = match simulate_with_hedging_prepriced(
                 &trade,
                 &pricer,
                 options_repo,
@@ -232,6 +379,7 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
                 exit_time,
                 exec_config.hedge_config.as_ref(),
                 &timing,
+                entry_context,
             ).await {
                 Ok(s) => s,
                 Err(err) => {
@@ -242,6 +390,7 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
             };
 
             // 4. Build result with hedge data
+            let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
             let mut result = trade.to_result(
                 sim.entry_pricing,
                 sim.exit_pricing,
@@ -255,6 +404,21 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
                 ),
                 Some(event),
             );
+
+            maybe_attach_bpr_timeline(
+                &mut result,
+                &trade,
+                &pricer,
+                options_repo,
+                equity_repo,
+                entry_time,
+                exit_time,
+                &timing,
+                sim.hedge_position.as_ref(),
+                Some(&bpr_contexts),
+                exec_config,
+            )
+            .await;
 
             // 5. Apply hedge results if present
             if let Some(pos) = sim.hedge_position {
@@ -345,9 +509,39 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
                 None => return TradeExecutionOutcome::Skipped,
             };
 
-            // 3. Simulate WITH HEDGING
             let pricer = IronButterflyCompositePricer::new();
-            let sim = match simulate_with_hedging(
+            let entry_pricing = match pricer.price_with_surface(
+                &trade,
+                &data.entry_chain,
+                data.spot.to_f64(),
+                entry_time,
+                Some(&data.surface),
+            ) {
+                Ok(pricing) => pricing,
+                Err(err) => {
+                    return TradeExecutionOutcome::Executed(
+                        trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
+                    );
+                }
+            };
+
+            let entry_price = entry_price_per_contract(&entry_pricing);
+            if let Err(error) = passes_trade_rules(&rule_evaluator, event, entry_price) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
+
+            // 3. Simulate WITH HEDGING
+            let bpr_entry_context = BprPricingContext {
+                ts: entry_time,
+                spot: data.spot.value,
+                pricing: entry_pricing.clone(),
+            };
+            let entry_context = EntryPricingContext {
+                pricing: entry_pricing,
+                spot: data.spot.to_f64(),
+                surface_time: Some(data.surface.as_of_time()),
+            };
+            let sim = match simulate_with_hedging_prepriced(
                 &trade,
                 &pricer,
                 options_repo,
@@ -356,6 +550,7 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
                 exit_time,
                 exec_config.hedge_config.as_ref(),
                 &timing,
+                entry_context,
             ).await {
                 Ok(s) => s,
                 Err(err) => {
@@ -366,6 +561,7 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
             };
 
             // 4. Build result with hedge data
+            let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
             let mut result = trade.to_result(
                 sim.entry_pricing,
                 sim.exit_pricing,
@@ -379,6 +575,21 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
                 ),
                 Some(event),
             );
+
+            maybe_attach_bpr_timeline(
+                &mut result,
+                &trade,
+                &pricer,
+                options_repo,
+                equity_repo,
+                entry_time,
+                exit_time,
+                &timing,
+                sim.hedge_position.as_ref(),
+                Some(&bpr_contexts),
+                exec_config,
+            )
+            .await;
 
             // 5. Apply hedge results if present
             if let Some(pos) = sim.hedge_position {
@@ -468,9 +679,39 @@ impl TradeStrategy<IronButterflyResult> for LongIronButterflyStrategy {
                 None => return TradeExecutionOutcome::Skipped,
             };
 
-            // 3. Simulate WITH HEDGING
             let pricer = LongIronButterflyCompositePricer::new();
-            let sim = match simulate_with_hedging(
+            let entry_pricing = match pricer.price_with_surface(
+                &trade,
+                &data.entry_chain,
+                data.spot.to_f64(),
+                entry_time,
+                Some(&data.surface),
+            ) {
+                Ok(pricing) => pricing,
+                Err(err) => {
+                    return TradeExecutionOutcome::Executed(
+                        trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
+                    );
+                }
+            };
+
+            let entry_price = entry_price_per_contract(&entry_pricing);
+            if let Err(error) = passes_trade_rules(&rule_evaluator, event, entry_price) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
+
+            // 3. Simulate WITH HEDGING
+            let bpr_entry_context = BprPricingContext {
+                ts: entry_time,
+                spot: data.spot.value,
+                pricing: entry_pricing.clone(),
+            };
+            let entry_context = EntryPricingContext {
+                pricing: entry_pricing,
+                spot: data.spot.to_f64(),
+                surface_time: Some(data.surface.as_of_time()),
+            };
+            let sim = match simulate_with_hedging_prepriced(
                 &trade,
                 &pricer,
                 options_repo,
@@ -479,6 +720,7 @@ impl TradeStrategy<IronButterflyResult> for LongIronButterflyStrategy {
                 exit_time,
                 exec_config.hedge_config.as_ref(),
                 &timing,
+                entry_context,
             ).await {
                 Ok(s) => s,
                 Err(err) => {
@@ -489,6 +731,7 @@ impl TradeStrategy<IronButterflyResult> for LongIronButterflyStrategy {
             };
 
             // 4. Build result with hedge data
+            let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
             let mut result = trade.to_result(
                 sim.entry_pricing,
                 sim.exit_pricing,
@@ -502,6 +745,21 @@ impl TradeStrategy<IronButterflyResult> for LongIronButterflyStrategy {
                 ),
                 Some(event),
             );
+
+            maybe_attach_bpr_timeline(
+                &mut result,
+                &trade,
+                &pricer,
+                options_repo,
+                equity_repo,
+                entry_time,
+                exit_time,
+                &timing,
+                sim.hedge_position.as_ref(),
+                Some(&bpr_contexts),
+                exec_config,
+            )
+            .await;
 
             // 5. Apply hedge results if present
             if let Some(pos) = sim.hedge_position {
@@ -553,6 +811,7 @@ impl TradeStrategy<StraddleResult> for LongStraddleStrategy {
         exit_time: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<StraddleResult>> + Send + 'a>> {
         let min_short_dte = criteria.min_short_dte;
+        let max_short_dte = criteria.max_short_dte;
         let timing = self.timing.clone();
         let rule_evaluator = self.rule_evaluator.clone();
         Box::pin(async move {
@@ -588,9 +847,48 @@ impl TradeStrategy<StraddleResult> for LongStraddleStrategy {
                 None => return TradeExecutionOutcome::Skipped,
             };
 
-            // 4. Simulate WITH HEDGING (integrated into execution loop)
+            if let Err(error) = ensure_straddle_max_dte(
+                event,
+                entry_date,
+                trade.expiration(),
+                max_short_dte,
+            ) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
+
             let pricer = CompositePricer::default();
-            let sim = match simulate_with_hedging(
+            let entry_pricing = match pricer.price_with_surface(
+                &trade,
+                &data.entry_chain,
+                data.spot.to_f64(),
+                entry_time,
+                Some(&data.surface),
+            ) {
+                Ok(pricing) => pricing,
+                Err(err) => {
+                    return TradeExecutionOutcome::Executed(
+                        trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
+                    );
+                }
+            };
+
+            let entry_price = entry_price_per_contract(&entry_pricing);
+            if let Err(error) = passes_trade_rules(&rule_evaluator, event, entry_price) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
+
+            // 4. Simulate WITH HEDGING (integrated into execution loop)
+            let bpr_entry_context = BprPricingContext {
+                ts: entry_time,
+                spot: data.spot.value,
+                pricing: entry_pricing.clone(),
+            };
+            let entry_context = EntryPricingContext {
+                pricing: entry_pricing,
+                spot: data.spot.to_f64(),
+                surface_time: Some(data.surface.as_of_time()),
+            };
+            let sim = match simulate_with_hedging_prepriced(
                 &trade,
                 &pricer,
                 options_repo,
@@ -599,6 +897,7 @@ impl TradeStrategy<StraddleResult> for LongStraddleStrategy {
                 exit_time,
                 exec_config.hedge_config.as_ref(),
                 &timing,
+                entry_context,
             ).await {
                 Ok(s) => s,
                 Err(err) => {
@@ -609,6 +908,7 @@ impl TradeStrategy<StraddleResult> for LongStraddleStrategy {
             };
 
             // 4. Build result with hedge data
+            let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
             let mut result = trade.to_result(
                 sim.entry_pricing,
                 sim.exit_pricing,
@@ -622,6 +922,21 @@ impl TradeStrategy<StraddleResult> for LongStraddleStrategy {
                 ),
                 Some(event),
             );
+
+            maybe_attach_bpr_timeline(
+                &mut result,
+                &trade,
+                &pricer,
+                options_repo,
+                equity_repo,
+                entry_time,
+                exit_time,
+                &timing,
+                sim.hedge_position.as_ref(),
+                Some(&bpr_contexts),
+                exec_config,
+            )
+            .await;
 
             // 5. Apply hedge results if present
             if let Some(pos) = sim.hedge_position {
@@ -673,6 +988,7 @@ impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
         exit_time: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<StraddleResult>> + Send + 'a>> {
         let min_short_dte = criteria.min_short_dte;
+        let max_short_dte = criteria.max_short_dte;
         let timing = self.timing.clone();
         let rule_evaluator = self.rule_evaluator.clone();
         Box::pin(async move {
@@ -708,9 +1024,48 @@ impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
                 None => return TradeExecutionOutcome::Skipped,
             };
 
-            // 3. Simulate WITH HEDGING (integrated into execution loop)
+            if let Err(error) = ensure_straddle_max_dte(
+                event,
+                entry_date,
+                trade.expiration(),
+                max_short_dte,
+            ) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
+
             let pricer = ShortStraddlePricer::default();
-            let sim = match simulate_with_hedging(
+            let entry_pricing = match pricer.price_with_surface(
+                &trade,
+                &data.entry_chain,
+                data.spot.to_f64(),
+                entry_time,
+                Some(&data.surface),
+            ) {
+                Ok(pricing) => pricing,
+                Err(err) => {
+                    return TradeExecutionOutcome::Executed(
+                        trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
+                    );
+                }
+            };
+
+            let entry_price = entry_price_per_contract(&entry_pricing);
+            if let Err(error) = passes_trade_rules(&rule_evaluator, event, entry_price) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
+
+            // 3. Simulate WITH HEDGING (integrated into execution loop)
+            let bpr_entry_context = BprPricingContext {
+                ts: entry_time,
+                spot: data.spot.value,
+                pricing: entry_pricing.clone(),
+            };
+            let entry_context = EntryPricingContext {
+                pricing: entry_pricing,
+                spot: data.spot.to_f64(),
+                surface_time: Some(data.surface.as_of_time()),
+            };
+            let sim = match simulate_with_hedging_prepriced(
                 &trade,
                 &pricer,
                 options_repo,
@@ -719,6 +1074,7 @@ impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
                 exit_time,
                 exec_config.hedge_config.as_ref(),
                 &timing,
+                entry_context,
             ).await {
                 Ok(s) => s,
                 Err(err) => {
@@ -729,6 +1085,7 @@ impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
             };
 
             // 4. Build result with hedge data
+            let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
             let mut result = trade.to_result(
                 sim.entry_pricing,
                 sim.exit_pricing,
@@ -742,6 +1099,21 @@ impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
                 ),
                 Some(event),
             );
+
+            maybe_attach_bpr_timeline(
+                &mut result,
+                &trade,
+                &pricer,
+                options_repo,
+                equity_repo,
+                entry_time,
+                exit_time,
+                &timing,
+                sim.hedge_position.as_ref(),
+                Some(&bpr_contexts),
+                exec_config,
+            )
+            .await;
 
             // 5. Apply hedge results if present
             if let Some(pos) = sim.hedge_position {
@@ -794,6 +1166,7 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
         exit_time: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<StraddleResult>> + Send + 'a>> {
         let min_short_dte = criteria.min_short_dte;
+        let max_short_dte = criteria.max_short_dte;
         let timing = self.timing.clone();
         let rule_evaluator = self.rule_evaluator.clone();
         Box::pin(async move {
@@ -824,9 +1197,48 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
                 None => return TradeExecutionOutcome::Skipped,
             };
 
-            // 3. Simulate WITH HEDGING
+            if let Err(error) = ensure_straddle_max_dte(
+                event,
+                entry_date,
+                trade.expiration(),
+                max_short_dte,
+            ) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
+
             let pricer = CompositePricer::default();
-            let sim = match simulate_with_hedging(
+            let entry_pricing = match pricer.price_with_surface(
+                &trade,
+                &data.entry_chain,
+                data.spot.to_f64(),
+                entry_time,
+                Some(&data.surface),
+            ) {
+                Ok(pricing) => pricing,
+                Err(err) => {
+                    return TradeExecutionOutcome::Executed(
+                        trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
+                    );
+                }
+            };
+
+            let entry_price = entry_price_per_contract(&entry_pricing);
+            if let Err(error) = passes_trade_rules(&rule_evaluator, event, entry_price) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
+
+            // 3. Simulate WITH HEDGING
+            let bpr_entry_context = BprPricingContext {
+                ts: entry_time,
+                spot: data.spot.value,
+                pricing: entry_pricing.clone(),
+            };
+            let entry_context = EntryPricingContext {
+                pricing: entry_pricing,
+                spot: data.spot.to_f64(),
+                surface_time: Some(data.surface.as_of_time()),
+            };
+            let sim = match simulate_with_hedging_prepriced(
                 &trade,
                 &pricer,
                 options_repo,
@@ -835,6 +1247,7 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
                 exit_time,
                 exec_config.hedge_config.as_ref(),
                 &timing,
+                entry_context,
             ).await {
                 Ok(s) => s,
                 Err(err) => {
@@ -845,6 +1258,7 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
             };
 
             // 4. Build result with hedge data
+            let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
             let mut result = trade.to_result(
                 sim.entry_pricing,
                 sim.exit_pricing,
@@ -858,6 +1272,21 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
                 ),
                 Some(event),
             );
+
+            maybe_attach_bpr_timeline(
+                &mut result,
+                &trade,
+                &pricer,
+                options_repo,
+                equity_repo,
+                entry_time,
+                exit_time,
+                &timing,
+                sim.hedge_position.as_ref(),
+                Some(&bpr_contexts),
+                exec_config,
+            )
+            .await;
 
             // 5. Apply hedge results if present
             if let Some(pos) = sim.hedge_position {
@@ -929,9 +1358,39 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
                 None => return TradeExecutionOutcome::Skipped,
             };
 
-            // 3. Simulate WITH HEDGING
             let pricer = CalendarStraddleCompositePricer::new();
-            let sim = match simulate_with_hedging(
+            let entry_pricing = match pricer.price_with_surface(
+                &trade,
+                &data.entry_chain,
+                data.spot.to_f64(),
+                entry_time,
+                Some(&data.surface),
+            ) {
+                Ok(pricing) => pricing,
+                Err(err) => {
+                    return TradeExecutionOutcome::Executed(
+                        trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
+                    );
+                }
+            };
+
+            let entry_price = entry_price_per_contract(&entry_pricing);
+            if let Err(error) = passes_trade_rules(&rule_evaluator, event, entry_price) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
+
+            // 3. Simulate WITH HEDGING
+            let bpr_entry_context = BprPricingContext {
+                ts: entry_time,
+                spot: data.spot.value,
+                pricing: entry_pricing.clone(),
+            };
+            let entry_context = EntryPricingContext {
+                pricing: entry_pricing,
+                spot: data.spot.to_f64(),
+                surface_time: Some(data.surface.as_of_time()),
+            };
+            let sim = match simulate_with_hedging_prepriced(
                 &trade,
                 &pricer,
                 options_repo,
@@ -940,6 +1399,7 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
                 exit_time,
                 exec_config.hedge_config.as_ref(),
                 &timing,
+                entry_context,
             ).await {
                 Ok(s) => s,
                 Err(err) => {
@@ -950,6 +1410,7 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
             };
 
             // 4. Build result with hedge data
+            let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
             let mut result = trade.to_result(
                 sim.entry_pricing,
                 sim.exit_pricing,
@@ -963,6 +1424,21 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
                 ),
                 Some(event),
             );
+
+            maybe_attach_bpr_timeline(
+                &mut result,
+                &trade,
+                &pricer,
+                options_repo,
+                equity_repo,
+                entry_time,
+                exit_time,
+                &timing,
+                sim.hedge_position.as_ref(),
+                Some(&bpr_contexts),
+                exec_config,
+            )
+            .await;
 
             // 5. Apply hedge results if present
             if let Some(pos) = sim.hedge_position {

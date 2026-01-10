@@ -6,6 +6,7 @@ use console::style;
 use tabled::{Table, Tabled};
 
 use cs_backtest::{BacktestResult, TradeResultMethods, UnifiedBacktestResult};
+use cs_backtest::bpr::{build_portfolio_bpr_timeline, HasBprTimeline};
 use cs_domain::{TradeResult as TradeResultTrait, HasAccounting, HasTradingCost, ToPnlRecord, ReturnBasis};
 use rust_decimal::Decimal;
 
@@ -28,10 +29,16 @@ impl BacktestOutputHandler {
     /// Display backtest results with capital-weighted metrics and trading costs
     pub fn display_with_accounting<R>(result: &BacktestResult<R>)
     where
-        R: TradeResultTrait + TradeResultMethods + HasAccounting + HasTradingCost + ToPnlRecord,
+        R: TradeResultTrait
+            + TradeResultMethods
+            + HasAccounting
+            + HasTradingCost
+            + ToPnlRecord
+            + HasBprTimeline,
     {
         Self::display_summary(result);
         Self::display_capital_weighted(result);
+        Self::display_bpr_metrics(result);
         Self::display_pnl_statistics(result);
         Self::display_trading_costs(result);
         Self::display_sample_trades(result);
@@ -114,7 +121,7 @@ impl BacktestOutputHandler {
     /// Display capital-weighted metrics (more accurate for varying position sizes)
     fn display_capital_weighted<R>(result: &BacktestResult<R>)
     where
-        R: TradeResultTrait + TradeResultMethods + HasAccounting,
+        R: TradeResultTrait + TradeResultMethods + HasAccounting + HasBprTimeline,
     {
         use rust_decimal::prelude::ToPrimitive;
 
@@ -157,6 +164,8 @@ impl BacktestOutputHandler {
             ReturnBasis::Premium,
             ReturnBasis::CapitalRequired,
             ReturnBasis::MaxLoss,
+            ReturnBasis::BprPeak,
+            ReturnBasis::BprAvg,
         ]
         .iter()
         .map(|basis| {
@@ -331,6 +340,135 @@ impl BacktestOutputHandler {
         }
     }
 
+    fn display_bpr_metrics<R>(result: &BacktestResult<R>)
+    where
+        R: TradeResultTrait + TradeResultMethods + HasBprTimeline,
+    {
+        use rust_decimal::prelude::ToPrimitive;
+
+        let Some(portfolio) = build_portfolio_bpr_timeline(&result.results) else {
+            return;
+        };
+
+        let use_maintenance = result.margin_config.use_maintenance;
+        let basis_label = if use_maintenance { "maint" } else { "initial" };
+        let (portfolio_max, portfolio_avg) = if use_maintenance {
+            (portfolio.summary.max_total_maint, portfolio.summary.avg_total_maint)
+        } else {
+            (portfolio.summary.max_total_initial, portfolio.summary.avg_total_initial)
+        };
+        let (max_option_bpr, max_hedge_bpr) = if use_maintenance {
+            (portfolio.summary.max_option_maint, portfolio.summary.max_hedge_maint)
+        } else {
+            let mut max_option = Decimal::ZERO;
+            let mut max_hedge = Decimal::ZERO;
+            for snap in &portfolio.snapshots {
+                if snap.option_initial > max_option {
+                    max_option = snap.option_initial;
+                }
+                if snap.hedge_initial > max_hedge {
+                    max_hedge = snap.hedge_initial;
+                }
+            }
+            (max_option, max_hedge)
+        };
+
+        let mut trade_rocs = Vec::new();
+        let mut covered = 0usize;
+        for trade in &result.results {
+            let Some(timeline) = trade.bpr_timeline() else { continue };
+            covered += 1;
+            let denom = if use_maintenance {
+                timeline.summary.max_total_maint
+            } else {
+                timeline.summary.max_total_initial
+            };
+            if denom.is_zero() {
+                continue;
+            }
+            let pnl = TradeResultMethods::total_pnl_with_hedge(trade)
+                .unwrap_or_else(|| TradeResultMethods::pnl(trade));
+            let roc = (pnl / denom).to_f64().unwrap_or(0.0);
+            trade_rocs.push(roc);
+        }
+
+        if trade_rocs.is_empty() {
+            return;
+        }
+
+        let mean_roc = trade_rocs.iter().sum::<f64>() / trade_rocs.len() as f64;
+        let variance = trade_rocs
+            .iter()
+            .map(|r| {
+                let diff = r - mean_roc;
+                diff * diff
+            })
+            .sum::<f64>()
+            / trade_rocs.len() as f64;
+        let std_roc = variance.sqrt();
+        let sharpe = if std_roc > 0.0 { mean_roc / std_roc } else { 0.0 };
+
+        let total_pnl = if result.has_hedging() {
+            result.total_pnl_with_hedge()
+        } else {
+            result.total_pnl()
+        };
+        let portfolio_roc = if portfolio_max.is_zero() {
+            0.0
+        } else {
+            (total_pnl / portfolio_max).to_f64().unwrap_or(0.0)
+        };
+
+        println!("{}", style("Margin & Buying Power (IBKR-like):").bold().magenta());
+
+        let rows = vec![
+            ResultRow {
+                metric: "Trades with BPR".into(),
+                value: format!("{}/{}", covered, result.results.len()),
+            },
+            ResultRow {
+                metric: "Return Denominator".into(),
+                value: basis_label.to_string(),
+            },
+            ResultRow {
+                metric: "Portfolio Max BPR".into(),
+                value: format!("${:.2}", portfolio_max),
+            },
+            ResultRow {
+                metric: "Portfolio Avg BPR".into(),
+                value: format!("${:.2}", portfolio_avg),
+            },
+            ResultRow {
+                metric: "Portfolio ROC on BPR".into(),
+                value: format!("{:.2}%", portfolio_roc * 100.0),
+            },
+            ResultRow {
+                metric: "Mean Trade ROC".into(),
+                value: format!("{:.2}%", mean_roc * 100.0),
+            },
+            ResultRow {
+                metric: "Std Trade ROC".into(),
+                value: format!("{:.2}%", std_roc * 100.0),
+            },
+            ResultRow {
+                metric: "Trade ROC Sharpe".into(),
+                value: format!("{:.2}", sharpe),
+            },
+            ResultRow {
+                metric: "Max Option BPR".into(),
+                value: format!("${:.2}", max_option_bpr),
+            },
+            ResultRow {
+                metric: "Max Hedge BPR".into(),
+                value: format!("${:.2}", max_hedge_bpr),
+            },
+        ];
+
+        let table = Table::new(rows);
+        println!("{}", table);
+        println!();
+    }
+
     /// Display dropped events summary
     fn display_dropped_events<R>(result: &BacktestResult<R>)
     where
@@ -355,7 +493,7 @@ impl BacktestOutputHandler {
     /// Save results to file
     pub fn save<R>(result: &BacktestResult<R>, output: &PathBuf) -> Result<()>
     where
-        R: TradeResultTrait + TradeResultMethods + serde::Serialize,
+        R: TradeResultTrait + TradeResultMethods + HasBprTimeline + serde::Serialize,
     {
         use anyhow::Context;
 
@@ -371,16 +509,36 @@ impl BacktestOutputHandler {
             .map(|ext| ext.eq_ignore_ascii_case("json"))
             .unwrap_or(false);
 
+        let bpr_portfolio = build_portfolio_bpr_timeline(&result.results).map(|timeline| {
+            let use_maintenance = result.margin_config.use_maintenance;
+            let (max_basis, avg_basis) = if use_maintenance {
+                (timeline.summary.max_total_maint, timeline.summary.avg_total_maint)
+            } else {
+                (timeline.summary.max_total_initial, timeline.summary.avg_total_initial)
+            };
+            BprPortfolioOutput {
+                summary: timeline.summary,
+                use_maintenance,
+                max_basis,
+                avg_basis,
+            }
+        });
+
+        let payload = BacktestJsonOutput {
+            results: &result.results,
+            bpr_portfolio,
+        };
+
         if is_json {
             // Save results as JSON
-            let json_content = serde_json::to_string_pretty(&result.results)
+            let json_content = serde_json::to_string_pretty(&payload)
                 .context("Failed to serialize results to JSON")?;
             std::fs::write(output, json_content)
                 .context("Failed to write JSON file")?;
             println!("{}", style(format!("Results saved to {:?}", output)).green());
         } else {
             // Default to JSON if no extension
-            let json_content = serde_json::to_string_pretty(&result.results)
+            let json_content = serde_json::to_string_pretty(&payload)
                 .context("Failed to serialize results to JSON")?;
             std::fs::write(output, json_content)
                 .context("Failed to write JSON file")?;
@@ -425,37 +583,85 @@ struct BasisMetrics {
     coverage_total: usize,
 }
 
+#[derive(serde::Serialize)]
+struct BacktestJsonOutput<'a, R> {
+    results: &'a [R],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bpr_portfolio: Option<BprPortfolioOutput>,
+}
+
+#[derive(serde::Serialize)]
+struct BprPortfolioOutput {
+    summary: cs_domain::BprSummary,
+    use_maintenance: bool,
+    max_basis: Decimal,
+    avg_basis: Decimal,
+}
+
 fn compute_basis_metrics<R>(result: &BacktestResult<R>, basis: ReturnBasis) -> BasisMetrics
 where
-    R: TradeResultTrait + TradeResultMethods + HasAccounting,
+    R: TradeResultTrait + TradeResultMethods + HasAccounting + HasBprTimeline,
 {
+    use rust_decimal::prelude::ToPrimitive;
+    let use_maintenance = result.margin_config.use_maintenance;
     let mut total_basis = Decimal::ZERO;
     let mut total_pnl = Decimal::ZERO;
     let mut returns = Vec::new();
     let mut supported = 0usize;
 
-    for trade in &result.results {
-        if let Some(basis_value) = trade.return_basis_value(basis) {
-            supported += 1;
-            total_basis += basis_value;
-            total_pnl += trade.realized_pnl();
-            if let Some(ret) = trade.return_on_basis(basis) {
-                returns.push(ret);
+    let basis_value_for_trade = |trade: &R| -> Option<Decimal> {
+        match basis {
+            ReturnBasis::Premium | ReturnBasis::CapitalRequired | ReturnBasis::MaxLoss => {
+                trade.return_basis_value(basis)
             }
+            ReturnBasis::BprPeak => trade.bpr_timeline().map(|timeline| {
+                if use_maintenance {
+                    timeline.summary.max_total_maint
+                } else {
+                    timeline.summary.max_total_initial
+                }
+            }),
+            ReturnBasis::BprAvg => trade.bpr_timeline().map(|timeline| {
+                if use_maintenance {
+                    timeline.summary.avg_total_maint
+                } else {
+                    timeline.summary.avg_total_initial
+                }
+            }),
         }
+    };
+
+    for trade in &result.results {
+        let Some(basis_value) = basis_value_for_trade(trade) else {
+            continue;
+        };
+        if basis_value.is_zero() {
+            continue;
+        }
+        supported += 1;
+        total_basis += basis_value;
+        let pnl = trade.realized_pnl();
+        total_pnl += pnl;
+        let ret = (pnl / basis_value).to_f64().unwrap_or(0.0);
+        returns.push(ret);
     }
 
     let return_on_basis = if total_basis.is_zero() {
         0.0
     } else {
-        (total_pnl / total_basis).try_into().unwrap_or(0.0)
+        (total_pnl / total_basis).to_f64().unwrap_or(0.0)
     };
 
     let weighted_return = {
         let weighted_sum: f64 = result.results.iter()
             .filter_map(|trade| {
-                let basis_value = trade.return_basis_value(basis)?;
-                let ret = trade.return_on_basis(basis)?;
+                let basis_value = basis_value_for_trade(trade)?;
+                if basis_value.is_zero() {
+                    return None;
+                }
+                let pnl = trade.realized_pnl();
+                let ret = (pnl / basis_value).to_f64();
+                let ret = ret.unwrap_or(0.0);
                 let basis_f: f64 = basis_value.try_into().unwrap_or(0.0);
                 if basis_f > 0.0 {
                     Some(basis_f * ret)

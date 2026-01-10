@@ -60,6 +60,7 @@ pub trait HasAccounting {
             ReturnBasis::Premium => Some(self.premium_magnitude()),
             ReturnBasis::CapitalRequired => Some(self.capital_required().initial_requirement),
             ReturnBasis::MaxLoss => self.max_loss(),
+            ReturnBasis::BprPeak | ReturnBasis::BprAvg => None,
         }
     }
 

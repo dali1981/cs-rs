@@ -12,6 +12,12 @@ pub enum ReturnBasis {
     CapitalRequired,
     /// Maximum loss (defined-risk strategies).
     MaxLoss,
+    /// Peak BPR over the trade lifetime.
+    #[serde(rename = "bpr-peak")]
+    BprPeak,
+    /// Average BPR over the trade lifetime.
+    #[serde(rename = "bpr-avg")]
+    BprAvg,
 }
 
 impl Default for ReturnBasis {
@@ -26,6 +32,8 @@ impl ReturnBasis {
             ReturnBasis::Premium => "premium",
             ReturnBasis::CapitalRequired => "capital-required",
             ReturnBasis::MaxLoss => "max-loss",
+            ReturnBasis::BprPeak => "bpr-peak",
+            ReturnBasis::BprAvg => "bpr-avg",
         }
     }
 }

@@ -288,6 +288,7 @@ impl PyBacktestUseCase {
             trading_costs: cs_domain::TradingCostConfig::default(),
             rules: cs_domain::FileRulesConfig::default(),
             return_basis: ReturnBasis::default(),
+            margin: cs_domain::MarginConfig::default(),
         };
 
         // Create repositories

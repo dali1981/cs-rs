@@ -156,6 +156,7 @@ impl ExecutableTrade for LongStraddle {
             total_pnl_with_hedge: None,
             position_attribution: None,
             cost_summary: None,  // Costs applied separately via ApplyCosts trait
+            bpr_timeline: None,
             direction: Some(StraddleDirection::Long),
         }
     }
@@ -211,6 +212,7 @@ impl ExecutableTrade for LongStraddle {
             total_pnl_with_hedge: None,
             position_attribution: None,
             cost_summary: None,
+            bpr_timeline: None,
             direction: Some(StraddleDirection::Long),
         }
     }
@@ -363,6 +365,7 @@ impl ExecutableTrade for ShortStraddle {
             total_pnl_with_hedge: None,
             position_attribution: None,
             cost_summary: None,
+            bpr_timeline: None,
             direction: Some(StraddleDirection::Short),
         }
     }
@@ -418,6 +421,7 @@ impl ExecutableTrade for ShortStraddle {
             total_pnl_with_hedge: None,
             position_attribution: None,
             cost_summary: None,
+            bpr_timeline: None,
             direction: Some(StraddleDirection::Short),
         }
     }

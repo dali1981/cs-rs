@@ -5,6 +5,7 @@ use cs_analytics::{PricingModel, InterpolationMode};
 use cs_domain::{
     TimingConfig, TradeSelectionCriteria, StrikeMatchMode, HedgeConfig, AttributionConfig,
     TradingRange, TradingPeriodSpec, FilterCriteria, TradingCostConfig, FileRulesConfig, ReturnBasis,
+    MarginConfig,
 };
 use thiserror::Error;
 
@@ -129,6 +130,9 @@ pub struct BacktestConfig {
     /// Return denominator used for capital-weighted metrics
     #[serde(default)]
     pub return_basis: ReturnBasis,
+    /// Margin & buying power configuration (IBKR-like)
+    #[serde(default)]
+    pub margin: MarginConfig,
 }
 
 fn default_wing_width() -> f64 {
@@ -270,6 +274,7 @@ impl Default for BacktestConfig {
             trading_costs: TradingCostConfig::default(), // No costs by default (explicit opt-in)
             rules: FileRulesConfig::default(), // No entry rules by default
             return_basis: ReturnBasis::default(),
+            margin: MarginConfig::default(),
         }
     }
 }

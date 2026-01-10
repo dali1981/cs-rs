@@ -129,6 +129,7 @@ impl CampaignUseCase {
             min_credit: None,
             trading_costs: cs_domain::TradingCostConfig::default(),
             hedge_config: None,
+            margin_config: cs_domain::MarginConfig::default(),
         };
 
         Ok(SessionExecutor::new(
@@ -139,4 +140,3 @@ impl CampaignUseCase {
         ))
     }
 }
-

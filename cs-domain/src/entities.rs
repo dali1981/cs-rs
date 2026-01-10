@@ -1195,6 +1195,10 @@ pub struct CalendarSpreadResult {
     /// When present, pnl field represents NET P&L (after costs)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_summary: Option<CostSummary>,
+
+    /// Buying power requirement snapshots (IBKR-like, optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bpr_timeline: Option<crate::BprTimeline>,
 }
 
 impl CalendarSpreadResult {
@@ -1317,6 +1321,10 @@ pub struct IronButterflyResult {
     /// When present, pnl field represents NET P&L (after costs)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_summary: Option<CostSummary>,
+
+    /// Buying power requirement snapshots (IBKR-like, optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bpr_timeline: Option<crate::BprTimeline>,
 }
 
 impl IronButterflyResult {
@@ -1430,6 +1438,10 @@ pub struct StraddleResult {
     /// Trade direction (long or short straddle)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direction: Option<StraddleDirection>,
+
+    /// Buying power requirement snapshots (IBKR-like, optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bpr_timeline: Option<crate::BprTimeline>,
 }
 
 impl StraddleResult {
@@ -1526,6 +1538,10 @@ pub struct CalendarStraddleResult {
     /// When present, pnl field represents NET P&L (after costs)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_summary: Option<CostSummary>,
+
+    /// Buying power requirement snapshots (IBKR-like, optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bpr_timeline: Option<crate::BprTimeline>,
 }
 
 impl CalendarStraddleResult {
@@ -2175,6 +2191,8 @@ mod tests {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,
+            bpr_timeline: None,
         };
 
         assert_eq!(result.iv_ratio(), Some(1.2));
@@ -2230,6 +2248,8 @@ mod tests {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,
+            bpr_timeline: None,
         };
 
         assert!(result.is_winner());
@@ -2427,6 +2447,8 @@ mod tests {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,
+            bpr_timeline: None,
         };
 
         assert!(result.is_winner());

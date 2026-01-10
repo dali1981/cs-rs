@@ -280,6 +280,7 @@ impl TradeAccounting {
             super::ReturnBasis::Premium => Some(self.entry_cash_flow.abs()),
             super::ReturnBasis::CapitalRequired => Some(self.capital_required.initial_requirement),
             super::ReturnBasis::MaxLoss => self.max_loss,
+            super::ReturnBasis::BprPeak | super::ReturnBasis::BprAvg => None,
         }
     }
 

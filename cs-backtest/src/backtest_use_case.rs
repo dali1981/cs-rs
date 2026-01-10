@@ -24,6 +24,7 @@ pub struct BacktestResult<R> {
     pub total_opportunities: usize,
     pub dropped_events: Vec<TradeGenerationError>,
     pub return_basis: ReturnBasis,
+    pub margin_config: MarginConfig,
 }
 
 /// Unified backtest result that can hold any strategy result type
@@ -824,6 +825,7 @@ where
             total_opportunities,
             dropped_events,
             return_basis: self.config.return_basis,
+            margin_config: self.config.margin.clone(),
         })
     }
 
@@ -1001,7 +1003,9 @@ where
         };
 
         // Add trading costs and hedging config from backtest config
-        let config = base_config.with_trading_costs(self.config.trading_costs.clone());
+        let config = base_config
+            .with_trading_costs(self.config.trading_costs.clone())
+            .with_margin_config(self.config.margin.clone());
 
         // Add hedging if enabled
         if self.config.hedge_config.is_enabled() {

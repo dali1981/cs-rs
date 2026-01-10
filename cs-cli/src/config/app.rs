@@ -13,7 +13,7 @@ use anyhow::Result;
 
 use cs_backtest::{SpreadType, SelectionType};
 use cs_analytics::{PricingModel, InterpolationMode};
-use cs_domain::{StrikeMatchMode, AttributionConfig, VolatilitySource, SnapshotTimes, ReturnBasis};
+use cs_domain::{StrikeMatchMode, AttributionConfig, VolatilitySource, SnapshotTimes, ReturnBasis, MarginConfig};
 use crate::cli_args::CliOverrides;
 
 /// Full layered configuration
@@ -26,6 +26,8 @@ pub struct AppConfig {
     pub strategy: StrategyConfig,
     pub pricing: PricingConfig,
     pub metrics: MetricsConfig,
+    #[serde(default)]
+    pub margin: MarginConfig,
     pub hedging: HedgingConfig,
     pub attribution: AttributionConfig,
     #[serde(default)]
@@ -137,6 +139,7 @@ impl Default for AppConfig {
             strategy: StrategyConfig::default(),
             pricing: PricingConfig::default(),
             metrics: MetricsConfig::default(),
+            margin: MarginConfig::default(),
             hedging: HedgingConfig::default(),
             attribution: AttributionConfig::default(),
             strike_match_mode: StrikeMatchMode::default(),
@@ -423,6 +426,7 @@ impl AppConfig {
             // Rules from TOML (CLI override applied in BacktestConfigBuilder)
             rules: self.rules.clone(),
             return_basis: self.metrics.return_basis,
+            margin: self.margin.clone(),
         }
     }
 
