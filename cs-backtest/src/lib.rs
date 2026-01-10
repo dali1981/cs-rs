@@ -48,7 +48,7 @@ pub use earnings_analysis_use_case::{EarningsAnalysisUseCase, EarningsAnalysisRe
 pub use execution::{ExecutableTrade, TradePricer, ExecutionConfig, SimulationOutput, ExecutionError};
 pub use timing_strategy::TimingStrategy;
 pub use trade_strategy::{
-    TradeStrategy, StrategyDispatch,
+    TradeExecutionOutcome, TradeStrategy, StrategyDispatch,
     CalendarSpreadStrategy, IronButterflyStrategy, StraddleStrategy,
     PostEarningsStraddleStrategy, CalendarStraddleStrategy,
 };

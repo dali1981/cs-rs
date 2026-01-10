@@ -37,7 +37,7 @@ use crate::config::BacktestConfig;
 use crate::execution::{ExecutionConfig, ExecutableTrade};
 use crate::timing_strategy::TimingStrategy;
 use crate::backtest_use_case::{TradeResultMethods, TradeGenerationError};
-use crate::backtest_use_case_helpers::TradeSimulator;
+use crate::backtest_use_case_helpers::{PreparedData, TradeSimulator};
 use crate::hedging_simulator::simulate_with_hedging;
 use crate::composite_pricer::{
     CompositePricer, CalendarSpreadPricer, IronButterflyCompositePricer,
@@ -58,8 +58,6 @@ pub trait TradeStrategy<R: TradeResultMethods + Send>: Send + Sync {
     fn timing(&self) -> &TimingStrategy;
 
     /// Execute a single trade
-    ///
-    /// Returns `None` if the trade could not be executed (missing data, validation failure, etc.)
     fn execute_trade<'a>(
         &'a self,
         options_repo: &'a dyn OptionsDataRepository,
@@ -70,7 +68,7 @@ pub trait TradeStrategy<R: TradeResultMethods + Send>: Send + Sync {
         event: &'a EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = Option<R>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<R>> + Send + 'a>>;
 
     /// Apply post-execution filters to the result
     ///
@@ -114,6 +112,42 @@ pub trait TradeStrategy<R: TradeResultMethods + Send>: Send + Sync {
     }
 }
 
+pub enum TradeExecutionOutcome<R> {
+    Executed(R),
+    Dropped(TradeGenerationError),
+    Skipped,
+}
+
+fn passes_market_rules(
+    rule_evaluator: &RuleEvaluator,
+    event: &EarningsEvent,
+    data: &PreparedData,
+) -> Result<(), TradeGenerationError> {
+    if !rule_evaluator.has_market_rules() {
+        return Ok(());
+    }
+
+    match rule_evaluator.eval_market_rules_with_reason(event, data) {
+        Ok(None) => Ok(()),
+        Ok(Some(rule_name)) => Err(TradeGenerationError {
+            symbol: event.symbol.clone(),
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
+            reason: "MARKET_RULE_FAILED".into(),
+            details: Some(format!("Rule: {}", rule_name)),
+            phase: "filter".into(),
+        }),
+        Err(e) => Err(TradeGenerationError {
+            symbol: event.symbol.clone(),
+            earnings_date: event.earnings_date,
+            earnings_time: event.earnings_time,
+            reason: "MARKET_RULE_ERROR".into(),
+            details: Some(e.to_string()),
+            phase: "filter".into(),
+        }),
+    }
+}
+
 // ============================================================================
 // Concrete Strategy Implementations
 // ============================================================================
@@ -122,14 +156,18 @@ pub trait TradeStrategy<R: TradeResultMethods + Send>: Send + Sync {
 pub struct CalendarSpreadStrategy {
     timing: TimingStrategy,
     option_type: finq_core::OptionType,
+    rule_evaluator: RuleEvaluator,
 }
 
 impl CalendarSpreadStrategy {
     pub fn new(config: &BacktestConfig) -> Self {
         let timing = TimingStrategy::for_earnings(config.timing);
+        let rules_config = config.build_rules_config();
+        let rule_evaluator = RuleEvaluator::new(rules_config);
         Self {
             timing,
             option_type: finq_core::OptionType::Call, // Default to calls
+            rule_evaluator,
         }
     }
 
@@ -154,19 +192,34 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
         event: &'a EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = Option<CalendarSpreadResult>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<CalendarSpreadResult>> + Send + 'a>> {
         let option_type = self.option_type;
         let timing = self.timing.clone();
+        let rule_evaluator = self.rule_evaluator.clone();
         Box::pin(async move {
             let simulator = TradeSimulator::new(
                 options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
             );
 
             // 1. Prepare market data
-            let data = simulator.prepare().await?;
+            let data = match simulator.prepare().await {
+                Some(data) => data,
+                None => return TradeExecutionOutcome::Skipped,
+            };
+
+            // 2. Check market-level entry rules
+            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
 
             // 2. Select trade
-            let trade = selector.select_calendar_spread(&data.spot, &data.surface, option_type, criteria).ok()?;
+            let trade = match selector
+                .select_calendar_spread(&data.spot, &data.surface, option_type, criteria)
+                .ok()
+            {
+                Some(trade) => trade,
+                None => return TradeExecutionOutcome::Skipped,
+            };
 
             // 3. Simulate WITH HEDGING
             let pricer = CalendarSpreadPricer::new();
@@ -182,7 +235,9 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
             ).await {
                 Ok(s) => s,
                 Err(err) => {
-                    return Some(trade.to_failed_result(&simulator.failed_output(), Some(event), err));
+                    return TradeExecutionOutcome::Executed(
+                        trade.to_failed_result(&simulator.failed_output(), Some(event), err),
+                    );
                 }
             };
 
@@ -208,42 +263,29 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
                 result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
             }
 
-            Some(result)
+            TradeExecutionOutcome::Executed(result)
         })
     }
 
-    fn apply_filter(&self, result: &CalendarSpreadResult, min_iv_ratio: Option<f64>) -> bool {
-        match (min_iv_ratio, result.iv_ratio()) {
-            (Some(min), Some(ratio)) => ratio >= min,
-            (Some(_), None) => false,
-            (None, _) => true,
-        }
-    }
-
-    fn create_filter_error(&self, result: &CalendarSpreadResult, event: &EarningsEvent) -> Option<TradeGenerationError> {
-        Some(TradeGenerationError {
-            symbol: result.symbol.clone(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
-            reason: "IV_RATIO_FILTER".into(),
-            details: result.iv_ratio().map(|r| format!("IV ratio: {:.2}", r)),
-            phase: "filter".into(),
-        })
-    }
 }
 
 /// Iron Butterfly Strategy
 pub struct IronButterflyStrategy {
     timing: TimingStrategy,
     wing_width: Decimal,
+    rule_evaluator: RuleEvaluator,
 }
 
 impl IronButterflyStrategy {
     pub fn new(config: &BacktestConfig) -> Self {
         let timing = TimingStrategy::for_earnings(config.timing);
+        let rules_config = config.build_rules_config();
+        let rule_evaluator = RuleEvaluator::new(rules_config);
         Self {
             timing,
-            wing_width: Decimal::new(5, 0), // Default wing width
+            wing_width: Decimal::from_f64_retain(config.wing_width)
+                .unwrap_or_else(|| Decimal::new(5, 0)),
+            rule_evaluator,
         }
     }
 
@@ -268,18 +310,27 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
         event: &'a EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = Option<IronButterflyResult>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<IronButterflyResult>> + Send + 'a>> {
         let wing_width = self.wing_width;
         let min_short_dte = criteria.min_short_dte;
         let max_short_dte = criteria.max_short_dte;
         let timing = self.timing.clone();
+        let rule_evaluator = self.rule_evaluator.clone();
         Box::pin(async move {
             let simulator = TradeSimulator::new(
                 options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
             );
 
             // 1. Prepare market data
-            let data = simulator.prepare().await?;
+            let data = match simulator.prepare().await {
+                Some(data) => data,
+                None => return TradeExecutionOutcome::Skipped,
+            };
+
+            // 2. Check market-level entry rules
+            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
 
             // 2. Select trade
             let trade = selector.select_iron_butterfly(
@@ -288,7 +339,11 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
                 wing_width,
                 min_short_dte,
                 max_short_dte,
-            ).ok()?;
+            ).ok();
+            let trade = match trade {
+                Some(trade) => trade,
+                None => return TradeExecutionOutcome::Skipped,
+            };
 
             // 3. Simulate WITH HEDGING
             let pricer = IronButterflyCompositePricer::new();
@@ -304,7 +359,9 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
             ).await {
                 Ok(s) => s,
                 Err(err) => {
-                    return Some(trade.to_failed_result(&simulator.failed_output(), Some(event), err));
+                    return TradeExecutionOutcome::Executed(
+                        trade.to_failed_result(&simulator.failed_output(), Some(event), err),
+                    );
                 }
             };
 
@@ -330,7 +387,7 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
                 result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
             }
 
-            Some(result)
+            TradeExecutionOutcome::Executed(result)
         })
     }
 }
@@ -339,14 +396,19 @@ impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
 pub struct LongIronButterflyStrategy {
     timing: TimingStrategy,
     wing_width: Decimal,
+    rule_evaluator: RuleEvaluator,
 }
 
 impl LongIronButterflyStrategy {
     pub fn new(config: &BacktestConfig) -> Self {
         let timing = TimingStrategy::for_earnings(config.timing);
+        let rules_config = config.build_rules_config();
+        let rule_evaluator = RuleEvaluator::new(rules_config);
         Self {
             timing,
-            wing_width: Decimal::new(5, 0), // Default wing width
+            wing_width: Decimal::from_f64_retain(config.wing_width)
+                .unwrap_or_else(|| Decimal::new(5, 0)),
+            rule_evaluator,
         }
     }
 
@@ -371,18 +433,27 @@ impl TradeStrategy<IronButterflyResult> for LongIronButterflyStrategy {
         event: &'a EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = Option<IronButterflyResult>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<IronButterflyResult>> + Send + 'a>> {
         let wing_width = self.wing_width;
         let min_short_dte = criteria.min_short_dte;
         let max_short_dte = criteria.max_short_dte;
         let timing = self.timing.clone();
+        let rule_evaluator = self.rule_evaluator.clone();
         Box::pin(async move {
             let simulator = TradeSimulator::new(
                 options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
             );
 
             // 1. Prepare market data
-            let data = simulator.prepare().await?;
+            let data = match simulator.prepare().await {
+                Some(data) => data,
+                None => return TradeExecutionOutcome::Skipped,
+            };
+
+            // 2. Check market-level entry rules
+            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
 
             // 2. Select trade (LONG iron butterfly)
             let trade = selector.select_long_iron_butterfly(
@@ -391,7 +462,11 @@ impl TradeStrategy<IronButterflyResult> for LongIronButterflyStrategy {
                 wing_width,
                 min_short_dte,
                 max_short_dte,
-            ).ok()?;
+            ).ok();
+            let trade = match trade {
+                Some(trade) => trade,
+                None => return TradeExecutionOutcome::Skipped,
+            };
 
             // 3. Simulate WITH HEDGING
             let pricer = LongIronButterflyCompositePricer::new();
@@ -407,7 +482,9 @@ impl TradeStrategy<IronButterflyResult> for LongIronButterflyStrategy {
             ).await {
                 Ok(s) => s,
                 Err(err) => {
-                    return Some(trade.to_failed_result(&simulator.failed_output(), Some(event), err));
+                    return TradeExecutionOutcome::Executed(
+                        trade.to_failed_result(&simulator.failed_output(), Some(event), err),
+                    );
                 }
             };
 
@@ -433,7 +510,7 @@ impl TradeStrategy<IronButterflyResult> for LongIronButterflyStrategy {
                 result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
             }
 
-            Some(result)
+            TradeExecutionOutcome::Executed(result)
         })
     }
 }
@@ -474,7 +551,7 @@ impl TradeStrategy<StraddleResult> for LongStraddleStrategy {
         event: &'a EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = Option<StraddleResult>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<StraddleResult>> + Send + 'a>> {
         let min_short_dte = criteria.min_short_dte;
         let timing = self.timing.clone();
         let rule_evaluator = self.rule_evaluator.clone();
@@ -489,41 +566,27 @@ impl TradeStrategy<StraddleResult> for LongStraddleStrategy {
             );
 
             // 1. Prepare market data
-            let data = simulator.prepare().await?;
+            let data = match simulator.prepare().await {
+                Some(data) => data,
+                None => return TradeExecutionOutcome::Skipped,
+            };
 
             // 2. Check market-level entry rules (IV slope, etc.)
-            let has_rules = rule_evaluator.has_market_rules();
-            tracing::debug!(
-                symbol = %event.symbol,
-                has_market_rules = has_rules,
-                "Checking if market rules need evaluation"
-            );
-            if has_rules {
-                match rule_evaluator.eval_market_rules(event, &data) {
-                    Ok(true) => {} // Rules passed
-                    Ok(false) => {
-                        tracing::debug!(
-                            symbol = %event.symbol,
-                            "Trade filtered: market rules failed"
-                        );
-                        return None;
-                    }
-                    Err(e) => {
-                        tracing::debug!(
-                            symbol = %event.symbol,
-                            error = %e,
-                            "Trade filtered: rule evaluation error (missing IV data)"
-                        );
-                        return None;
-                    }
-                }
+            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
+                return TradeExecutionOutcome::Dropped(error);
             }
 
             // 3. Select trade (LONG straddle)
             let entry_date = entry_time.date_naive();
             let min_expiration = (entry_date + chrono::Duration::days(min_short_dte as i64))
                 .max(entry_date);
-            let trade = selector.select_long_straddle(&data.spot, &data.surface, min_expiration).ok()?;
+            let trade = match selector
+                .select_long_straddle(&data.spot, &data.surface, min_expiration)
+                .ok()
+            {
+                Some(trade) => trade,
+                None => return TradeExecutionOutcome::Skipped,
+            };
 
             // 4. Simulate WITH HEDGING (integrated into execution loop)
             let pricer = CompositePricer::default();
@@ -539,7 +602,9 @@ impl TradeStrategy<StraddleResult> for LongStraddleStrategy {
             ).await {
                 Ok(s) => s,
                 Err(err) => {
-                    return Some(trade.to_failed_result(&simulator.failed_output(), Some(event), err));
+                    return TradeExecutionOutcome::Executed(
+                        trade.to_failed_result(&simulator.failed_output(), Some(event), err),
+                    );
                 }
             };
 
@@ -565,7 +630,7 @@ impl TradeStrategy<StraddleResult> for LongStraddleStrategy {
                 result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
             }
 
-            Some(result)
+            TradeExecutionOutcome::Executed(result)
         })
     }
 }
@@ -606,7 +671,7 @@ impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
         event: &'a EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = Option<StraddleResult>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<StraddleResult>> + Send + 'a>> {
         let min_short_dte = criteria.min_short_dte;
         let timing = self.timing.clone();
         let rule_evaluator = self.rule_evaluator.clone();
@@ -621,41 +686,27 @@ impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
             );
 
             // 1. Prepare market data
-            let data = simulator.prepare().await?;
+            let data = match simulator.prepare().await {
+                Some(data) => data,
+                None => return TradeExecutionOutcome::Skipped,
+            };
 
             // 2. Check market-level entry rules (IV slope, etc.)
-            let has_rules = rule_evaluator.has_market_rules();
-            tracing::debug!(
-                symbol = %event.symbol,
-                has_market_rules = has_rules,
-                "Checking if market rules need evaluation"
-            );
-            if has_rules {
-                match rule_evaluator.eval_market_rules(event, &data) {
-                    Ok(true) => {} // Rules passed
-                    Ok(false) => {
-                        tracing::debug!(
-                            symbol = %event.symbol,
-                            "Trade filtered: market rules failed"
-                        );
-                        return None;
-                    }
-                    Err(e) => {
-                        tracing::debug!(
-                            symbol = %event.symbol,
-                            error = %e,
-                            "Trade filtered: rule evaluation error (missing IV data)"
-                        );
-                        return None;
-                    }
-                }
+            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
+                return TradeExecutionOutcome::Dropped(error);
             }
 
             // 3. Select trade (SHORT straddle)
             let entry_date = entry_time.date_naive();
             let min_expiration = (entry_date + chrono::Duration::days(min_short_dte as i64))
                 .max(entry_date);
-            let trade = selector.select_short_straddle(&data.spot, &data.surface, min_expiration).ok()?;
+            let trade = match selector
+                .select_short_straddle(&data.spot, &data.surface, min_expiration)
+                .ok()
+            {
+                Some(trade) => trade,
+                None => return TradeExecutionOutcome::Skipped,
+            };
 
             // 3. Simulate WITH HEDGING (integrated into execution loop)
             let pricer = ShortStraddlePricer::default();
@@ -671,7 +722,9 @@ impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
             ).await {
                 Ok(s) => s,
                 Err(err) => {
-                    return Some(trade.to_failed_result(&simulator.failed_output(), Some(event), err));
+                    return TradeExecutionOutcome::Executed(
+                        trade.to_failed_result(&simulator.failed_output(), Some(event), err),
+                    );
                 }
             };
 
@@ -697,7 +750,7 @@ impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
                 result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
             }
 
-            Some(result)
+            TradeExecutionOutcome::Executed(result)
         })
     }
 }
@@ -709,6 +762,7 @@ pub type StraddleStrategy = LongStraddleStrategy;
 /// Post-Earnings Straddle Strategy
 pub struct PostEarningsStraddleStrategy {
     timing: TimingStrategy,
+    rule_evaluator: RuleEvaluator,
 }
 
 impl PostEarningsStraddleStrategy {
@@ -717,7 +771,9 @@ impl PostEarningsStraddleStrategy {
             config.timing,
             config.post_earnings_holding_days,
         );
-        Self { timing }
+        let rules_config = config.build_rules_config();
+        let rule_evaluator = RuleEvaluator::new(rules_config);
+        Self { timing, rule_evaluator }
     }
 }
 
@@ -736,22 +792,37 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
         event: &'a EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = Option<StraddleResult>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<StraddleResult>> + Send + 'a>> {
         let min_short_dte = criteria.min_short_dte;
         let timing = self.timing.clone();
+        let rule_evaluator = self.rule_evaluator.clone();
         Box::pin(async move {
             let simulator = TradeSimulator::new(
                 options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
             );
 
             // 1. Prepare market data
-            let data = simulator.prepare().await?;
+            let data = match simulator.prepare().await {
+                Some(data) => data,
+                None => return TradeExecutionOutcome::Skipped,
+            };
+
+            // 2. Check market-level entry rules
+            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
 
             // 2. Select trade (post-earnings uses LONG straddle)
             let entry_date = entry_time.date_naive();
             let min_expiration = (entry_date + chrono::Duration::days(min_short_dte as i64))
                 .max(entry_date);
-            let trade = selector.select_long_straddle(&data.spot, &data.surface, min_expiration).ok()?;
+            let trade = match selector
+                .select_long_straddle(&data.spot, &data.surface, min_expiration)
+                .ok()
+            {
+                Some(trade) => trade,
+                None => return TradeExecutionOutcome::Skipped,
+            };
 
             // 3. Simulate WITH HEDGING
             let pricer = CompositePricer::default();
@@ -767,7 +838,9 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
             ).await {
                 Ok(s) => s,
                 Err(err) => {
-                    return Some(trade.to_failed_result(&simulator.failed_output(), Some(event), err));
+                    return TradeExecutionOutcome::Executed(
+                        trade.to_failed_result(&simulator.failed_output(), Some(event), err),
+                    );
                 }
             };
 
@@ -793,7 +866,7 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
                 result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
             }
 
-            Some(result)
+            TradeExecutionOutcome::Executed(result)
         })
     }
 }
@@ -801,12 +874,15 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
 /// Calendar Straddle Strategy
 pub struct CalendarStraddleStrategy {
     timing: TimingStrategy,
+    rule_evaluator: RuleEvaluator,
 }
 
 impl CalendarStraddleStrategy {
     pub fn new(config: &BacktestConfig) -> Self {
         let timing = TimingStrategy::for_earnings(config.timing);
-        Self { timing }
+        let rules_config = config.build_rules_config();
+        let rule_evaluator = RuleEvaluator::new(rules_config);
+        Self { timing, rule_evaluator }
     }
 }
 
@@ -825,18 +901,33 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
         event: &'a EarningsEvent,
         entry_time: DateTime<Utc>,
         exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = Option<CalendarStraddleResult>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<CalendarStraddleResult>> + Send + 'a>> {
         let timing = self.timing.clone();
+        let rule_evaluator = self.rule_evaluator.clone();
         Box::pin(async move {
             let simulator = TradeSimulator::new(
                 options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
             );
 
             // 1. Prepare market data
-            let data = simulator.prepare().await?;
+            let data = match simulator.prepare().await {
+                Some(data) => data,
+                None => return TradeExecutionOutcome::Skipped,
+            };
+
+            // 2. Check market-level entry rules
+            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
 
             // 2. Select trade
-            let trade = selector.select_calendar_straddle(&data.spot, &data.surface, criteria).ok()?;
+            let trade = match selector
+                .select_calendar_straddle(&data.spot, &data.surface, criteria)
+                .ok()
+            {
+                Some(trade) => trade,
+                None => return TradeExecutionOutcome::Skipped,
+            };
 
             // 3. Simulate WITH HEDGING
             let pricer = CalendarStraddleCompositePricer::new();
@@ -852,7 +943,9 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
             ).await {
                 Ok(s) => s,
                 Err(err) => {
-                    return Some(trade.to_failed_result(&simulator.failed_output(), Some(event), err));
+                    return TradeExecutionOutcome::Executed(
+                        trade.to_failed_result(&simulator.failed_output(), Some(event), err),
+                    );
                 }
             };
 
@@ -878,28 +971,10 @@ impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
                 result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
             }
 
-            Some(result)
+            TradeExecutionOutcome::Executed(result)
         })
     }
 
-    fn apply_filter(&self, result: &CalendarStraddleResult, min_iv_ratio: Option<f64>) -> bool {
-        match (min_iv_ratio, result.iv_ratio()) {
-            (Some(min), Some(ratio)) => ratio >= min,
-            (Some(_), None) => false,
-            (None, _) => true,
-        }
-    }
-
-    fn create_filter_error(&self, result: &CalendarStraddleResult, event: &EarningsEvent) -> Option<TradeGenerationError> {
-        Some(TradeGenerationError {
-            symbol: result.symbol.clone(),
-            earnings_date: event.earnings_date,
-            earnings_time: event.earnings_time,
-            reason: "IV_RATIO_FILTER".into(),
-            details: result.iv_ratio().map(|r| format!("IV ratio: {:.2}", r)),
-            phase: "filter".into(),
-        })
-    }
 }
 
 // ============================================================================

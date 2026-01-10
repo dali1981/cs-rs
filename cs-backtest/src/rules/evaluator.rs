@@ -86,6 +86,44 @@ impl RuleEvaluator {
         Ok(true)
     }
 
+    /// Evaluate market rules and return the first failed rule name (if any)
+    ///
+    /// Returns Ok(None) if all rules pass or if no market rules are configured.
+    pub fn eval_market_rules_with_reason(
+        &self,
+        event: &EarningsEvent,
+        data: &PreparedData,
+    ) -> Result<Option<String>, RuleError> {
+        if self.config.market.is_empty() {
+            return Ok(None);
+        }
+
+        for rule in &self.config.market {
+            match self.eval_market_rule(rule, data) {
+                Ok(true) => continue,
+                Ok(false) => {
+                    tracing::debug!(
+                        symbol = %event.symbol,
+                        rule = rule.name(),
+                        "Market rule failed"
+                    );
+                    return Ok(Some(rule.name().to_string()));
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        symbol = %event.symbol,
+                        rule = rule.name(),
+                        error = %e,
+                        "Market rule evaluation error"
+                    );
+                    return Err(e);
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Evaluate all trade-level rules (AND logic)
     ///
     /// Returns true if all rules pass, false if any rule fails.

@@ -10,9 +10,10 @@ use cs_backtest::{
     GenerateIvTimeSeriesUseCase,
     EarningsAnalysisUseCase,
 };
+use cs_domain::{OptionsDataRepository, EquityDataRepository};
 use cs_domain::infrastructure::{FinqOptionsRepository, FinqEquityRepository};
 
-use super::RepositoryFactory;
+use super::{RepositoryFactory, DataRepositoryFactory};
 
 /// Factory for creating use case instances with all dependencies wired up
 pub struct UseCaseFactory;
@@ -23,11 +24,25 @@ impl UseCaseFactory {
     pub fn create_backtest(
         config: BacktestConfig,
     ) -> Result<BacktestUseCase<FinqOptionsRepository, FinqEquityRepository>> {
-        let options_repo = RepositoryFactory::create_options_repo(&config.data_dir);
-        let equity_repo = RepositoryFactory::create_equity_repo(&config.data_dir);
+        let factory = RepositoryFactory;
+        Self::create_backtest_with_factory(&factory, config)
+    }
+
+    /// Create a backtest use case with a custom repository factory
+    pub fn create_backtest_with_factory<F>(
+        factory: &F,
+        config: BacktestConfig,
+    ) -> Result<BacktestUseCase<F::OptionsRepo, F::EquityRepo>>
+    where
+        F: DataRepositoryFactory,
+        F::OptionsRepo: OptionsDataRepository + 'static,
+        F::EquityRepo: EquityDataRepository + 'static,
+    {
+        let options_repo = factory.create_options_repo(&config.data_dir);
+        let equity_repo = factory.create_equity_repo(&config.data_dir);
 
         // Get earnings file/dir from config
-        let earnings_repo = RepositoryFactory::create_earnings_repo(
+        let earnings_repo = factory.create_earnings_repo(
             Some(&config.earnings_dir),
             config.earnings_file.as_ref(),
         );
@@ -66,8 +81,22 @@ impl UseCaseFactory {
     pub fn create_atm_iv(
         data_dir: &PathBuf,
     ) -> Result<GenerateIvTimeSeriesUseCase<FinqEquityRepository, FinqOptionsRepository>> {
-        let equity_repo = RepositoryFactory::create_equity_repo(data_dir);
-        let options_repo = RepositoryFactory::create_options_repo(data_dir);
+        let factory = RepositoryFactory;
+        Self::create_atm_iv_with_factory(&factory, data_dir)
+    }
+
+    /// Create ATM IV generation use case with a custom repository factory
+    pub fn create_atm_iv_with_factory<F>(
+        factory: &F,
+        data_dir: &PathBuf,
+    ) -> Result<GenerateIvTimeSeriesUseCase<F::EquityRepo, F::OptionsRepo>>
+    where
+        F: DataRepositoryFactory,
+        F::OptionsRepo: OptionsDataRepository,
+        F::EquityRepo: EquityDataRepository,
+    {
+        let equity_repo = factory.create_equity_repo(data_dir);
+        let options_repo = factory.create_options_repo(data_dir);
 
         Ok(GenerateIvTimeSeriesUseCase::new(equity_repo, options_repo))
     }

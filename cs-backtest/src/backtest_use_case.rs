@@ -10,7 +10,7 @@ use crate::config::{BacktestConfig, SelectionType};
 use crate::execution::ExecutionConfig;
 use crate::rules::RuleEvaluator;
 use crate::trade_strategy::{
-    TradeStrategy, StrategyDispatch,
+    TradeExecutionOutcome, TradeStrategy, StrategyDispatch,
     CalendarSpreadStrategy, IronButterflyStrategy, StraddleStrategy,
     PostEarningsStraddleStrategy, CalendarStraddleStrategy,
 };
@@ -620,7 +620,9 @@ where
 
         // 1. Determine trading range and timing spec
         let trading_range = self.config.trading_range();
-        let timing_spec = self.config.timing_spec();
+        let timing_spec = self.config
+            .timing_spec()
+            .map_err(|e| BacktestError::Config(e.to_string()))?;
         let filter_criteria = self.config.filter_criteria();
 
         info!(
@@ -767,13 +769,19 @@ where
 
         // 7. Collect and apply post-execution filters
         let min_iv_ratio = self.config.selection.min_iv_ratio;
-        for (result_opt, tradable) in batch_results.into_iter().zip(filtered_events.iter()) {
-            if let Some(result) = result_opt {
-                if strategy.apply_filter(&result, min_iv_ratio) {
-                    all_results.push(result);
-                } else if let Some(error) = strategy.create_filter_error(&result, &tradable.event) {
+        for (outcome, tradable) in batch_results.into_iter().zip(filtered_events.iter()) {
+            match outcome {
+                TradeExecutionOutcome::Executed(result) => {
+                    if strategy.apply_filter(&result, min_iv_ratio) {
+                        all_results.push(result);
+                    } else if let Some(error) = strategy.create_filter_error(&result, &tradable.event) {
+                        dropped_events.push(error);
+                    }
+                }
+                TradeExecutionOutcome::Dropped(error) => {
                     dropped_events.push(error);
                 }
+                TradeExecutionOutcome::Skipped => {}
             }
         }
 
@@ -808,19 +816,14 @@ where
         selector: &dyn StrikeSelector,
         criteria: &ExpirationCriteria,
         exec_config: &ExecutionConfig,
-    ) -> Vec<Option<R>>
+    ) -> Vec<TradeExecutionOutcome<R>>
     where
         S: TradeStrategy<R> + Sync,
         R: TradeResultMethods + Send,
     {
-        let events: Vec<&EarningsEvent> = tradable_events.iter().map(|te| &te.event).collect();
-
-        crate::execution::run_batch(&events, self.config.parallel, |event| {
-            // Find the corresponding TradableEvent for this event
-            let tradable = tradable_events.iter()
-                .find(|te| te.symbol() == event.symbol && te.earnings_date() == event.earnings_date)
-                .expect("TradableEvent must exist for every event");
-
+        crate::execution::run_batch(tradable_events, self.config.parallel, |tradable| {
+            let tradable = *tradable;
+            let event = &tradable.event;
             strategy.execute_trade(
                 self.options_repo.as_ref(),
                 self.equity_repo.as_ref(),
@@ -846,7 +849,7 @@ where
         selector: &dyn StrikeSelector,
         criteria: &ExpirationCriteria,
         exec_config: &ExecutionConfig,
-    ) -> Vec<Option<R>>
+    ) -> Vec<TradeExecutionOutcome<R>>
     where
         S: TradeStrategy<R> + Sync,
         R: TradeResultMethods + Send,
@@ -1123,6 +1126,8 @@ where
 pub enum BacktestError {
     #[error("Repository error: {0}")]
     Repository(String),
+    #[error("Config error: {0}")]
+    Config(String),
     #[error("Strategy error: {0}")]
     Strategy(String),
     #[error("Pricing error: {0}")]
