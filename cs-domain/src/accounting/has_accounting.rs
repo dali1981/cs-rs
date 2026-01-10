@@ -12,8 +12,14 @@ use super::{CapitalRequirement, TradeAccounting};
 /// Implement this for trade result types to enable capital-weighted returns
 /// and other proper accounting metrics.
 pub trait HasAccounting {
-    /// Get the capital required to enter this trade
-    fn capital_required(&self) -> Decimal;
+    /// Capital requirement (non-negative) derived from a capital basis.
+    fn capital_required(&self) -> CapitalRequirement;
+
+    /// Entry cash flow (negative = paid debit, positive = received credit).
+    fn entry_cash_flow(&self) -> Decimal;
+
+    /// Exit cash flow (negative = paid to close, positive = received).
+    fn exit_cash_flow(&self) -> Decimal;
 
     /// Get the realized P&L
     fn realized_pnl(&self) -> Decimal;
@@ -30,7 +36,7 @@ pub trait HasAccounting {
 
     /// Get return on capital (computed from realized P&L and capital)
     fn return_on_capital(&self) -> f64 {
-        let capital = self.capital_required();
+        let capital = self.capital_required().initial_requirement;
         if capital.is_zero() {
             return 0.0;
         }
@@ -40,18 +46,19 @@ pub trait HasAccounting {
 
     /// Convert to full TradeAccounting record
     fn to_accounting(&self) -> TradeAccounting {
-        let capital = self.capital_required();
+        let capital_required = self.capital_required();
         let pnl = self.realized_pnl();
-        let hedge_pnl = self.hedge_pnl();
-        let hedge_capital = self.hedge_capital();
 
-        let mut accounting = TradeAccounting::from_pnl(capital, capital + pnl, pnl);
+        let mut accounting = TradeAccounting::from_cashflows(
+            capital_required,
+            self.entry_cash_flow(),
+            self.exit_cash_flow(),
+            pnl,
+        );
 
-        if let Some(hp) = hedge_pnl {
-            accounting = accounting.with_hedge_pnl(hp);
-        }
+        accounting.hedge_pnl = self.hedge_pnl();
 
-        if let Some(hc) = hedge_capital {
+        if let Some(hc) = self.hedge_capital() {
             accounting = accounting.with_hedge_capital(hc);
         }
 

@@ -311,14 +311,18 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
 
         let weighted_sum: f64 = self.results.iter()
             .map(|r| {
-                let capital = r.capital_required().to_f64().unwrap_or(0.0);
+                let capital = r.capital_required().initial_requirement
+                    .to_f64()
+                    .unwrap_or(0.0);
                 let return_pct = r.return_on_capital();
                 capital * return_pct
             })
             .sum();
 
         let total_capital: f64 = self.results.iter()
-            .map(|r| r.capital_required().to_f64().unwrap_or(0.0))
+            .map(|r| r.capital_required().initial_requirement
+                .to_f64()
+                .unwrap_or(0.0))
             .sum();
 
         if total_capital > 0.0 {
@@ -331,7 +335,7 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
     /// Total capital deployed across all trades
     pub fn total_capital_deployed(&self) -> Decimal {
         self.results.iter()
-            .map(|r| r.capital_required())
+            .map(|r| r.capital_required().initial_requirement)
             .sum()
     }
 

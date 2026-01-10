@@ -191,6 +191,32 @@ impl TradeAccounting {
         }
     }
 
+    /// Create accounting from explicit cash flows and capital requirement.
+    pub fn from_cashflows(
+        capital_required: CapitalRequirement,
+        entry_cash_flow: Decimal,
+        exit_cash_flow: Decimal,
+        realized_pnl: Decimal,
+    ) -> Self {
+        let return_on_capital = if capital_required.initial_requirement.is_zero() {
+            0.0
+        } else {
+            (realized_pnl / capital_required.initial_requirement)
+                .to_f64()
+                .unwrap_or(0.0)
+        };
+
+        Self {
+            capital_required,
+            entry_cash_flow,
+            exit_cash_flow,
+            transaction_costs: Decimal::ZERO,
+            hedge_pnl: None,
+            realized_pnl,
+            return_on_capital,
+        }
+    }
+
     /// Add hedge P&L to the accounting
     pub fn with_hedge_pnl(mut self, hedge_pnl: Decimal) -> Self {
         self.hedge_pnl = Some(hedge_pnl);
