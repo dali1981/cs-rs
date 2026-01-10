@@ -5,7 +5,7 @@
 
 use rust_decimal::Decimal;
 
-use super::{CapitalRequirement, TradeAccounting};
+use super::{CapitalRequirement, ReturnBasis, TradeAccounting};
 
 /// Trait for types that can provide accounting data
 ///
@@ -23,6 +23,16 @@ pub trait HasAccounting {
 
     /// Get the realized P&L
     fn realized_pnl(&self) -> Decimal;
+
+    /// Premium magnitude (absolute entry cash flow).
+    fn premium_magnitude(&self) -> Decimal {
+        self.entry_cash_flow().abs()
+    }
+
+    /// Maximum loss (defined-risk strategies).
+    fn max_loss(&self) -> Option<Decimal> {
+        None
+    }
 
     /// Get the hedge P&L (if any)
     fn hedge_pnl(&self) -> Option<Decimal> {
@@ -44,6 +54,25 @@ pub trait HasAccounting {
         (pnl / capital).try_into().unwrap_or(0.0)
     }
 
+    /// Return denominator based on a chosen basis.
+    fn return_basis_value(&self, basis: ReturnBasis) -> Option<Decimal> {
+        match basis {
+            ReturnBasis::Premium => Some(self.premium_magnitude()),
+            ReturnBasis::CapitalRequired => Some(self.capital_required().initial_requirement),
+            ReturnBasis::MaxLoss => self.max_loss(),
+        }
+    }
+
+    /// Return on a selected basis (pnl / basis).
+    fn return_on_basis(&self, basis: ReturnBasis) -> Option<f64> {
+        let denom = self.return_basis_value(basis)?;
+        if denom.is_zero() {
+            return None;
+        }
+        let pnl = self.realized_pnl();
+        Some((pnl / denom).try_into().unwrap_or(0.0))
+    }
+
     /// Convert to full TradeAccounting record
     fn to_accounting(&self) -> TradeAccounting {
         let capital_required = self.capital_required();
@@ -57,6 +86,10 @@ pub trait HasAccounting {
         );
 
         accounting.hedge_pnl = self.hedge_pnl();
+
+        if let Some(max_loss) = self.max_loss() {
+            accounting = accounting.with_max_loss(max_loss);
+        }
 
         if let Some(hc) = self.hedge_capital() {
             accounting = accounting.with_hedge_capital(hc);

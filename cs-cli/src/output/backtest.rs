@@ -6,7 +6,8 @@ use console::style;
 use tabled::{Table, Tabled};
 
 use cs_backtest::{BacktestResult, TradeResultMethods, UnifiedBacktestResult};
-use cs_domain::{TradeResult as TradeResultTrait, HasAccounting, HasTradingCost, ToPnlRecord};
+use cs_domain::{TradeResult as TradeResultTrait, HasAccounting, HasTradingCost, ToPnlRecord, ReturnBasis};
+use rust_decimal::Decimal;
 
 use crate::display::ResultRow;
 
@@ -117,26 +118,15 @@ impl BacktestOutputHandler {
     {
         use rust_decimal::prelude::ToPrimitive;
 
-        println!("{}", style("Capital-Weighted Metrics:").bold().cyan());
+        println!("{}", style("Basis Metrics:").bold().cyan());
 
-        let cw_return = result.capital_weighted_return() * 100.0;
-        let cw_sharpe = result.capital_weighted_sharpe();
         let profit_factor = result.profit_factor();
-        let total_capital = result.total_capital_deployed();
-        let roc = result.return_on_capital() * 100.0;
+        let configured_basis = result.return_basis.label();
 
         let rows = vec![
             ResultRow {
-                metric: "Return on Capital".into(),
-                value: format!("{:.2}%", roc),
-            },
-            ResultRow {
-                metric: "Capital-Weighted Return".into(),
-                value: format!("{:.2}%", cw_return),
-            },
-            ResultRow {
-                metric: "Capital-Weighted Sharpe".into(),
-                value: format!("{:.2}", cw_sharpe),
+                metric: "Configured Return Basis".into(),
+                value: configured_basis.to_string(),
             },
             ResultRow {
                 metric: "Profit Factor".into(),
@@ -146,13 +136,45 @@ impl BacktestOutputHandler {
                     format!("{:.2}", profit_factor)
                 },
             },
-            ResultRow {
-                metric: "Total Capital Deployed".into(),
-                value: format!("${:.2}", total_capital),
-            },
         ];
 
         let table = Table::new(rows);
+        println!("{}", table);
+
+        #[derive(Tabled)]
+        struct BasisRow {
+            basis: String,
+            return_on_basis: String,
+            weighted_return: String,
+            mean_return: String,
+            std_return: String,
+            sharpe: String,
+            total_basis: String,
+            coverage: String,
+        }
+
+        let basis_rows = [
+            ReturnBasis::Premium,
+            ReturnBasis::CapitalRequired,
+            ReturnBasis::MaxLoss,
+        ]
+        .iter()
+        .map(|basis| {
+            let metrics = compute_basis_metrics(result, *basis);
+            BasisRow {
+                basis: basis.label().to_string(),
+                return_on_basis: format!("{:.2}%", metrics.return_on_basis * 100.0),
+                weighted_return: format!("{:.2}%", metrics.weighted_return * 100.0),
+                mean_return: format!("{:.2}%", metrics.mean_return * 100.0),
+                std_return: format!("{:.2}%", metrics.std_return * 100.0),
+                sharpe: format!("{:.2}", metrics.sharpe),
+                total_basis: format!("${:.2}", metrics.total_basis),
+                coverage: format!("{}/{}", metrics.coverage_supported, metrics.coverage_total),
+            }
+        })
+        .collect::<Vec<_>>();
+
+        let table = Table::new(basis_rows);
         println!("{}", table);
         println!();
     }
@@ -389,5 +411,96 @@ impl BacktestOutputHandler {
             UnifiedBacktestResult::CalendarStraddle(r) => Self::save(r, output),
             UnifiedBacktestResult::PostEarningsStraddle(r) => Self::save(r, output),
         }
+    }
+}
+
+struct BasisMetrics {
+    return_on_basis: f64,
+    weighted_return: f64,
+    mean_return: f64,
+    std_return: f64,
+    sharpe: f64,
+    total_basis: Decimal,
+    coverage_supported: usize,
+    coverage_total: usize,
+}
+
+fn compute_basis_metrics<R>(result: &BacktestResult<R>, basis: ReturnBasis) -> BasisMetrics
+where
+    R: TradeResultTrait + TradeResultMethods + HasAccounting,
+{
+    let mut total_basis = Decimal::ZERO;
+    let mut total_pnl = Decimal::ZERO;
+    let mut returns = Vec::new();
+    let mut supported = 0usize;
+
+    for trade in &result.results {
+        if let Some(basis_value) = trade.return_basis_value(basis) {
+            supported += 1;
+            total_basis += basis_value;
+            total_pnl += trade.realized_pnl();
+            if let Some(ret) = trade.return_on_basis(basis) {
+                returns.push(ret);
+            }
+        }
+    }
+
+    let return_on_basis = if total_basis.is_zero() {
+        0.0
+    } else {
+        (total_pnl / total_basis).try_into().unwrap_or(0.0)
+    };
+
+    let weighted_return = {
+        let weighted_sum: f64 = result.results.iter()
+            .filter_map(|trade| {
+                let basis_value = trade.return_basis_value(basis)?;
+                let ret = trade.return_on_basis(basis)?;
+                let basis_f: f64 = basis_value.try_into().unwrap_or(0.0);
+                if basis_f > 0.0 {
+                    Some(basis_f * ret)
+                } else {
+                    None
+                }
+            })
+            .sum();
+        let total_basis_f: f64 = total_basis.try_into().unwrap_or(0.0);
+        if total_basis_f > 0.0 {
+            weighted_sum / total_basis_f
+        } else {
+            0.0
+        }
+    };
+
+    let mean_return = if returns.is_empty() {
+        0.0
+    } else {
+        returns.iter().sum::<f64>() / returns.len() as f64
+    };
+
+    let std_return = if returns.len() < 2 {
+        0.0
+    } else {
+        let variance = returns.iter()
+            .map(|r| (r - mean_return).powi(2))
+            .sum::<f64>() / (returns.len() - 1) as f64;
+        variance.sqrt()
+    };
+
+    let sharpe = if std_return > 0.0 {
+        mean_return / std_return * 16.0
+    } else {
+        0.0
+    };
+
+    BasisMetrics {
+        return_on_basis,
+        weighted_return,
+        mean_return,
+        std_return,
+        sharpe,
+        total_basis,
+        coverage_supported: supported,
+        coverage_total: result.results.len(),
     }
 }

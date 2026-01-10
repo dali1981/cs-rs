@@ -133,7 +133,9 @@ impl BacktestConfigBuilder {
 
     /// Build CliOverrides from BacktestArgs and GlobalArgs
     fn build_cli_overrides(&self) -> CliOverrides {
-        use crate::cli_args::{CliPaths, CliTiming, CliSelection, CliStrategy, CliHedging, CliAttribution};
+        use crate::cli_args::{
+            CliPaths, CliTiming, CliSelection, CliStrategy, CliHedging, CliAttribution, CliMetrics,
+        };
         use crate::parsing::parse_time;
 
         let mut overrides = CliOverrides::default();
@@ -205,6 +207,17 @@ impl BacktestConfigBuilder {
                 || timing.holding_days.is_some()
                 || timing.exit_days_after.is_some() {
                 overrides.timing = Some(timing);
+            }
+
+            // Metrics
+            let mut metrics = CliMetrics::default();
+            let mut has_metrics_override = false;
+            if let Some(ref return_basis) = args.metrics.return_basis {
+                metrics.return_basis = Some(return_basis.clone());
+                has_metrics_override = true;
+            }
+            if has_metrics_override {
+                overrides.metrics = Some(metrics);
             }
 
             // Selection criteria

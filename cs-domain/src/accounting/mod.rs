@@ -34,6 +34,7 @@
 mod capital;
 mod has_accounting;
 mod margin;
+mod return_basis;
 mod statistics;
 mod trade_accounting;
 
@@ -42,5 +43,6 @@ pub use capital::{
 };
 pub use has_accounting::HasAccounting;
 pub use margin::MarginCalculator;
+pub use return_basis::ReturnBasis;
 pub use statistics::TradeStatistics;
 pub use trade_accounting::{CashFlow, TradeAccounting};

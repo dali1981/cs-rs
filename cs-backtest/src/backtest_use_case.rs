@@ -23,6 +23,7 @@ pub struct BacktestResult<R> {
     pub total_entries: usize,
     pub total_opportunities: usize,
     pub dropped_events: Vec<TradeGenerationError>,
+    pub return_basis: ReturnBasis,
 }
 
 /// Unified backtest result that can hold any strategy result type
@@ -296,58 +297,64 @@ impl<R: TradeResultMethods> BacktestResult<R> {
 
 // Additional methods for types that implement HasAccounting
 impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
-    /// Capital-weighted return (THE CORRECT METRIC)
+    /// Capital-weighted return using the configured return basis.
     ///
     /// This weights each trade's return by the capital deployed, ensuring that
     /// trades with larger positions contribute proportionally more to the
     /// overall return calculation.
     ///
-    /// Formula: sum(capital_i * return_i) / sum(capital_i)
+    /// Formula: sum(basis_i * return_i) / sum(basis_i)
     ///
     /// This fixes the issue where simple mean return can show positive returns
     /// while total P&L is negative (when larger positions have losses).
     pub fn capital_weighted_return(&self) -> f64 {
         use rust_decimal::prelude::ToPrimitive;
 
-        let weighted_sum: f64 = self.results.iter()
-            .map(|r| {
-                let capital = r.capital_required().initial_requirement
-                    .to_f64()
-                    .unwrap_or(0.0);
-                let return_pct = r.return_on_capital();
-                capital * return_pct
-            })
-            .sum();
+        let mut weighted_sum = 0.0;
+        let mut total_basis = 0.0;
 
-        let total_capital: f64 = self.results.iter()
-            .map(|r| r.capital_required().initial_requirement
-                .to_f64()
-                .unwrap_or(0.0))
-            .sum();
+        for r in &self.results {
+            let Some(basis) = r.return_basis_value(self.return_basis) else { continue };
+            let Some(ret) = r.return_on_basis(self.return_basis) else { continue };
 
-        if total_capital > 0.0 {
-            weighted_sum / total_capital
+            let basis_f = basis.to_f64().unwrap_or(0.0);
+            if basis_f > 0.0 {
+                weighted_sum += basis_f * ret;
+                total_basis += basis_f;
+            }
+        }
+
+        if total_basis > 0.0 {
+            weighted_sum / total_basis
         } else {
             0.0
         }
     }
 
-    /// Total capital deployed across all trades
+    /// Total basis deployed across all trades
     pub fn total_capital_deployed(&self) -> Decimal {
         self.results.iter()
-            .map(|r| r.capital_required().initial_requirement)
+            .filter_map(|r| r.return_basis_value(self.return_basis))
             .sum()
     }
 
-    /// Return on total capital (total P&L / total capital)
+    /// Return on total basis (total P&L / total basis)
     pub fn return_on_capital(&self) -> f64 {
         use rust_decimal::prelude::ToPrimitive;
-        let total_capital = self.total_capital_deployed();
-        if total_capital.is_zero() {
+        let mut total_basis = Decimal::ZERO;
+        let mut total_pnl = Decimal::ZERO;
+
+        for r in &self.results {
+            if let Some(basis) = r.return_basis_value(self.return_basis) {
+                total_basis += basis;
+                total_pnl += r.realized_pnl();
+            }
+        }
+
+        if total_basis.is_zero() {
             return 0.0;
         }
-        let total_pnl = self.total_pnl_with_hedge();
-        (total_pnl / total_capital).to_f64().unwrap_or(0.0)
+        (total_pnl / total_basis).to_f64().unwrap_or(0.0)
     }
 
     /// Profit factor (gross profit / gross loss)
@@ -378,7 +385,7 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
         use rust_decimal::prelude::ToPrimitive;
 
         let returns: Vec<f64> = self.results.iter()
-            .map(|r| r.return_on_capital())
+            .filter_map(|r| r.return_on_basis(self.return_basis))
             .collect();
 
         if returns.len() < 2 {
@@ -406,7 +413,16 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
             .map(|r| r.to_accounting())
             .collect();
 
-        cs_domain::TradeStatistics::from_trades(&accountings)
+        cs_domain::TradeStatistics::from_trades_with_basis(&accountings, self.return_basis)
+    }
+
+    /// Number of trades that provide the configured return basis.
+    pub fn return_basis_coverage(&self) -> (usize, usize) {
+        let total = self.results.len();
+        let supported = self.results.iter()
+            .filter(|r| r.return_basis_value(self.return_basis).is_some())
+            .count();
+        (supported, total)
     }
 }
 
@@ -807,6 +823,7 @@ where
             total_entries,
             total_opportunities,
             dropped_events,
+            return_basis: self.config.return_basis,
         })
     }
 

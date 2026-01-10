@@ -7,7 +7,7 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
-use super::TradeAccounting;
+use super::{ReturnBasis, TradeAccounting};
 
 /// Comprehensive trade statistics
 ///
@@ -85,6 +85,11 @@ pub struct TradeStatistics {
 impl TradeStatistics {
     /// Calculate statistics from a slice of trade accounting records
     pub fn from_trades(trades: &[TradeAccounting]) -> Self {
+        Self::from_trades_with_basis(trades, ReturnBasis::CapitalRequired)
+    }
+
+    /// Calculate statistics using an explicit return basis.
+    pub fn from_trades_with_basis(trades: &[TradeAccounting], basis: ReturnBasis) -> Self {
         if trades.is_empty() {
             return Self::default();
         }
@@ -107,20 +112,20 @@ impl TradeStatistics {
             .map(|t| t.transaction_costs.abs())
             .sum();
 
-        // Capital metrics
+        // Basis metrics
         let total_capital_deployed: Decimal = trades.iter()
-            .map(|t| t.capital_required.initial_requirement)
+            .filter_map(|t| t.return_basis_value(basis))
             .sum();
 
-        // Peak capital (simplified - assumes sequential trades)
+        // Peak basis (simplified - assumes sequential trades)
         let peak_capital_required = trades.iter()
-            .map(|t| t.capital_required.initial_requirement)
+            .filter_map(|t| t.return_basis_value(basis))
             .max()
             .unwrap_or(Decimal::ZERO);
 
         // Returns
         let returns: Vec<f64> = trades.iter()
-            .map(|t| t.return_on_capital)
+            .filter_map(|t| t.return_on_basis(basis))
             .collect();
 
         // Simple mean return (current behavior - potentially misleading)
@@ -130,19 +135,24 @@ impl TradeStatistics {
             0.0
         };
 
-        // Capital-weighted return (THE FIX!)
+        // Capital-weighted return
         let capital_weighted_return = {
             let weighted_sum: f64 = trades.iter()
-                .map(|t| {
-                    let capital = t.capital_required.initial_requirement
+                .filter_map(|t| {
+                    let basis_value = t.return_basis_value(basis)?
                         .to_f64()
                         .unwrap_or(0.0);
-                    capital * t.return_on_capital
+                    let ret = t.return_on_basis(basis)?;
+                    if basis_value > 0.0 {
+                        Some(basis_value * ret)
+                    } else {
+                        None
+                    }
                 })
                 .sum();
-            let total_cap = total_capital_deployed.to_f64().unwrap_or(1.0);
-            if total_cap > 0.0 {
-                weighted_sum / total_cap
+            let total_basis = total_capital_deployed.to_f64().unwrap_or(1.0);
+            if total_basis > 0.0 {
+                weighted_sum / total_basis
             } else {
                 0.0
             }
@@ -207,15 +217,27 @@ impl TradeStatistics {
         };
 
         let avg_winner_pct = if !winners.is_empty() {
-            winners.iter().map(|t| t.return_on_capital).sum::<f64>()
-                / winners.len() as f64
+            let winner_returns: Vec<f64> = winners.iter()
+                .filter_map(|t| t.return_on_basis(basis))
+                .collect();
+            if winner_returns.is_empty() {
+                0.0
+            } else {
+                winner_returns.iter().sum::<f64>() / winner_returns.len() as f64
+            }
         } else {
             0.0
         };
 
         let avg_loser_pct = if !losers.is_empty() {
-            losers.iter().map(|t| t.return_on_capital).sum::<f64>()
-                / losers.len() as f64
+            let loser_returns: Vec<f64> = losers.iter()
+                .filter_map(|t| t.return_on_basis(basis))
+                .collect();
+            if loser_returns.is_empty() {
+                0.0
+            } else {
+                loser_returns.iter().sum::<f64>() / loser_returns.len() as f64
+            }
         } else {
             0.0
         };
@@ -245,15 +267,20 @@ impl TradeStatistics {
         // Max drawdown (simple sequential)
         let max_drawdown = Self::calculate_max_drawdown(trades);
 
-        // Capital efficiency
+        // Capital efficiency (basis-aware)
+        let basis_pnl: Decimal = trades.iter()
+            .filter(|t| t.return_basis_value(basis).is_some())
+            .map(|t| t.realized_pnl)
+            .sum();
+
         let return_on_total_capital = if !total_capital_deployed.is_zero() {
-            (total_pnl / total_capital_deployed).to_f64().unwrap_or(0.0)
+            (basis_pnl / total_capital_deployed).to_f64().unwrap_or(0.0)
         } else {
             0.0
         };
 
         let return_on_peak_capital = if !peak_capital_required.is_zero() {
-            (total_pnl / peak_capital_required).to_f64().unwrap_or(0.0)
+            (basis_pnl / peak_capital_required).to_f64().unwrap_or(0.0)
         } else {
             0.0
         };

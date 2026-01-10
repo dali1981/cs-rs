@@ -13,7 +13,7 @@ use anyhow::Result;
 
 use cs_backtest::{SpreadType, SelectionType};
 use cs_analytics::{PricingModel, InterpolationMode};
-use cs_domain::{StrikeMatchMode, AttributionConfig, VolatilitySource, SnapshotTimes};
+use cs_domain::{StrikeMatchMode, AttributionConfig, VolatilitySource, SnapshotTimes, ReturnBasis};
 use crate::cli_args::CliOverrides;
 
 /// Full layered configuration
@@ -25,6 +25,7 @@ pub struct AppConfig {
     pub selection: SelectionConfig,
     pub strategy: StrategyConfig,
     pub pricing: PricingConfig,
+    pub metrics: MetricsConfig,
     pub hedging: HedgingConfig,
     pub attribution: AttributionConfig,
     #[serde(default)]
@@ -105,6 +106,12 @@ pub struct PricingConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+pub struct MetricsConfig {
+    pub return_basis: ReturnBasis,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct HedgingConfig {
     pub enabled: bool,
     pub strategy: String,  // "time", "delta", "gamma"
@@ -129,6 +136,7 @@ impl Default for AppConfig {
             selection: SelectionConfig::default(),
             strategy: StrategyConfig::default(),
             pricing: PricingConfig::default(),
+            metrics: MetricsConfig::default(),
             hedging: HedgingConfig::default(),
             attribution: AttributionConfig::default(),
             strike_match_mode: StrikeMatchMode::default(),
@@ -210,6 +218,14 @@ impl Default for PricingConfig {
         Self {
             model: PricingModel::default(),
             vol_model: InterpolationMode::default(),
+        }
+    }
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            return_basis: ReturnBasis::default(),
         }
     }
 }
@@ -406,6 +422,7 @@ impl AppConfig {
             trading_costs: self.trading_costs.clone(),
             // Rules from TOML (CLI override applied in BacktestConfigBuilder)
             rules: self.rules.clone(),
+            return_basis: self.metrics.return_basis,
         }
     }
 

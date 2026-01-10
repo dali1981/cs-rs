@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use cs_analytics::{PricingModel, InterpolationMode};
 use cs_domain::{
     TimingConfig, TradeSelectionCriteria, StrikeMatchMode, HedgeConfig, AttributionConfig,
-    TradingRange, TradingPeriodSpec, FilterCriteria, TradingCostConfig, FileRulesConfig,
+    TradingRange, TradingPeriodSpec, FilterCriteria, TradingCostConfig, FileRulesConfig, ReturnBasis,
 };
 use thiserror::Error;
 
@@ -126,6 +126,9 @@ pub struct BacktestConfig {
     /// Entry rules configuration (filters trades before/during execution)
     #[serde(default)]
     pub rules: FileRulesConfig,
+    /// Return denominator used for capital-weighted metrics
+    #[serde(default)]
+    pub return_basis: ReturnBasis,
 }
 
 fn default_wing_width() -> f64 {
@@ -266,6 +269,7 @@ impl Default for BacktestConfig {
             attribution_config: None, // No attribution by default
             trading_costs: TradingCostConfig::default(), // No costs by default (explicit opt-in)
             rules: FileRulesConfig::default(), // No entry rules by default
+            return_basis: ReturnBasis::default(),
         }
     }
 }

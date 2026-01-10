@@ -3,7 +3,7 @@
 use clap::Args;
 use std::path::PathBuf;
 use super::{
-    TimingArgs, SelectionArgs, StrategyArgs, HedgingArgs, AttributionArgs, RulesArgs,
+    TimingArgs, SelectionArgs, StrategyArgs, HedgingArgs, AttributionArgs, RulesArgs, MetricsArgs,
 };
 
 /// Arguments for the backtest command
@@ -71,4 +71,7 @@ pub struct BacktestArgs {
 
     #[command(flatten)]
     pub rules: RulesArgs,
+
+    #[command(flatten)]
+    pub metrics: MetricsArgs,
 }

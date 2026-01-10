@@ -110,6 +110,10 @@ impl HasAccounting for IronButterflyResult {
         self.total_pnl_with_hedge.unwrap_or(self.pnl)
     }
 
+    fn max_loss(&self) -> Option<Decimal> {
+        Some(self.max_loss.abs())
+    }
+
     fn hedge_pnl(&self) -> Option<Decimal> {
         // hedge_pnl is ALREADY per-contract
         self.hedge_pnl
