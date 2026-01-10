@@ -186,21 +186,49 @@ pub trait StrikeSelector: Send + Sync {
         criteria: &ExpirationCriteria,
     ) -> Result<CalendarSpread, SelectionError>;
 
-    /// Select a straddle (always ATM)
+    /// Select a long straddle (always ATM)
     ///
     /// # Arguments
     /// * `spot` - Current spot price
     /// * `surface` - IV surface with available expirations
     /// * `min_expiration` - Minimum required expiration date (options must expire AFTER this date)
-    fn select_straddle(
+    fn select_long_straddle(
         &self,
         _spot: &SpotPrice,
         _surface: &IVSurface,
         _min_expiration: NaiveDate,
-    ) -> Result<Straddle, SelectionError> {
+    ) -> Result<LongStraddle, SelectionError> {
         Err(SelectionError::UnsupportedStrategy(
-            "Straddle not supported by this selector".to_string()
+            "Long straddle not supported by this selector".to_string()
         ))
+    }
+
+    /// Select a short straddle (always ATM)
+    ///
+    /// # Arguments
+    /// * `spot` - Current spot price
+    /// * `surface` - IV surface with available expirations
+    /// * `min_expiration` - Minimum required expiration date (options must expire AFTER this date)
+    fn select_short_straddle(
+        &self,
+        _spot: &SpotPrice,
+        _surface: &IVSurface,
+        _min_expiration: NaiveDate,
+    ) -> Result<ShortStraddle, SelectionError> {
+        Err(SelectionError::UnsupportedStrategy(
+            "Short straddle not supported by this selector".to_string()
+        ))
+    }
+
+    /// Select a straddle (always ATM) - DEPRECATED
+    #[deprecated(since = "0.3.0", note = "Use select_long_straddle or select_short_straddle")]
+    fn select_straddle(
+        &self,
+        spot: &SpotPrice,
+        surface: &IVSurface,
+        min_expiration: NaiveDate,
+    ) -> Result<LongStraddle, SelectionError> {
+        self.select_long_straddle(spot, surface, min_expiration)
     }
 
     /// Select a calendar straddle (always ATM)
@@ -241,6 +269,20 @@ pub trait StrikeSelector: Send + Sync {
     ) -> Result<IronButterfly, SelectionError> {
         Err(SelectionError::UnsupportedStrategy(
             "Advanced iron butterfly selection not supported by this selector".to_string()
+        ))
+    }
+
+    /// Select a LONG iron butterfly (buy ATM straddle, sell wings - profits from volatility)
+    fn select_long_iron_butterfly(
+        &self,
+        _spot: &SpotPrice,
+        _surface: &IVSurface,
+        _wing_width: Decimal,
+        _min_dte: i32,
+        _max_dte: i32,
+    ) -> Result<LongIronButterfly, SelectionError> {
+        Err(SelectionError::UnsupportedStrategy(
+            "Long iron butterfly not supported by this selector".to_string()
         ))
     }
 
@@ -316,19 +358,45 @@ pub trait SelectionStrategy: Send + Sync {
         ))
     }
 
-    /// Select a straddle opportunity
+    /// Select a long straddle opportunity
     ///
     /// Selects ATM strike and first expiration AFTER earnings date.
     /// Default implementation returns UnsupportedStrategy error.
-    fn select_straddle(
+    fn select_long_straddle(
         &self,
         _event: &EarningsEvent,
         _spot: &SpotPrice,
         _chain_data: &OptionChainData,
-    ) -> Result<crate::entities::Straddle, StrategyError> {
+    ) -> Result<LongStraddle, StrategyError> {
         Err(StrategyError::UnsupportedStrategy(
-            "Straddle not supported by this selection strategy".to_string()
+            "Long straddle not supported by this selection strategy".to_string()
         ))
+    }
+
+    /// Select a short straddle opportunity
+    ///
+    /// Selects ATM strike and first expiration AFTER earnings date.
+    /// Default implementation returns UnsupportedStrategy error.
+    fn select_short_straddle(
+        &self,
+        _event: &EarningsEvent,
+        _spot: &SpotPrice,
+        _chain_data: &OptionChainData,
+    ) -> Result<ShortStraddle, StrategyError> {
+        Err(StrategyError::UnsupportedStrategy(
+            "Short straddle not supported by this selection strategy".to_string()
+        ))
+    }
+
+    /// Select a straddle opportunity - DEPRECATED
+    #[deprecated(since = "0.3.0", note = "Use select_long_straddle or select_short_straddle")]
+    fn select_straddle(
+        &self,
+        event: &EarningsEvent,
+        spot: &SpotPrice,
+        chain_data: &OptionChainData,
+    ) -> Result<LongStraddle, StrategyError> {
+        self.select_long_straddle(event, spot, chain_data)
     }
 
     /// Select a calendar straddle opportunity

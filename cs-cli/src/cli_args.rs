@@ -58,6 +58,19 @@ pub struct CliTiming {
     pub exit_hour: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_minute: Option<u32>,
+    // Generic timing specification fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing_strategy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_days_before: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_days_before: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_offset: Option<i16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub holding_days: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_days_after: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

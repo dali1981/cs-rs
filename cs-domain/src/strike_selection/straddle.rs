@@ -45,6 +45,38 @@ impl StraddleStrategy {
             .min()
             .copied()
     }
+
+    /// Select straddle legs (shared logic for long/short straddles)
+    fn select_straddle_legs(
+        &self,
+        event: &EarningsEvent,
+        spot: &SpotPrice,
+        chain_data: &OptionChainData,
+    ) -> Result<(OptionLeg, OptionLeg), StrategyError> {
+        // Select first expiration with sufficient DTE from entry
+        let expiration = self.select_expiration(&chain_data.expirations)
+            .ok_or(StrategyError::NoExpirations)?;
+
+        // Select ATM strike (closest to spot)
+        let spot_value = spot.to_f64();
+        let atm_strike = super::find_closest_strike(&chain_data.strikes, spot_value)?;
+
+        // Create legs
+        let call_leg = OptionLeg::new(
+            event.symbol.clone(),
+            atm_strike,
+            expiration,
+            OptionType::Call,
+        );
+        let put_leg = OptionLeg::new(
+            event.symbol.clone(),
+            atm_strike,
+            expiration,
+            OptionType::Put,
+        );
+
+        Ok((call_leg, put_leg))
+    }
 }
 
 impl SelectionStrategy for StraddleStrategy {
@@ -71,35 +103,25 @@ impl SelectionStrategy for StraddleStrategy {
         ))
     }
 
-    fn select_straddle(
+    fn select_long_straddle(
         &self,
         event: &EarningsEvent,
         spot: &SpotPrice,
         chain_data: &OptionChainData,
-    ) -> Result<Straddle, StrategyError> {
-        // Select first expiration with sufficient DTE from entry
-        let expiration = self.select_expiration(&chain_data.expirations)
-            .ok_or(StrategyError::NoExpirations)?;
+    ) -> Result<LongStraddle, StrategyError> {
+        let (call_leg, put_leg) = self.select_straddle_legs(event, spot, chain_data)?;
+        LongStraddle::new(call_leg, put_leg)
+            .map_err(StrategyError::SpreadCreation)
+    }
 
-        // Select ATM strike (closest to spot)
-        let spot_value = spot.to_f64();
-        let atm_strike = super::find_closest_strike(&chain_data.strikes, spot_value)?;
-
-        // Create legs
-        let call_leg = OptionLeg::new(
-            event.symbol.clone(),
-            atm_strike,
-            expiration,
-            OptionType::Call,
-        );
-        let put_leg = OptionLeg::new(
-            event.symbol.clone(),
-            atm_strike,
-            expiration,
-            OptionType::Put,
-        );
-
-        Straddle::new(call_leg, put_leg)
+    fn select_short_straddle(
+        &self,
+        event: &EarningsEvent,
+        spot: &SpotPrice,
+        chain_data: &OptionChainData,
+    ) -> Result<ShortStraddle, StrategyError> {
+        let (call_leg, put_leg) = self.select_straddle_legs(event, spot, chain_data)?;
+        ShortStraddle::new(call_leg, put_leg)
             .map_err(StrategyError::SpreadCreation)
     }
 }
@@ -126,7 +148,7 @@ mod tests {
     }
 
     #[test]
-    fn test_select_straddle() {
+    fn test_select_long_straddle() {
         let strategy = StraddleStrategy::default();
         let event = EarningsEvent::new(
             "AAPL".into(),
@@ -151,7 +173,7 @@ mod tests {
         };
 
         let spot = SpotPrice::new(Decimal::new(180, 0), Utc::now());
-        let straddle = strategy.select_straddle(&event, &spot, &chain_data).unwrap();
+        let straddle = strategy.select_long_straddle(&event, &spot, &chain_data).unwrap();
 
         // Should select Jan 31 (first after earnings) and 180 strike (ATM)
         assert_eq!(straddle.expiration(), NaiveDate::from_ymd_opt(2025, 1, 31).unwrap());
@@ -160,7 +182,41 @@ mod tests {
     }
 
     #[test]
-    fn test_select_straddle_no_post_earnings_expiration() {
+    fn test_select_short_straddle() {
+        let strategy = StraddleStrategy::default();
+        let event = EarningsEvent::new(
+            "AAPL".into(),
+            NaiveDate::from_ymd_opt(2025, 1, 30).unwrap(),
+            EarningsTime::AfterMarketClose,
+        );
+
+        let chain_data = OptionChainData {
+            expirations: vec![
+                NaiveDate::from_ymd_opt(2025, 1, 31).unwrap(),
+                NaiveDate::from_ymd_opt(2025, 2, 7).unwrap(),
+            ],
+            strikes: vec![
+                Strike::new(Decimal::new(175, 0)).unwrap(),
+                Strike::new(Decimal::new(180, 0)).unwrap(),
+                Strike::new(Decimal::new(185, 0)).unwrap(),
+            ],
+            deltas: None,
+            volumes: None,
+            iv_ratios: None,
+            iv_surface: None,
+        };
+
+        let spot = SpotPrice::new(Decimal::new(180, 0), Utc::now());
+        let straddle = strategy.select_short_straddle(&event, &spot, &chain_data).unwrap();
+
+        // Should select Jan 31 (first after earnings) and 180 strike (ATM)
+        assert_eq!(straddle.expiration(), NaiveDate::from_ymd_opt(2025, 1, 31).unwrap());
+        assert_eq!(straddle.strike().value(), Decimal::new(180, 0));
+        assert_eq!(straddle.symbol(), "AAPL");
+    }
+
+    #[test]
+    fn test_select_long_straddle_no_post_earnings_expiration() {
         let earnings_date = NaiveDate::from_ymd_opt(2025, 1, 30).unwrap();
         let strategy = StraddleStrategy::with_min_dte(7, earnings_date);
         let event = EarningsEvent::new(
@@ -181,7 +237,7 @@ mod tests {
         };
 
         let spot = SpotPrice::new(Decimal::new(180, 0), Utc::now());
-        let result = strategy.select_straddle(&event, &spot, &chain_data);
+        let result = strategy.select_long_straddle(&event, &spot, &chain_data);
 
         assert!(matches!(result, Err(StrategyError::NoExpirations)));
     }

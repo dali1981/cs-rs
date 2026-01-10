@@ -161,12 +161,179 @@ pub struct IronButterfly {
     pub long_put: OptionLeg,
 }
 
+/// Straddle trade direction (for result serialization)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StraddleDirection {
+    Long,
+    Short,
+}
+
+impl Default for StraddleDirection {
+    fn default() -> Self {
+        StraddleDirection::Long
+    }
+}
+
+/// Trait for straddle trades (long or short)
+pub trait StraddleTrade: crate::trade::CompositeTrade + Send + Sync {
+    /// Get the call leg
+    fn call_leg(&self) -> &OptionLeg;
+    /// Get the put leg
+    fn put_leg(&self) -> &OptionLeg;
+    /// Get the underlying symbol
+    fn symbol(&self) -> &str {
+        &self.call_leg().symbol
+    }
+    /// Get the strike price
+    fn strike(&self) -> Strike {
+        self.call_leg().strike
+    }
+    /// Get the expiration date
+    fn expiration(&self) -> NaiveDate {
+        self.call_leg().expiration
+    }
+    /// Get days to expiration from a given date
+    fn dte(&self, from: NaiveDate) -> i32 {
+        (self.expiration() - from).num_days() as i32
+    }
+    /// Get the direction of this straddle
+    fn direction(&self) -> StraddleDirection;
+}
+
+/// Shared validation for straddle legs
+fn validate_straddle_legs(call_leg: &OptionLeg, put_leg: &OptionLeg) -> Result<(), ValidationError> {
+    // Validate same symbol
+    if call_leg.symbol != put_leg.symbol {
+        return Err(ValidationError::SymbolMismatch(
+            call_leg.symbol.clone(),
+            put_leg.symbol.clone(),
+        ));
+    }
+
+    // Validate same expiration
+    if call_leg.expiration != put_leg.expiration {
+        return Err(ValidationError::ExpirationMismatch {
+            short: call_leg.expiration,
+            long: put_leg.expiration,
+        });
+    }
+
+    // Validate same strike
+    if call_leg.strike != put_leg.strike {
+        return Err(ValidationError::StrikeMismatch {
+            call: call_leg.strike,
+            put: put_leg.strike,
+        });
+    }
+
+    // Validate option types
+    if call_leg.option_type != OptionType::Call {
+        return Err(ValidationError::InvalidOptionType(
+            "Call leg must be a Call".to_string(),
+        ));
+    }
+    if put_leg.option_type != OptionType::Put {
+        return Err(ValidationError::InvalidOptionType(
+            "Put leg must be a Put".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 /// Long straddle = long ATM call + long ATM put
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Straddle {
+pub struct LongStraddle {
     pub call_leg: OptionLeg,
     pub put_leg: OptionLeg,
 }
+
+/// Short straddle = short ATM call + short ATM put
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShortStraddle {
+    pub call_leg: OptionLeg,
+    pub put_leg: OptionLeg,
+}
+
+/// Backward compatibility alias
+#[deprecated(since = "0.3.0", note = "Use LongStraddle or ShortStraddle instead")]
+pub type Straddle = LongStraddle;
+
+/// Iron butterfly trade direction (for result serialization)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IronButterflyDirection {
+    /// Short iron butterfly: sell ATM straddle, buy OTM wings (credit)
+    Short,
+    /// Long iron butterfly: buy ATM straddle, sell OTM wings (debit)
+    Long,
+}
+
+impl Default for IronButterflyDirection {
+    fn default() -> Self {
+        IronButterflyDirection::Short
+    }
+}
+
+/// Trait for iron butterfly trades (short or long)
+pub trait IronButterflyTrade: crate::trade::CompositeTrade + Send + Sync {
+    /// Get the center call leg
+    fn center_call(&self) -> &OptionLeg;
+    /// Get the center put leg
+    fn center_put(&self) -> &OptionLeg;
+    /// Get the upper wing (call at higher strike)
+    fn upper_wing(&self) -> &OptionLeg;
+    /// Get the lower wing (put at lower strike)
+    fn lower_wing(&self) -> &OptionLeg;
+    /// Get the underlying symbol
+    fn symbol(&self) -> &str {
+        &self.center_call().symbol
+    }
+    /// Get the center strike price
+    fn center_strike(&self) -> Strike {
+        self.center_call().strike
+    }
+    /// Get the upper strike price
+    fn upper_strike(&self) -> Strike {
+        self.upper_wing().strike
+    }
+    /// Get the lower strike price
+    fn lower_strike(&self) -> Strike {
+        self.lower_wing().strike
+    }
+    /// Get the expiration date
+    fn expiration(&self) -> NaiveDate {
+        self.center_call().expiration
+    }
+    /// Get days to expiration from a given date
+    fn dte(&self, from: NaiveDate) -> i32 {
+        (self.expiration() - from).num_days() as i32
+    }
+    /// Get the wing width
+    fn wing_width(&self) -> Decimal {
+        self.upper_strike().value() - self.center_strike().value()
+    }
+    /// Get the direction of this iron butterfly
+    fn direction(&self) -> IronButterflyDirection;
+}
+
+/// Long iron butterfly = long ATM straddle + short OTM wings (debit, profits from volatility)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LongIronButterfly {
+    /// Long call at center strike
+    pub center_call: OptionLeg,
+    /// Long put at center strike
+    pub center_put: OptionLeg,
+    /// Short call at upper strike (wing)
+    pub upper_call: OptionLeg,
+    /// Short put at lower strike (wing)
+    pub lower_put: OptionLeg,
+}
+
+/// Backward compatibility alias - IronButterfly is a short iron butterfly
+#[deprecated(since = "0.3.0", note = "Use IronButterfly directly (it's a short iron butterfly) or LongIronButterfly for the reverse")]
+pub type ShortIronButterfly = IronButterfly;
 
 impl IronButterfly {
     pub fn new(
@@ -277,44 +444,137 @@ impl IronButterfly {
     }
 }
 
-impl Straddle {
-    pub fn new(call_leg: OptionLeg, put_leg: OptionLeg) -> Result<Self, ValidationError> {
+impl IronButterflyTrade for IronButterfly {
+    fn center_call(&self) -> &OptionLeg {
+        &self.short_call
+    }
+
+    fn center_put(&self) -> &OptionLeg {
+        &self.short_put
+    }
+
+    fn upper_wing(&self) -> &OptionLeg {
+        &self.long_call
+    }
+
+    fn lower_wing(&self) -> &OptionLeg {
+        &self.long_put
+    }
+
+    fn direction(&self) -> IronButterflyDirection {
+        IronButterflyDirection::Short
+    }
+}
+
+impl LongIronButterfly {
+    pub fn new(
+        center_call: OptionLeg,
+        center_put: OptionLeg,
+        upper_call: OptionLeg,
+        lower_put: OptionLeg,
+    ) -> Result<Self, ValidationError> {
         // Validate same symbol
-        if call_leg.symbol != put_leg.symbol {
+        if center_call.symbol != center_put.symbol
+            || center_call.symbol != upper_call.symbol
+            || center_call.symbol != lower_put.symbol
+        {
             return Err(ValidationError::SymbolMismatch(
-                call_leg.symbol.clone(),
-                put_leg.symbol.clone(),
+                center_call.symbol.clone(),
+                center_put.symbol.clone(),
             ));
         }
 
         // Validate same expiration
-        if call_leg.expiration != put_leg.expiration {
+        if center_call.expiration != center_put.expiration
+            || center_call.expiration != upper_call.expiration
+            || center_call.expiration != lower_put.expiration
+        {
             return Err(ValidationError::ExpirationMismatch {
-                short: call_leg.expiration,
-                long: put_leg.expiration,
+                short: center_call.expiration,
+                long: upper_call.expiration,
             });
         }
 
-        // Validate same strike
-        if call_leg.strike != put_leg.strike {
+        // Validate center strikes match
+        if center_call.strike != center_put.strike {
             return Err(ValidationError::StrikeMismatch {
-                call: call_leg.strike,
-                put: put_leg.strike,
+                call: center_call.strike,
+                put: center_put.strike,
             });
+        }
+
+        // Validate wing strikes
+        if upper_call.strike <= center_call.strike {
+            return Err(ValidationError::InvalidStrikeOrder(
+                "Upper call strike must be > center strike".to_string(),
+            ));
+        }
+        if lower_put.strike >= center_put.strike {
+            return Err(ValidationError::InvalidStrikeOrder(
+                "Lower put strike must be < center strike".to_string(),
+            ));
         }
 
         // Validate option types
-        if call_leg.option_type != OptionType::Call {
+        if center_call.option_type != OptionType::Call {
             return Err(ValidationError::InvalidOptionType(
-                "Call leg must be a Call".to_string(),
+                "Center call must be a Call".to_string(),
             ));
         }
-        if put_leg.option_type != OptionType::Put {
+        if center_put.option_type != OptionType::Put {
             return Err(ValidationError::InvalidOptionType(
-                "Put leg must be a Put".to_string(),
+                "Center put must be a Put".to_string(),
+            ));
+        }
+        if upper_call.option_type != OptionType::Call {
+            return Err(ValidationError::InvalidOptionType(
+                "Upper call must be a Call".to_string(),
+            ));
+        }
+        if lower_put.option_type != OptionType::Put {
+            return Err(ValidationError::InvalidOptionType(
+                "Lower put must be a Put".to_string(),
             ));
         }
 
+        Ok(Self {
+            center_call,
+            center_put,
+            upper_call,
+            lower_put,
+        })
+    }
+
+    pub fn symbol(&self) -> &str {
+        &self.center_call.symbol
+    }
+}
+
+impl IronButterflyTrade for LongIronButterfly {
+    fn center_call(&self) -> &OptionLeg {
+        &self.center_call
+    }
+
+    fn center_put(&self) -> &OptionLeg {
+        &self.center_put
+    }
+
+    fn upper_wing(&self) -> &OptionLeg {
+        &self.upper_call
+    }
+
+    fn lower_wing(&self) -> &OptionLeg {
+        &self.lower_put
+    }
+
+    fn direction(&self) -> IronButterflyDirection {
+        IronButterflyDirection::Long
+    }
+}
+
+impl LongStraddle {
+    pub fn new(call_leg: OptionLeg, put_leg: OptionLeg) -> Result<Self, ValidationError> {
+        validate_straddle_legs(&call_leg, &put_leg)?;
         Ok(Self { call_leg, put_leg })
     }
 
@@ -332,6 +592,57 @@ impl Straddle {
 
     pub fn dte(&self, from: NaiveDate) -> i32 {
         (self.expiration() - from).num_days() as i32
+    }
+}
+
+impl StraddleTrade for LongStraddle {
+    fn call_leg(&self) -> &OptionLeg {
+        &self.call_leg
+    }
+
+    fn put_leg(&self) -> &OptionLeg {
+        &self.put_leg
+    }
+
+    fn direction(&self) -> StraddleDirection {
+        StraddleDirection::Long
+    }
+}
+
+impl ShortStraddle {
+    pub fn new(call_leg: OptionLeg, put_leg: OptionLeg) -> Result<Self, ValidationError> {
+        validate_straddle_legs(&call_leg, &put_leg)?;
+        Ok(Self { call_leg, put_leg })
+    }
+
+    pub fn symbol(&self) -> &str {
+        &self.call_leg.symbol
+    }
+
+    pub fn strike(&self) -> Strike {
+        self.call_leg.strike
+    }
+
+    pub fn expiration(&self) -> NaiveDate {
+        self.call_leg.expiration
+    }
+
+    pub fn dte(&self, from: NaiveDate) -> i32 {
+        (self.expiration() - from).num_days() as i32
+    }
+}
+
+impl StraddleTrade for ShortStraddle {
+    fn call_leg(&self) -> &OptionLeg {
+        &self.call_leg
+    }
+
+    fn put_leg(&self) -> &OptionLeg {
+        &self.put_leg
+    }
+
+    fn direction(&self) -> StraddleDirection {
+        StraddleDirection::Short
     }
 }
 
@@ -918,13 +1229,16 @@ pub struct IronButterflyResult {
     pub earnings_date: Option<NaiveDate>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub earnings_time: Option<EarningsTime>,
+    /// Trade direction (short = credit, long = debit)
+    #[serde(default)]
+    pub direction: IronButterflyDirection,
     pub center_strike: Strike,
     pub upper_strike: Strike,
     pub lower_strike: Strike,
     pub expiration: NaiveDate,
     pub wing_width: Decimal,
 
-    // Entry (CREDIT received)
+    // Entry (CREDIT for short, DEBIT for long)
     pub entry_time: DateTime<Utc>,
     pub short_call_entry: Decimal,
     pub short_put_entry: Decimal,
@@ -1112,6 +1426,10 @@ pub struct StraddleResult {
     /// When present, pnl field represents NET P&L (after costs)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_summary: Option<CostSummary>,
+
+    /// Trade direction (long or short straddle)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<StraddleDirection>,
 }
 
 impl StraddleResult {
@@ -1568,11 +1886,20 @@ impl crate::trade::TradeResult for IronCondorResult {
 
 use crate::trade::{CompositeTrade, LegPosition};
 
-impl CompositeTrade for Straddle {
+impl CompositeTrade for LongStraddle {
     fn legs(&self) -> Vec<(&OptionLeg, LegPosition)> {
         vec![
             (&self.call_leg, LegPosition::Long),
             (&self.put_leg, LegPosition::Long),
+        ]
+    }
+}
+
+impl CompositeTrade for ShortStraddle {
+    fn legs(&self) -> Vec<(&OptionLeg, LegPosition)> {
+        vec![
+            (&self.call_leg, LegPosition::Short),
+            (&self.put_leg, LegPosition::Short),
         ]
     }
 }
@@ -1593,6 +1920,18 @@ impl CompositeTrade for IronButterfly {
             (&self.short_put, LegPosition::Short),
             (&self.long_call, LegPosition::Long),
             (&self.long_put, LegPosition::Long),
+        ]
+    }
+}
+
+impl CompositeTrade for LongIronButterfly {
+    fn legs(&self) -> Vec<(&OptionLeg, LegPosition)> {
+        // Long iron butterfly: buy center straddle, sell wings
+        vec![
+            (&self.center_call, LegPosition::Long),
+            (&self.center_put, LegPosition::Long),
+            (&self.upper_call, LegPosition::Short),
+            (&self.lower_put, LegPosition::Short),
         ]
     }
 }

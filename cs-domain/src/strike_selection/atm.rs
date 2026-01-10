@@ -79,6 +79,58 @@ impl ATMStrategy {
             .copied()
             .ok_or(SelectionError::NoStrikes)
     }
+
+    /// Select straddle legs (shared logic for long/short straddles)
+    fn select_straddle_legs(
+        &self,
+        spot: &SpotPrice,
+        surface: &IVSurface,
+        min_expiration: NaiveDate,
+    ) -> Result<(OptionLeg, OptionLeg), SelectionError> {
+        // Get strikes from IV surface
+        let strikes: Vec<Strike> = surface.strikes()
+            .iter()
+            .filter_map(|&s| Strike::new(s).ok())
+            .collect();
+
+        if strikes.is_empty() {
+            return Err(SelectionError::NoStrikes);
+        }
+
+        // Filter expirations to those AFTER min_expiration
+        let expirations: Vec<NaiveDate> = surface.expirations()
+            .into_iter()
+            .filter(|&exp| exp > min_expiration)
+            .collect();
+
+        if expirations.is_empty() {
+            return Err(SelectionError::NoExpirations);
+        }
+
+        // Select first valid expiration (soonest after min_expiration)
+        let expiration = *expirations.iter().min().unwrap();
+
+        // Select ATM strike (closest to spot)
+        let spot_f64: f64 = spot.value.try_into().unwrap_or(0.0);
+        let atm_strike = super::find_closest_strike(&strikes, spot_f64)?;
+
+        // Create legs
+        let symbol = surface.underlying().to_string();
+        let call_leg = OptionLeg::new(
+            symbol.clone(),
+            atm_strike,
+            expiration,
+            OptionType::Call,
+        );
+        let put_leg = OptionLeg::new(
+            symbol,
+            atm_strike,
+            expiration,
+            OptionType::Put,
+        );
+
+        Ok((call_leg, put_leg))
+    }
 }
 
 impl SelectionStrategy for ATMStrategy {
@@ -342,55 +394,24 @@ impl StrikeSelector for ATMStrategy {
         CalendarSpread::new(short_leg, long_leg).map_err(Into::into)
     }
 
-    fn select_straddle(
+    fn select_long_straddle(
         &self,
         spot: &SpotPrice,
         surface: &IVSurface,
         min_expiration: NaiveDate,
-    ) -> Result<Straddle, SelectionError> {
-        // Get strikes from IV surface
-        let strikes: Vec<Strike> = surface.strikes()
-            .iter()
-            .filter_map(|&s| Strike::new(s).ok())
-            .collect();
+    ) -> Result<LongStraddle, SelectionError> {
+        let (call_leg, put_leg) = self.select_straddle_legs(spot, surface, min_expiration)?;
+        LongStraddle::new(call_leg, put_leg).map_err(Into::into)
+    }
 
-        if strikes.is_empty() {
-            return Err(SelectionError::NoStrikes);
-        }
-
-        // Filter expirations to those AFTER min_expiration
-        let expirations: Vec<NaiveDate> = surface.expirations()
-            .into_iter()
-            .filter(|&exp| exp > min_expiration)
-            .collect();
-
-        if expirations.is_empty() {
-            return Err(SelectionError::NoExpirations);
-        }
-
-        // Select first valid expiration (soonest after min_expiration)
-        let expiration = *expirations.iter().min().unwrap();
-
-        // Select ATM strike (closest to spot)
-        let spot_f64: f64 = spot.value.try_into().unwrap_or(0.0);
-        let atm_strike = super::find_closest_strike(&strikes, spot_f64)?;
-
-        // Create legs
-        let symbol = surface.underlying().to_string();
-        let call_leg = OptionLeg::new(
-            symbol.clone(),
-            atm_strike,
-            expiration,
-            OptionType::Call,
-        );
-        let put_leg = OptionLeg::new(
-            symbol,
-            atm_strike,
-            expiration,
-            OptionType::Put,
-        );
-
-        Straddle::new(call_leg, put_leg).map_err(Into::into)
+    fn select_short_straddle(
+        &self,
+        spot: &SpotPrice,
+        surface: &IVSurface,
+        min_expiration: NaiveDate,
+    ) -> Result<ShortStraddle, SelectionError> {
+        let (call_leg, put_leg) = self.select_straddle_legs(spot, surface, min_expiration)?;
+        ShortStraddle::new(call_leg, put_leg).map_err(Into::into)
     }
 
     fn select_calendar_straddle(

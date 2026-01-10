@@ -14,7 +14,7 @@ use super::{
     StrikeSelector, SelectionError, ExpirationCriteria, ATMStrategy,
 };
 use crate::entities::{
-    CalendarSpread, EarningsEvent, OptionLeg, Straddle, CalendarStraddle, IronButterfly
+    CalendarSpread, EarningsEvent, OptionLeg, LongStraddle, ShortStraddle, CalendarStraddle, IronButterfly
 };
 use crate::value_objects::SpotPrice;
 use cs_analytics::IVSurface;
@@ -291,16 +291,28 @@ impl StrikeSelector for DeltaStrategy {
         CalendarSpread::new(short_leg, long_leg).map_err(Into::into)
     }
 
-    /// Straddles are ALWAYS ATM - delegate to ATMStrategy
-    fn select_straddle(
+    /// Long straddles are ALWAYS ATM - delegate to ATMStrategy
+    fn select_long_straddle(
         &self,
         spot: &SpotPrice,
         surface: &IVSurface,
         min_expiration: NaiveDate,
-    ) -> Result<Straddle, SelectionError> {
+    ) -> Result<LongStraddle, SelectionError> {
         // Create an ATM strategy with our criteria and delegate
         let atm_strategy = ATMStrategy::new(self.criteria.clone());
-        StrikeSelector::select_straddle(&atm_strategy, spot, surface, min_expiration)
+        StrikeSelector::select_long_straddle(&atm_strategy, spot, surface, min_expiration)
+    }
+
+    /// Short straddles are ALWAYS ATM - delegate to ATMStrategy
+    fn select_short_straddle(
+        &self,
+        spot: &SpotPrice,
+        surface: &IVSurface,
+        min_expiration: NaiveDate,
+    ) -> Result<ShortStraddle, SelectionError> {
+        // Create an ATM strategy with our criteria and delegate
+        let atm_strategy = ATMStrategy::new(self.criteria.clone());
+        StrikeSelector::select_short_straddle(&atm_strategy, spot, surface, min_expiration)
     }
 
     /// Calendar straddles are ALWAYS ATM - delegate to ATMStrategy

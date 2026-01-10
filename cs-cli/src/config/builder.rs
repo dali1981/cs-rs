@@ -126,7 +126,7 @@ impl BacktestConfigBuilder {
                 ..Default::default()
             });
 
-            // Timing - parse time strings to hour/minute
+            // Timing - parse time strings to hour/minute and populate generic timing fields
             let mut timing = CliTiming::default();
             if let Some(ref entry_time) = args.timing.entry_time {
                 if let Ok((hour, minute)) = parse_time(Some(entry_time.clone())) {
@@ -140,7 +140,22 @@ impl BacktestConfigBuilder {
                     timing.exit_minute = minute;
                 }
             }
-            if timing.entry_hour.is_some() || timing.exit_hour.is_some() {
+            // Populate generic timing fields from CLI args
+            timing.timing_strategy = args.timing.timing_strategy.clone();
+            timing.entry_days_before = args.timing.entry_days_before;
+            timing.exit_days_before = args.timing.exit_days_before;
+            timing.entry_offset = args.timing.entry_offset;
+            timing.holding_days = args.timing.holding_days;
+            timing.exit_days_after = args.timing.exit_days_after;
+
+            if timing.entry_hour.is_some()
+                || timing.exit_hour.is_some()
+                || timing.timing_strategy.is_some()
+                || timing.entry_days_before.is_some()
+                || timing.exit_days_before.is_some()
+                || timing.entry_offset.is_some()
+                || timing.holding_days.is_some()
+                || timing.exit_days_after.is_some() {
                 overrides.timing = Some(timing);
             }
 

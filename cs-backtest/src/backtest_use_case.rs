@@ -549,7 +549,15 @@ where
                 let result = self.execute_with_strategy(&s, None).await?;
                 Ok(UnifiedBacktestResult::IronButterfly(result))
             }
-            StrategyDispatch::Straddle(s) => {
+            StrategyDispatch::LongIronButterfly(s) => {
+                let result = self.execute_with_strategy(&s, None).await?;
+                Ok(UnifiedBacktestResult::IronButterfly(result))
+            }
+            StrategyDispatch::LongStraddle(s) => {
+                let result = self.execute_with_strategy(&s, None).await?;
+                Ok(UnifiedBacktestResult::Straddle(result))
+            }
+            StrategyDispatch::ShortStraddle(s) => {
                 let result = self.execute_with_strategy(&s, None).await?;
                 Ok(UnifiedBacktestResult::Straddle(result))
             }
@@ -852,7 +860,9 @@ where
         let base_config = match self.config.spread {
             SpreadType::Calendar => ExecutionConfig::for_calendar_spread(self.config.max_entry_iv),
             SpreadType::IronButterfly => ExecutionConfig::for_iron_butterfly(self.config.max_entry_iv),
+            SpreadType::LongIronButterfly => ExecutionConfig::for_iron_butterfly(self.config.max_entry_iv),
             SpreadType::Straddle => ExecutionConfig::for_straddle(self.config.max_entry_iv),
+            SpreadType::ShortStraddle => ExecutionConfig::for_straddle(self.config.max_entry_iv),
             SpreadType::CalendarStraddle => ExecutionConfig::for_calendar_straddle(self.config.max_entry_iv),
             SpreadType::PostEarningsStraddle => ExecutionConfig::for_straddle(self.config.max_entry_iv),
         };

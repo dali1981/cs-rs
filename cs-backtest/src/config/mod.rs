@@ -26,6 +26,27 @@ pub struct BacktestConfig {
     /// Backtest end date
     pub end_date: NaiveDate,
     pub timing: TimingConfig,
+
+    // NEW: Generic timing specification (preferred over spread-specific params)
+    /// Timing strategy: PreEarnings, PostEarnings, CrossEarnings, etc.
+    #[serde(default)]
+    pub timing_strategy: Option<String>,
+    /// Entry days before event (for PreEarnings/CrossEarnings)
+    #[serde(default)]
+    pub entry_days_before: Option<u16>,
+    /// Exit days before event (for PreEarnings)
+    #[serde(default)]
+    pub exit_days_before: Option<u16>,
+    /// Days after event to enter (for PostEarnings)
+    #[serde(default)]
+    pub entry_offset: Option<i16>,
+    /// Holding days (for PostEarnings/HoldingPeriod)
+    #[serde(default)]
+    pub holding_days: Option<u16>,
+    /// Exit days after event (for CrossEarnings)
+    #[serde(default)]
+    pub exit_days_after: Option<u16>,
+
     pub selection: TradeSelectionCriteria,
     pub spread: SpreadType,
     pub selection_strategy: SelectionType,
@@ -129,9 +150,16 @@ fn default_min_straddle_dte() -> i32 {
 pub enum SpreadType {
     #[default]
     Calendar,
+    /// Iron butterfly (short): sell ATM straddle + buy OTM wings (credit)
     #[serde(rename = "iron-butterfly")]
     IronButterfly,
+    /// Long iron butterfly: buy ATM straddle + sell OTM wings (debit)
+    #[serde(rename = "long-iron-butterfly")]
+    LongIronButterfly,
     Straddle,
+    /// Short straddle: sell ATM call + sell ATM put
+    #[serde(rename = "short-straddle")]
+    ShortStraddle,
     /// Calendar straddle: short near-term straddle + long far-term straddle
     #[serde(rename = "calendar-straddle")]
     CalendarStraddle,
@@ -143,8 +171,10 @@ pub enum SpreadType {
 impl SpreadType {
     pub fn from_string(s: &str) -> Self {
         match s.to_lowercase().replace('-', "_").as_str() {
-            "iron_butterfly" | "ironbutterfly" | "butterfly" => SpreadType::IronButterfly,
+            "iron_butterfly" | "ironbutterfly" | "butterfly" | "short_iron_butterfly" => SpreadType::IronButterfly,
+            "long_iron_butterfly" | "longironbutterfly" | "reverse_butterfly" => SpreadType::LongIronButterfly,
             "straddle" | "long_straddle" => SpreadType::Straddle,
+            "short_straddle" | "shortstraddle" => SpreadType::ShortStraddle,
             "calendar_straddle" | "calendarstraddle" => SpreadType::CalendarStraddle,
             "post_earnings_straddle" | "postearningstraddle" | "post_straddle" => SpreadType::PostEarningsStraddle,
             _ => SpreadType::Calendar,
@@ -188,6 +218,13 @@ impl Default for BacktestConfig {
             start_date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             end_date: NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
             timing: TimingConfig::default(),
+            // Generic timing fields (None = use legacy spread-specific params)
+            timing_strategy: None,
+            entry_days_before: None,
+            exit_days_before: None,
+            entry_offset: None,
+            holding_days: None,
+            exit_days_after: None,
             selection: TradeSelectionCriteria::default(),
             spread: SpreadType::Calendar,
             selection_strategy: SelectionType::ATM,
@@ -251,30 +288,62 @@ impl BacktestConfig {
         }
     }
 
-    /// Build TradingPeriodSpec based on spread type and config
+    /// Build TradingPeriodSpec based on config
     ///
-    /// This converts spread-specific timing parameters into a unified spec.
+    /// Priority order (for backward compatibility):
+    /// 1. NEW PATH: Use generic timing_strategy if provided
+    /// 2. LEGACY PATH: Convert spread-specific params to timing spec
     pub fn timing_spec(&self) -> TradingPeriodSpec {
         use chrono::NaiveTime;
 
+        // Helper to get entry/exit times from config
+        let entry_time = NaiveTime::from_hms_opt(
+            self.timing.entry_hour,
+            self.timing.entry_minute,
+            0,
+        )
+        .unwrap();
+        let exit_time = NaiveTime::from_hms_opt(
+            self.timing.exit_hour,
+            self.timing.exit_minute,
+            0,
+        )
+        .unwrap();
+
+        // 1. NEW PATH: Use generic timing_strategy if provided
+        if let Some(strategy) = &self.timing_strategy {
+            return match strategy.as_str() {
+                "PreEarnings" => TradingPeriodSpec::PreEarnings {
+                    entry_days_before: self.entry_days_before.unwrap_or(5),
+                    exit_days_before: self.exit_days_before.unwrap_or(1),
+                    entry_time,
+                    exit_time,
+                },
+                "PostEarnings" => TradingPeriodSpec::PostEarnings {
+                    entry_offset: self.entry_offset.unwrap_or(0),
+                    holding_days: self.holding_days.unwrap_or(5),
+                    entry_time,
+                    exit_time,
+                },
+                "CrossEarnings" => TradingPeriodSpec::CrossEarnings {
+                    entry_days_before: self.entry_days_before.unwrap_or(1),
+                    exit_days_after: self.exit_days_after.unwrap_or(1),
+                    entry_time,
+                    exit_time,
+                },
+                _ => panic!("Unknown timing strategy: {}", strategy),
+            };
+        }
+
+        // 2. LEGACY PATH: Convert spread-specific params (backward compatible)
         match self.spread {
-            SpreadType::Straddle => {
-                // Pre-earnings straddle
+            SpreadType::Straddle | SpreadType::ShortStraddle => {
+                // Pre-earnings straddle (long or short)
                 TradingPeriodSpec::PreEarnings {
                     entry_days_before: self.straddle_entry_days as u16,
                     exit_days_before: self.straddle_exit_days as u16,
-                    entry_time: NaiveTime::from_hms_opt(
-                        self.timing.entry_hour,
-                        self.timing.entry_minute,
-                        0,
-                    )
-                    .unwrap(),
-                    exit_time: NaiveTime::from_hms_opt(
-                        self.timing.exit_hour,
-                        self.timing.exit_minute,
-                        0,
-                    )
-                    .unwrap(),
+                    entry_time,
+                    exit_time,
                 }
             }
 
@@ -283,18 +352,8 @@ impl BacktestConfig {
                 TradingPeriodSpec::PostEarnings {
                     entry_offset: 0,
                     holding_days: self.post_earnings_holding_days as u16,
-                    entry_time: NaiveTime::from_hms_opt(
-                        self.timing.entry_hour,
-                        self.timing.entry_minute,
-                        0,
-                    )
-                    .unwrap(),
-                    exit_time: NaiveTime::from_hms_opt(
-                        self.timing.exit_hour,
-                        self.timing.exit_minute,
-                        0,
-                    )
-                    .unwrap(),
+                    entry_time,
+                    exit_time,
                 }
             }
 
@@ -302,18 +361,8 @@ impl BacktestConfig {
             _ => TradingPeriodSpec::CrossEarnings {
                 entry_days_before: 1,
                 exit_days_after: 1,
-                entry_time: NaiveTime::from_hms_opt(
-                    self.timing.entry_hour,
-                    self.timing.entry_minute,
-                    0,
-                )
-                .unwrap(),
-                exit_time: NaiveTime::from_hms_opt(
-                    self.timing.exit_hour,
-                    self.timing.exit_minute,
-                    0,
-                )
-                .unwrap(),
+                entry_time,
+                exit_time,
             },
         }
     }
