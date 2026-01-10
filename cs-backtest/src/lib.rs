@@ -31,6 +31,7 @@ pub mod atm_iv_use_case;
 pub mod minute_aligned_iv_use_case;
 pub mod earnings_analysis_use_case;
 pub mod attribution;
+pub mod rules;  // Rule evaluation for entry filtering
 
 // Config
 pub use config::{BacktestConfig, SpreadType, SelectionType};
@@ -85,6 +86,9 @@ pub use greeks_helpers::{
 };
 pub use iv_validation::{IVValidator, IVValidationError, validate_iv_for_surface, validate_entry_iv};
 pub use iv_surface_builder::{build_iv_surface, build_iv_surface_minute_aligned};
+
+// Rules
+pub use rules::RuleEvaluator;
 
 // Re-export pricing model types for convenience
 pub use cs_analytics::{PricingModel, PricingIVProvider, InterpolationMode};

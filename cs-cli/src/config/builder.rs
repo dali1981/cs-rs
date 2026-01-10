@@ -80,6 +80,11 @@ impl BacktestConfigBuilder {
             if let Some(ref earnings_dir) = args.earnings_dir {
                 config.earnings_dir = earnings_dir.clone();
             }
+
+            // Apply CLI rules (override TOML rules if any CLI rule flags are set)
+            if args.rules.has_rules() {
+                config.rules = Self::build_file_rules_from_cli(&args.rules);
+            }
         }
 
         // Validate required fields
@@ -88,6 +93,36 @@ impl BacktestConfigBuilder {
         }
 
         Ok(config)
+    }
+
+    /// Build FileRulesConfig from CLI args
+    fn build_file_rules_from_cli(args: &crate::args::RulesArgs) -> cs_domain::FileRulesConfig {
+        use cs_domain::{FileRulesConfig, MarketRule};
+
+        let mut market_rules = Vec::new();
+
+        // IV Slope rule
+        if args.entry_iv_slope {
+            market_rules.push(MarketRule::IvSlope {
+                short_dte: args.iv_slope_short_dte.unwrap_or(7),
+                long_dte: args.iv_slope_long_dte.unwrap_or(20),
+                threshold_pp: args.iv_slope_threshold.unwrap_or(0.05),
+            });
+        }
+
+        // IV vs HV rule
+        if args.entry_iv_vs_hv {
+            market_rules.push(MarketRule::IvVsHv {
+                hv_window_days: args.iv_hv_window.unwrap_or(20),
+                min_ratio: args.iv_hv_ratio.unwrap_or(1.0),
+            });
+        }
+
+        FileRulesConfig {
+            event: None,  // CLI doesn't override event rules
+            market: if market_rules.is_empty() { None } else { Some(market_rules) },
+            trade: None,  // CLI doesn't override trade rules
+        }
     }
 
     /// Parse date string to NaiveDate
@@ -213,6 +248,19 @@ impl BacktestConfigBuilder {
                     enabled: Some(true),
                     vol_source: args.attribution.attribution_vol_source.clone(),
                     snapshot_times: args.attribution.attribution_snapshots.clone(),
+                });
+            }
+
+            // Rules - only populate if any rule flags are set
+            if args.rules.has_rules() {
+                overrides.rules = Some(crate::cli_args::CliRules {
+                    iv_slope_enabled: args.rules.entry_iv_slope,
+                    iv_slope_short_dte: args.rules.iv_slope_short_dte,
+                    iv_slope_long_dte: args.rules.iv_slope_long_dte,
+                    iv_slope_threshold: args.rules.iv_slope_threshold,
+                    iv_vs_hv_enabled: args.rules.entry_iv_vs_hv,
+                    iv_hv_window: args.rules.iv_hv_window,
+                    iv_hv_ratio: args.rules.iv_hv_ratio,
                 });
             }
         }

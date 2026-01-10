@@ -36,6 +36,28 @@ pub struct CliOverrides {
     pub max_entry_iv: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_notional: Option<f64>,
+    /// Rules are handled separately (not via figment) due to complex structure
+    #[serde(skip)]
+    pub rules: Option<CliRules>,
+}
+
+/// CLI rules configuration (applied post-figment)
+#[derive(Debug, Clone, Default)]
+pub struct CliRules {
+    /// Enable IV slope rule
+    pub iv_slope_enabled: bool,
+    /// IV slope short-term DTE
+    pub iv_slope_short_dte: Option<u16>,
+    /// IV slope long-term DTE
+    pub iv_slope_long_dte: Option<u16>,
+    /// IV slope threshold in percentage points
+    pub iv_slope_threshold: Option<f64>,
+    /// Enable IV vs HV rule
+    pub iv_vs_hv_enabled: bool,
+    /// HV window for IV vs HV rule
+    pub iv_hv_window: Option<u16>,
+    /// Minimum IV/HV ratio
+    pub iv_hv_ratio: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

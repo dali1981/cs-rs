@@ -8,6 +8,7 @@ use cs_domain::strike_selection::{StrikeSelector, ATMStrategy, DeltaStrategy, Ex
 use cs_domain::pnl::{TradePnlRecord, PnlStatistics, ToPnlRecord};
 use crate::config::{BacktestConfig, SelectionType};
 use crate::execution::ExecutionConfig;
+use crate::rules::RuleEvaluator;
 use crate::trade_strategy::{
     TradeStrategy, StrategyDispatch,
     CalendarSpreadStrategy, IronButterflyStrategy, StraddleStrategy,
@@ -48,6 +49,10 @@ pub trait TradeResultMethods {
     fn total_pnl_with_hedge(&self) -> Option<Decimal> {
         None
     }
+    /// Entry price for trade-level rule evaluation
+    fn entry_price(&self) -> Option<f64> {
+        None
+    }
 }
 
 impl TradeResultMethods for CalendarSpreadResult {
@@ -69,6 +74,10 @@ impl TradeResultMethods for CalendarSpreadResult {
     fn total_pnl_with_hedge(&self) -> Option<Decimal> {
         self.total_pnl_with_hedge
     }
+    fn entry_price(&self) -> Option<f64> {
+        use rust_decimal::prelude::ToPrimitive;
+        self.entry_cost.abs().to_f64()
+    }
 }
 
 impl TradeResultMethods for StraddleResult {
@@ -89,6 +98,10 @@ impl TradeResultMethods for StraddleResult {
     }
     fn total_pnl_with_hedge(&self) -> Option<Decimal> {
         self.total_pnl_with_hedge
+    }
+    fn entry_price(&self) -> Option<f64> {
+        use rust_decimal::prelude::ToPrimitive;
+        self.entry_debit.abs().to_f64()
     }
 }
 
@@ -599,6 +612,10 @@ where
         let criteria = self.build_expiration_criteria();
         let exec_config = self.create_execution_config();
 
+        // Build rules evaluator from config
+        let rules_config = self.config.build_rules_config();
+        let rule_evaluator = RuleEvaluator::new(rules_config);
+
         // ===== NEW TRADE-CENTRIC APPROACH =====
 
         // 1. Determine trading range and timing spec
@@ -635,34 +652,106 @@ where
 
         info!(tradable_events = tradable_events.len(), "Tradable events discovered");
 
-        // Log filter criteria being applied
+        // Debug: Log what's in the config
         debug!(
-            min_market_cap = ?filter_criteria.min_market_cap,
-            symbol_filter = ?filter_criteria.symbols,
-            "Applying event filters"
+            "Config values: min_market_cap={:?}, symbols={:?}",
+            self.config.min_market_cap,
+            self.config.symbols
+        );
+        debug!(
+            "FilterCriteria values: min_market_cap={:?}, symbols={:?}",
+            filter_criteria.min_market_cap,
+            filter_criteria.symbols
         );
 
-        // 5. Filter by market cap and other criteria
-        let filtered_events: Vec<_> = tradable_events
-            .into_iter()
-            .filter(|te| {
-                let symbol_ok = filter_criteria.symbol_matches(te.symbol());
-                let cap_ok = filter_criteria.market_cap_matches(te.event.market_cap);
-
-                if !cap_ok {
-                    debug!(
-                        symbol = te.symbol(),
-                        event_market_cap = ?te.event.market_cap,
-                        required_min = ?filter_criteria.min_market_cap,
-                        "Event filtered out by market cap"
-                    );
+        // Log active filters
+        info!("Applying entry filters:");
+        if let Some(min_cap) = filter_criteria.min_market_cap {
+            info!("  - Market cap >= ${:.0}B", min_cap as f64 / 1_000_000_000.0);
+        } else {
+            info!("  - Market cap filter: NOT CONFIGURED");
+        }
+        if let Some(ref symbols) = filter_criteria.symbols {
+            info!("  - Symbol whitelist: {:?}", symbols);
+        }
+        if rule_evaluator.has_rules() {
+            let rules_config = self.config.build_rules_config();
+            if !rules_config.event.is_empty() {
+                info!("  - Event rules: {} rule(s)", rules_config.event.len());
+                for rule in &rules_config.event {
+                    info!("    • {}", rule.name());
                 }
+            }
+            if !rules_config.market.is_empty() {
+                info!("  - Market rules: {} rule(s) (checked during execution)", rules_config.market.len());
+                for rule in &rules_config.market {
+                    info!("    • {}", rule.name());
+                }
+            }
+        }
 
-                symbol_ok && cap_ok
-            })
-            .collect();
+        // 5. Filter by market cap, symbols, and event-level rules
+        let mut filtered_by_symbol = 0;
+        let mut filtered_by_cap = 0;
+        let mut filtered_by_event_rules = 0;
+        let mut filtered_events = Vec::new();
 
-        info!(filtered_events = filtered_events.len(), "Events after filtering");
+        for te in tradable_events {
+            let symbol_ok = filter_criteria.symbol_matches(te.symbol());
+            let cap_ok = filter_criteria.market_cap_matches(te.event.market_cap);
+            let rules_ok = rule_evaluator.eval_event_rules(&te.event);
+
+            if !symbol_ok {
+                filtered_by_symbol += 1;
+                continue;
+            }
+            if !cap_ok {
+                filtered_by_cap += 1;
+                debug!(
+                    symbol = te.symbol(),
+                    event_market_cap = ?te.event.market_cap,
+                    required_min = ?filter_criteria.min_market_cap,
+                    "Event filtered out by market cap"
+                );
+                continue;
+            }
+            if !rules_ok {
+                filtered_by_event_rules += 1;
+                debug!(
+                    symbol = te.symbol(),
+                    "Event filtered out by event-level rules"
+                );
+                continue;
+            }
+
+            // Passed all filters
+            filtered_events.push(te);
+        }
+
+        // Log filter results
+        let total_filtered = filtered_by_symbol + filtered_by_cap + filtered_by_event_rules;
+        let total_input = filtered_events.len() + total_filtered;
+
+        info!(
+            "Event filtering: {} → {} events ({} filtered out)",
+            total_input,
+            filtered_events.len(),
+            total_filtered
+        );
+
+        if total_filtered == 0 {
+            info!("  ✓ All events passed filters");
+        } else {
+            if filtered_by_symbol > 0 {
+                info!("  ✗ Filtered by symbol: {}", filtered_by_symbol);
+            }
+            if filtered_by_cap > 0 {
+                info!("  ✗ Filtered by market cap: {}", filtered_by_cap);
+            }
+            if filtered_by_event_rules > 0 {
+                info!("  ✗ Filtered by event rules: {}", filtered_by_event_rules);
+            }
+        }
 
         total_opportunities = filtered_events.len();
 

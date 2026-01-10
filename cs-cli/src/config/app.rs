@@ -37,6 +37,9 @@ pub struct AppConfig {
     /// Trading costs configuration (slippage + commission)
     #[serde(default)]
     pub trading_costs: cs_domain::TradingCostConfig,
+    /// Entry rules configuration
+    #[serde(default)]
+    pub rules: cs_domain::FileRulesConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +138,7 @@ impl Default for AppConfig {
             max_entry_iv: None,
             min_notional: None,
             trading_costs: cs_domain::TradingCostConfig::default(),
+            rules: cs_domain::FileRulesConfig::default(),
         }
     }
 }
@@ -258,6 +262,14 @@ pub fn load_config(
 
     // Extract and post-process
     let mut config: AppConfig = figment.extract()?;
+
+    // Debug: Log extracted values
+    tracing::debug!(
+        "Figment extracted: min_market_cap={:?}, max_entry_iv={:?}, rules.market={:?}",
+        config.min_market_cap,
+        config.max_entry_iv,
+        config.rules.market.as_ref().map(|m| m.len())
+    );
 
     // 5. Apply attribution CLI overrides manually (converting strings to enums)
     if let Some(cli_attr) = cli_attribution {
@@ -392,6 +404,8 @@ impl AppConfig {
                 None
             },
             trading_costs: self.trading_costs.clone(),
+            // Rules from TOML (CLI override applied in BacktestConfigBuilder)
+            rules: self.rules.clone(),
         }
     }
 

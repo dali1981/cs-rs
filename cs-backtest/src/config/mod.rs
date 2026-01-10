@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use cs_analytics::{PricingModel, InterpolationMode};
 use cs_domain::{
     TimingConfig, TradeSelectionCriteria, StrikeMatchMode, HedgeConfig, AttributionConfig,
-    TradingRange, TradingPeriodSpec, FilterCriteria, TradingCostConfig,
+    TradingRange, TradingPeriodSpec, FilterCriteria, TradingCostConfig, FileRulesConfig,
 };
 
 // Infrastructure config types (separated into submodules)
@@ -110,6 +110,9 @@ pub struct BacktestConfig {
     /// Trading costs configuration (slippage + commission)
     #[serde(default)]
     pub trading_costs: TradingCostConfig,
+    /// Entry rules configuration (filters trades before/during execution)
+    #[serde(default)]
+    pub rules: FileRulesConfig,
 }
 
 fn default_wing_width() -> f64 {
@@ -249,6 +252,7 @@ impl Default for BacktestConfig {
             hedge_config: HedgeConfig::default(), // No hedging by default
             attribution_config: None, // No attribution by default
             trading_costs: TradingCostConfig::default(), // No costs by default (explicit opt-in)
+            rules: FileRulesConfig::default(), // No entry rules by default
         }
     }
 }
@@ -286,6 +290,69 @@ impl BacktestConfig {
             max_entry_price: self.max_entry_price,
             min_iv_ratio: self.selection.min_iv_ratio,
         }
+    }
+
+    /// Build RulesConfig from file config + legacy filters
+    ///
+    /// If new-style rules are defined in `[rules]` section, uses those.
+    /// Otherwise, falls back to legacy filter fields for backward compatibility.
+    pub fn build_rules_config(&self) -> cs_domain::RulesConfig {
+        use cs_domain::{RulesConfig, EventRule, MarketRule, TradeRule};
+
+        // Start with defaults (empty)
+        let mut config = RulesConfig::default();
+
+        // Apply file-based rules if any
+        config = config.apply_file(self.rules.clone());
+
+        // If no event rules from file, migrate legacy filters
+        if config.event.is_empty() {
+            if let Some(ref symbols) = self.symbols {
+                if !symbols.is_empty() {
+                    config.event.push(EventRule::Symbols {
+                        include: symbols.clone(),
+                    });
+                }
+            }
+            if let Some(min_cap) = self.min_market_cap {
+                config.event.push(EventRule::MinMarketCap {
+                    threshold: min_cap,
+                });
+            }
+        }
+
+        // If no market rules from file, migrate legacy filters
+        if config.market.is_empty() {
+            if let Some(max_iv) = self.max_entry_iv {
+                config.market.push(MarketRule::MaxEntryIv {
+                    threshold: max_iv,
+                });
+            }
+            if let Some(min_ratio) = self.selection.min_iv_ratio {
+                config.market.push(MarketRule::MinIvRatio {
+                    short_dte: 7,
+                    long_dte: 30,
+                    threshold: min_ratio,
+                });
+            }
+            if let Some(min_notional) = self.min_notional {
+                config.market.push(MarketRule::MinNotional {
+                    threshold: min_notional,
+                });
+            }
+        }
+
+        // If no trade rules from file, migrate legacy filters
+        if config.trade.is_empty() {
+            if self.min_entry_price.is_some() || self.max_entry_price.is_some() {
+                config.trade.push(TradeRule::EntryPriceRange {
+                    min: self.min_entry_price,
+                    max: self.max_entry_price,
+                });
+            }
+        }
+
+        config
     }
 
     /// Build TradingPeriodSpec based on config

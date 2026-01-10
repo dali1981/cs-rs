@@ -43,6 +43,7 @@ use crate::composite_pricer::{
     CompositePricer, CalendarSpreadPricer, IronButterflyCompositePricer,
     LongIronButterflyCompositePricer, CalendarStraddleCompositePricer, ShortStraddlePricer,
 };
+use crate::rules::RuleEvaluator;
 
 /// Core trait for trade execution strategies
 ///
@@ -440,6 +441,8 @@ impl TradeStrategy<IronButterflyResult> for LongIronButterflyStrategy {
 /// Long Straddle Strategy (pre-earnings)
 pub struct LongStraddleStrategy {
     timing: TimingStrategy,
+    /// Entry rules evaluator (checks IV slope, etc.)
+    rule_evaluator: RuleEvaluator,
 }
 
 impl LongStraddleStrategy {
@@ -449,7 +452,10 @@ impl LongStraddleStrategy {
             config.straddle_entry_days,
             config.straddle_exit_days,
         );
-        Self { timing }
+        let rules_config = config.build_rules_config();
+        let rule_evaluator = RuleEvaluator::new(rules_config);
+
+        Self { timing, rule_evaluator }
     }
 }
 
@@ -471,7 +477,13 @@ impl TradeStrategy<StraddleResult> for LongStraddleStrategy {
     ) -> Pin<Box<dyn Future<Output = Option<StraddleResult>> + Send + 'a>> {
         let min_short_dte = criteria.min_short_dte;
         let timing = self.timing.clone();
+        let rule_evaluator = self.rule_evaluator.clone();
         Box::pin(async move {
+            tracing::debug!(
+                symbol = %event.symbol,
+                "LongStraddleStrategy::execute_trade called"
+            );
+
             let simulator = TradeSimulator::new(
                 options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
             );
@@ -479,13 +491,41 @@ impl TradeStrategy<StraddleResult> for LongStraddleStrategy {
             // 1. Prepare market data
             let data = simulator.prepare().await?;
 
-            // 2. Select trade (LONG straddle)
+            // 2. Check market-level entry rules (IV slope, etc.)
+            let has_rules = rule_evaluator.has_market_rules();
+            tracing::debug!(
+                symbol = %event.symbol,
+                has_market_rules = has_rules,
+                "Checking if market rules need evaluation"
+            );
+            if has_rules {
+                match rule_evaluator.eval_market_rules(event, &data) {
+                    Ok(true) => {} // Rules passed
+                    Ok(false) => {
+                        tracing::debug!(
+                            symbol = %event.symbol,
+                            "Trade filtered: market rules failed"
+                        );
+                        return None;
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            symbol = %event.symbol,
+                            error = %e,
+                            "Trade filtered: rule evaluation error (missing IV data)"
+                        );
+                        return None;
+                    }
+                }
+            }
+
+            // 3. Select trade (LONG straddle)
             let entry_date = entry_time.date_naive();
             let min_expiration = (entry_date + chrono::Duration::days(min_short_dte as i64))
                 .max(entry_date);
             let trade = selector.select_long_straddle(&data.spot, &data.surface, min_expiration).ok()?;
 
-            // 3. Simulate WITH HEDGING (integrated into execution loop)
+            // 4. Simulate WITH HEDGING (integrated into execution loop)
             let pricer = CompositePricer::default();
             let sim = match simulate_with_hedging(
                 &trade,
@@ -533,6 +573,8 @@ impl TradeStrategy<StraddleResult> for LongStraddleStrategy {
 /// Short Straddle Strategy (pre-earnings)
 pub struct ShortStraddleStrategy {
     timing: TimingStrategy,
+    /// Entry rules evaluator (checks IV slope, etc.)
+    rule_evaluator: RuleEvaluator,
 }
 
 impl ShortStraddleStrategy {
@@ -542,7 +584,10 @@ impl ShortStraddleStrategy {
             config.straddle_entry_days,
             config.straddle_exit_days,
         );
-        Self { timing }
+        let rules_config = config.build_rules_config();
+        let rule_evaluator = RuleEvaluator::new(rules_config);
+
+        Self { timing, rule_evaluator }
     }
 }
 
@@ -564,7 +609,13 @@ impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
     ) -> Pin<Box<dyn Future<Output = Option<StraddleResult>> + Send + 'a>> {
         let min_short_dte = criteria.min_short_dte;
         let timing = self.timing.clone();
+        let rule_evaluator = self.rule_evaluator.clone();
         Box::pin(async move {
+            tracing::debug!(
+                symbol = %event.symbol,
+                "ShortStraddleStrategy::execute_trade called"
+            );
+
             let simulator = TradeSimulator::new(
                 options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
             );
@@ -572,7 +623,35 @@ impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
             // 1. Prepare market data
             let data = simulator.prepare().await?;
 
-            // 2. Select trade (SHORT straddle)
+            // 2. Check market-level entry rules (IV slope, etc.)
+            let has_rules = rule_evaluator.has_market_rules();
+            tracing::debug!(
+                symbol = %event.symbol,
+                has_market_rules = has_rules,
+                "Checking if market rules need evaluation"
+            );
+            if has_rules {
+                match rule_evaluator.eval_market_rules(event, &data) {
+                    Ok(true) => {} // Rules passed
+                    Ok(false) => {
+                        tracing::debug!(
+                            symbol = %event.symbol,
+                            "Trade filtered: market rules failed"
+                        );
+                        return None;
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            symbol = %event.symbol,
+                            error = %e,
+                            "Trade filtered: rule evaluation error (missing IV data)"
+                        );
+                        return None;
+                    }
+                }
+            }
+
+            // 3. Select trade (SHORT straddle)
             let entry_date = entry_time.date_naive();
             let min_expiration = (entry_date + chrono::Duration::days(min_short_dte as i64))
                 .max(entry_date);

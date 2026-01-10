@@ -430,7 +430,7 @@ impl ExecutableTrade for LongIronButterfly {
 
         // Net debit = net_cost (since long legs pay)
         let entry_debit = entry_pricing.net_cost;
-        let exit_credit = -exit_pricing.net_cost;  // What we receive when closing
+        let exit_credit = exit_pricing.net_cost;  // What we receive when closing
 
         // Calculate GROSS P&L: we paid entry_debit, received exit_credit
         let pnl_per_share = exit_credit - entry_debit;
@@ -511,7 +511,7 @@ impl ExecutableTrade for LongIronButterfly {
             short_put_exit: center_put_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             long_call_exit: upper_call_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             long_put_exit: lower_put_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
-            exit_cost: -exit_credit * Decimal::from(CONTRACT_MULTIPLIER),
+            exit_cost: exit_credit * Decimal::from(CONTRACT_MULTIPLIER),
             entry_surface_time: output.entry_surface_time,
             exit_surface_time: Some(output.exit_surface_time),
             pnl,

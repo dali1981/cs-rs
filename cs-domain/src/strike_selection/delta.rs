@@ -14,7 +14,7 @@ use super::{
     StrikeSelector, SelectionError, ExpirationCriteria, ATMStrategy,
 };
 use crate::entities::{
-    CalendarSpread, EarningsEvent, OptionLeg, LongStraddle, ShortStraddle, CalendarStraddle, IronButterfly
+    CalendarSpread, EarningsEvent, OptionLeg, LongStraddle, ShortStraddle, CalendarStraddle, IronButterfly, LongIronButterfly
 };
 use crate::value_objects::SpotPrice;
 use cs_analytics::IVSurface;
@@ -339,6 +339,19 @@ impl StrikeSelector for DeltaStrategy {
         // Create an ATM strategy with our criteria and delegate
         let atm_strategy = ATMStrategy::new(self.criteria.clone());
         StrikeSelector::select_iron_butterfly(&atm_strategy, spot, surface, wing_width, min_dte, max_dte)
+    }
+
+    fn select_long_iron_butterfly(
+        &self,
+        spot: &SpotPrice,
+        surface: &IVSurface,
+        wing_width: Decimal,
+        min_dte: i32,
+        max_dte: i32,
+    ) -> Result<LongIronButterfly, SelectionError> {
+        // Create an ATM strategy with our criteria and delegate
+        let atm_strategy = ATMStrategy::new(self.criteria.clone());
+        StrikeSelector::select_long_iron_butterfly(&atm_strategy, spot, surface, wing_width, min_dte, max_dte)
     }
 }
 

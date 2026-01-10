@@ -557,6 +557,82 @@ impl StrikeSelector for ATMStrategy {
             .map_err(Into::into)
     }
 
+    fn select_long_iron_butterfly(
+        &self,
+        spot: &SpotPrice,
+        surface: &IVSurface,
+        wing_width: Decimal,
+        min_dte: i32,
+        max_dte: i32,
+    ) -> Result<LongIronButterfly, SelectionError> {
+        // Get strikes and expirations from IV surface
+        let strikes: Vec<Strike> = surface.strikes()
+            .iter()
+            .filter_map(|&s| Strike::new(s).ok())
+            .collect();
+
+        if strikes.is_empty() {
+            return Err(SelectionError::NoStrikes);
+        }
+
+        let expirations = surface.expirations();
+
+        // Select expiration with DTE in range
+        let reference_date = surface.as_of_time().date_naive();
+        let expiration = expirations
+            .iter()
+            .find(|&&exp| {
+                let dte = (exp - reference_date).num_days() as i32;
+                dte >= min_dte && dte <= max_dte
+            })
+            .copied()
+            .ok_or(SelectionError::NoExpirations)?;
+
+        // Find ATM strike for center
+        let spot_f64: f64 = spot.value.try_into().unwrap_or(0.0);
+        let center = super::find_closest_strike(&strikes, spot_f64)?;
+
+        // Calculate wing strikes
+        let upper_target = Strike::new(center.value() + wing_width)
+            .map_err(|_| SelectionError::NoStrikes)?;
+        let lower_target = Strike::new(center.value() - wing_width)
+            .map_err(|_| SelectionError::NoStrikes)?;
+
+        // Snap to available strikes
+        let upper = Self::snap_to_strike(upper_target, &strikes, true)?;
+        let lower = Self::snap_to_strike(lower_target, &strikes, false)?;
+
+        // Build legs (LONG iron butterfly: buy center, sell wings)
+        let symbol = surface.underlying().to_string();
+        let center_call = OptionLeg::new(
+            symbol.clone(),
+            center,
+            expiration,
+            OptionType::Call,
+        );
+        let center_put = OptionLeg::new(
+            symbol.clone(),
+            center,
+            expiration,
+            OptionType::Put,
+        );
+        let upper_call = OptionLeg::new(
+            symbol.clone(),
+            upper,
+            expiration,
+            OptionType::Call,
+        );
+        let lower_put = OptionLeg::new(
+            symbol,
+            lower,
+            expiration,
+            OptionType::Put,
+        );
+
+        LongIronButterfly::new(center_call, center_put, upper_call, lower_put)
+            .map_err(Into::into)
+    }
+
     fn select_iron_butterfly_with_config(
         &self,
         spot: &SpotPrice,

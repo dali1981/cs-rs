@@ -9,11 +9,17 @@
 # - Uses delta targeting to select the optimal entry strike
 # - Filters for minimum IV ratio to ensure favorable volatility conditions
 
+#min_market_cap = 1_000_000_000  # $1 billion
+
 [strategy]
-spread_type = "iron_butterfly"
+spread_type = "long-iron-butterfly"
 selection_type = "delta"
 target_delta = 0.50
 wing_width = 10.0
+
+timing_strategy = "PreEarnings"
+entry_days_before = 5
+exit_days_before = 2
 
 [selection]
 min_short_dte = 3
@@ -26,8 +32,23 @@ min_iv_ratio = 1.5
 model = "sticky_strike"
 vol_model = "linear"
 
-[timing]
-entry_hour = 9
-entry_minute = 35
-exit_hour = 15
-exit_minute = 55
+#[timing]
+## Entry 1 month before earnings
+#straddle_entry_days = 5
+## Exit 5 days before earnings
+#straddle_exit_days = 2
+#entry_hour = 10
+#entry_minute = 00
+#exit_hour = 10
+#exit_minute = 00
+
+# Entry rules: Market-level (require market data)
+[[rules.market]]
+type = "iv_slope"
+short_dte = 7
+long_dte = 30
+threshold_pp = 0.05  # 5pp = 5 percentage points
+
+[[rules.market]]
+type = "max_entry_iv"
+threshold = 1.5  # 150%
