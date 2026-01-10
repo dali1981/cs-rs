@@ -75,9 +75,9 @@ pub struct SelectionConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StrategyConfig {
-    #[serde(default)]
+    #[serde(default, alias = "spread")]
     pub spread_type: SpreadType,
-    #[serde(default)]
+    #[serde(default, alias = "selection")]
     pub selection_type: SelectionType,
     pub target_delta: f64,
     pub delta_range: (f64, f64),

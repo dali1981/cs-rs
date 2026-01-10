@@ -7,12 +7,12 @@ use super::{SpreadTypeArg, SelectionTypeArg, OptionTypeArg};
 #[derive(Debug, Clone, Args)]
 pub struct StrategyArgs {
     /// Trade structure
-    #[arg(long, default_value_t = SpreadTypeArg::Calendar)]
-    pub spread: SpreadTypeArg,
+    #[arg(long)]
+    pub spread: Option<SpreadTypeArg>,
 
     /// Strike selection method
-    #[arg(long, default_value_t = SelectionTypeArg::ATM)]
-    pub selection: SelectionTypeArg,
+    #[arg(long)]
+    pub selection: Option<SelectionTypeArg>,
 
     /// Option type (call/put) - required for calendar spreads only
     #[arg(long)]
@@ -30,17 +30,17 @@ pub struct StrategyArgs {
     #[arg(long)]
     pub wing_width: Option<f64>,
 
-    /// Straddle: Entry N trading days before earnings (default: 5)
-    #[arg(long, default_value = "5")]
-    pub straddle_entry_days: usize,
+    /// Straddle: Entry N trading days before earnings
+    #[arg(long)]
+    pub straddle_entry_days: Option<usize>,
 
-    /// Straddle: Exit N trading days before earnings (default: 1)
-    #[arg(long, default_value = "1")]
-    pub straddle_exit_days: usize,
+    /// Straddle: Exit N trading days before earnings
+    #[arg(long)]
+    pub straddle_exit_days: Option<usize>,
 
-    /// Straddle: Minimum days from entry to expiration (default: 7)
-    #[arg(long, default_value = "7")]
-    pub min_straddle_dte: i32,
+    /// Straddle: Minimum days from entry to expiration
+    #[arg(long)]
+    pub min_straddle_dte: Option<i32>,
 
     /// Straddle: Minimum entry price
     #[arg(long)]
@@ -50,9 +50,9 @@ pub struct StrategyArgs {
     #[arg(long)]
     pub max_entry_price: Option<f64>,
 
-    /// Post-earnings straddle: holding period in trading days (default: 5)
-    #[arg(long, default_value = "5")]
-    pub post_earnings_holding_days: usize,
+    /// Post-earnings straddle: holding period in trading days
+    #[arg(long)]
+    pub post_earnings_holding_days: Option<usize>,
 
     /// Rolling strategy (weekly, monthly, or days:N)
     #[arg(long)]

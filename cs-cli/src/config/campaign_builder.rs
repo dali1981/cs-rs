@@ -73,8 +73,9 @@ impl CampaignConfigBuilder {
         // Parse strategy from string
         let strategy = Self::parse_strategy(&args.strategy)?;
 
-        // Parse direction from string
-        let trade_direction = Self::parse_direction(&args.direction)?;
+        // Parse direction from string (use default if not provided)
+        let direction_str = args.direction.as_deref().unwrap_or("short");
+        let trade_direction = Self::parse_direction(direction_str)?;
 
         let config = CampaignConfig {
             data_dir,

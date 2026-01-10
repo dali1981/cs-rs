@@ -115,16 +115,29 @@ impl BacktestConfigBuilder {
 
         // Apply backtest args
         if let Some(ref args) = self.args {
-            // Strategy
-            let spread_str = format!("{}", args.strategy.spread);
-            let selection_str = format!("{}", args.strategy.selection);
+            // Strategy - only add if explicitly provided
+            let mut strategy = CliStrategy::default();
+            let mut has_strategy_override = false;
 
-            overrides.strategy = Some(CliStrategy {
-                spread_type: Some(spread_str),
-                selection_type: Some(selection_str),
-                target_delta: args.selection.target_delta,
-                ..Default::default()
-            });
+            if let Some(spread) = args.strategy.spread {
+                strategy.spread_type = Some(format!("{}", spread));
+                has_strategy_override = true;
+            }
+
+            if let Some(selection) = args.strategy.selection {
+                strategy.selection_type = Some(format!("{}", selection));
+                has_strategy_override = true;
+            }
+
+            if let Some(delta) = args.selection.target_delta {
+                strategy.target_delta = Some(delta);
+                has_strategy_override = true;
+            }
+
+            // Only set overrides.strategy if user provided at least one strategy field
+            if has_strategy_override {
+                overrides.strategy = Some(strategy);
+            }
 
             // Timing - parse time strings to hour/minute and populate generic timing fields
             let mut timing = CliTiming::default();
@@ -183,13 +196,13 @@ impl BacktestConfigBuilder {
             if args.hedging.hedge {
                 overrides.hedging = Some(CliHedging {
                     enabled: Some(true),
-                    strategy: Some(args.hedging.hedge_strategy.clone()),
-                    delta_threshold: Some(args.hedging.delta_threshold),
-                    interval_hours: Some(args.hedging.hedge_interval_hours),
+                    strategy: args.hedging.hedge_strategy.clone(),
+                    delta_threshold: args.hedging.delta_threshold,
+                    interval_hours: args.hedging.hedge_interval_hours,
                     max_rehedges: args.hedging.max_rehedges,
-                    delta_mode: Some(args.hedging.hedge_delta_mode.clone()),
-                    hv_window: Some(args.hedging.hv_window),
-                    cost_per_share: Some(args.hedging.hedge_cost_per_share),
+                    delta_mode: args.hedging.hedge_delta_mode.clone(),
+                    hv_window: args.hedging.hv_window,
+                    cost_per_share: args.hedging.hedge_cost_per_share,
                     track_realized_vol: None,
                 });
             }
@@ -198,8 +211,8 @@ impl BacktestConfigBuilder {
             if args.attribution.attribution {
                 overrides.attribution = Some(CliAttribution {
                     enabled: Some(true),
-                    vol_source: Some(args.attribution.attribution_vol_source.clone()),
-                    snapshot_times: Some(args.attribution.attribution_snapshots.clone()),
+                    vol_source: args.attribution.attribution_vol_source.clone(),
+                    snapshot_times: args.attribution.attribution_snapshots.clone(),
                 });
             }
         }

@@ -7,12 +7,17 @@
 #   - Hold: ~15 trading days (20 - 5)
 #
 # This captures IV expansion before earnings announcement (AMC or BMO)
+#
+# Note: start_date and end_date must be passed via CLI args (--start --end)
 
-start_date = "2025-10-01"
-end_date = "2025-10-31"
+# Strategy configuration
+[strategy]
+spread_type = "straddle"
 
-spread = "straddle"
-straddle_entry_days = 20
-straddle_exit_days = 5
+# Generic timing specification (NEW - recommended)
+timing_strategy = "PreEarnings"
+entry_days_before = 20
+exit_days_before = 5
 
+# Filter by market cap
 min_market_cap = 1_000_000_000  # $1 billion

@@ -9,33 +9,33 @@ pub struct HedgingArgs {
     #[arg(long)]
     pub hedge: bool,
 
-    /// Hedging strategy: time, delta, gamma (default: delta)
-    #[arg(long, default_value = "delta")]
-    pub hedge_strategy: String,
+    /// Hedging strategy: time, delta, gamma
+    #[arg(long)]
+    pub hedge_strategy: Option<String>,
 
-    /// For time-based: rehedge interval in hours (default: 24)
-    #[arg(long, default_value = "24")]
-    pub hedge_interval_hours: u64,
+    /// For time-based: rehedge interval in hours
+    #[arg(long)]
+    pub hedge_interval_hours: Option<u64>,
 
-    /// For delta-based: threshold to trigger rehedge (default: 0.10)
-    #[arg(long, default_value = "0.10")]
-    pub delta_threshold: f64,
+    /// For delta-based: threshold to trigger rehedge
+    #[arg(long)]
+    pub delta_threshold: Option<f64>,
 
     /// Maximum number of rehedges per trade
     #[arg(long)]
     pub max_rehedges: Option<usize>,
 
-    /// Transaction cost per share (default: 0.01)
-    #[arg(long, default_value = "0.01")]
-    pub hedge_cost_per_share: f64,
+    /// Transaction cost per share
+    #[arg(long)]
+    pub hedge_cost_per_share: Option<f64>,
 
-    /// Delta computation mode: gamma, entry-hv, entry-iv, current-hv, current-iv, historical-iv (default: gamma)
-    #[arg(long, default_value = "gamma")]
-    pub hedge_delta_mode: String,
+    /// Delta computation mode: gamma, entry-hv, entry-iv, current-hv, current-iv, historical-iv
+    #[arg(long)]
+    pub hedge_delta_mode: Option<String>,
 
-    /// HV window for HV-based delta modes (default: 20 days)
-    #[arg(long, default_value = "20")]
-    pub hv_window: u32,
+    /// HV window for HV-based delta modes
+    #[arg(long)]
+    pub hv_window: Option<u32>,
 
     /// Enable realized volatility tracking during hedging
     #[arg(long)]

@@ -1,0 +1,33 @@
+# Straddle Strategy with Trading Costs
+# Entry 5 days before earnings, exit 2 days before earnings
+# Market cap > $1 billion
+# Trading costs: 4% half-spread slippage + IBKR commission ($0.65/contract)
+#
+# Note: start_date and end_date must be passed via CLI args (--start --end)
+
+# Strategy configuration
+[strategy]
+spread_type = "straddle"
+
+# Generic timing specification (NEW - recommended)
+timing_strategy = "PreEarnings"
+entry_days_before = 5
+exit_days_before = 2
+
+# Filter by market cap
+min_market_cap = 1_000_000_000  # $1 billion
+
+# Trading costs configuration
+[trading_costs]
+model = "composite"
+
+# Half-spread slippage (4% bid-ask spread assumption)
+[trading_costs.slippage]
+model = "half_spread"
+spread_pct = 0.04
+
+# IBKR-like commission
+[trading_costs.commission]
+model = "commission"
+per_contract = "0.65"
+max_per_leg = "10.00"

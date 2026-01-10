@@ -16,12 +16,12 @@ pub struct CampaignArgs {
     pub strategy: String,
 
     /// Period policy (earnings-only, inter-earnings, pre-earnings, post-earnings, continuous)
-    #[arg(long, default_value = "pre-earnings")]
-    pub period_policy: String,
+    #[arg(long)]
+    pub period_policy: Option<String>,
 
     /// Roll policy (none, weekly, monthly)
-    #[arg(long, default_value = "none")]
-    pub roll_policy: String,
+    #[arg(long)]
+    pub roll_policy: Option<String>,
 
     /// Start date (YYYY-MM-DD)
     #[arg(long)]
@@ -35,13 +35,13 @@ pub struct CampaignArgs {
     #[arg(long)]
     pub earnings_file: Option<PathBuf>,
 
-    /// Entry time in HH:MM format (default: 09:35)
-    #[arg(long, default_value = "09:35")]
-    pub entry_time: String,
+    /// Entry time in HH:MM format
+    #[arg(long)]
+    pub entry_time: Option<String>,
 
-    /// Exit time in HH:MM format (default: 15:55)
-    #[arg(long, default_value = "15:55")]
-    pub exit_time: String,
+    /// Exit time in HH:MM format
+    #[arg(long)]
+    pub exit_time: Option<String>,
 
     /// Days before earnings to enter (for pre-earnings policy)
     #[arg(long)]
@@ -52,28 +52,28 @@ pub struct CampaignArgs {
     pub exit_days_after: Option<u16>,
 
     /// Days after earnings to start inter-period trading
-    #[arg(long, default_value = "2")]
-    pub inter_entry_days_after: u16,
+    #[arg(long)]
+    pub inter_entry_days_after: Option<u16>,
 
     /// Days before next earnings to stop inter-period trading
-    #[arg(long, default_value = "3")]
-    pub inter_exit_days_before: u16,
+    #[arg(long)]
+    pub inter_exit_days_before: Option<u16>,
 
     /// Roll day for weekly policy (Mon, Tue, Wed, Thu, Fri)
-    #[arg(long, default_value = "Fri")]
-    pub roll_day: String,
+    #[arg(long)]
+    pub roll_day: Option<String>,
 
     /// Volatility strategy type: iron-butterfly, strangle, butterfly, condor, iron-condor
-    #[arg(long, default_value = "iron-butterfly")]
-    pub vol_strategy: String,
+    #[arg(long)]
+    pub vol_strategy: Option<String>,
 
     /// Wing selection mode for multi-leg strategies (delta:0.25 or moneyness:0.10)
     #[arg(long)]
     pub wing_mode: Option<String>,
 
     /// Trade direction (short or long) - applies to all strategies
-    #[arg(long, default_value = "short")]
-    pub direction: String,
+    #[arg(long)]
+    pub direction: Option<String>,
 
     /// Output file path (CSV format)
     #[arg(long)]

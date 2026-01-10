@@ -10,10 +10,10 @@ pub struct AttributionArgs {
     pub attribution: bool,
 
     /// Volatility source for attribution
-    #[arg(long, default_value = "current_market_iv")]
-    pub attribution_vol_source: String,
+    #[arg(long)]
+    pub attribution_vol_source: Option<String>,
 
-    /// Attribution snapshot times: open_close, close_only (default: open_close)
-    #[arg(long, default_value = "open_close")]
-    pub attribution_snapshots: String,
+    /// Attribution snapshot times: open_close, close_only
+    #[arg(long)]
+    pub attribution_snapshots: Option<String>,
 }
