@@ -1,0 +1,36 @@
+# Straddle Strategy: Enter 1 month before earnings, exit 15 days later
+# WITH DELTA HEDGING
+# Filters: Market cap > $1 billion
+#
+# Timing:
+#   - Entry: 20 trading days before earnings
+#   - Exit: 5 trading days before earnings
+#   - Hold: ~15 trading days (20 - 5)
+#
+# Hedging:
+#   - Strategy: Delta-based rehedging
+#   - Threshold: Rehedge when delta moves 0.10 from entry
+#   - Interval: Check every 24 hours
+#   - Cost: $0.01 per share per transaction
+#   - Delta mode: Gamma (for straddle, this tracks realized moves)
+#   - Max rehedges: 10 per trade
+
+start_date = "2025-10-01"
+end_date = "2025-10-31"
+
+spread = "straddle"
+straddle_entry_days = 20
+straddle_exit_days = 5
+
+min_market_cap = 1_000_000_000  # $1 billion
+
+# Hedging configuration
+hedge = true
+hedge_strategy = "delta"                # delta, time, gamma
+delta_threshold = 0.10                  # Rehedge when delta changes by 0.10
+hedge_interval_hours = 24               # Check every 24 hours
+max_rehedges = 10                       # Max 10 rehedges per trade
+hedge_cost_per_share = 0.01             # $0.01/share transaction cost
+hedge_delta_mode = "gamma"              # gamma, entry-hv, entry-iv, current-hv, current-iv, historical-iv
+hv_window = 20                          # 20-day historical volatility window
+track_realized_vol = true               # Track realized vol during hedging
