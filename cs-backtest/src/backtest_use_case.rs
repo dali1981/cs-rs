@@ -635,11 +635,31 @@ where
 
         info!(tradable_events = tradable_events.len(), "Tradable events discovered");
 
+        // Log filter criteria being applied
+        debug!(
+            min_market_cap = ?filter_criteria.min_market_cap,
+            symbol_filter = ?filter_criteria.symbols,
+            "Applying event filters"
+        );
+
         // 5. Filter by market cap and other criteria
         let filtered_events: Vec<_> = tradable_events
             .into_iter()
-            .filter(|te| filter_criteria.symbol_matches(te.symbol()))
-            .filter(|te| filter_criteria.market_cap_matches(te.event.market_cap))
+            .filter(|te| {
+                let symbol_ok = filter_criteria.symbol_matches(te.symbol());
+                let cap_ok = filter_criteria.market_cap_matches(te.event.market_cap);
+
+                if !cap_ok {
+                    debug!(
+                        symbol = te.symbol(),
+                        event_market_cap = ?te.event.market_cap,
+                        required_min = ?filter_criteria.min_market_cap,
+                        "Event filtered out by market cap"
+                    );
+                }
+
+                symbol_ok && cap_ok
+            })
             .collect();
 
         info!(filtered_events = filtered_events.len(), "Events after filtering");

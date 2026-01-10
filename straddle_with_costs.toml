@@ -5,6 +5,9 @@
 #
 # Note: start_date and end_date must be passed via CLI args (--start --end)
 
+# Filter by market cap (must be at root level)
+min_market_cap = 1_000_000_000  # $1 billion
+
 # Strategy configuration
 [strategy]
 spread_type = "straddle"
@@ -13,9 +16,6 @@ spread_type = "straddle"
 timing_strategy = "PreEarnings"
 entry_days_before = 5
 exit_days_before = 2
-
-# Filter by market cap
-min_market_cap = 1_000_000_000  # $1 billion
 
 # Trading costs configuration
 [trading_costs]

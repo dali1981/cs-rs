@@ -206,6 +206,7 @@ impl CompositePricer {
 
         for (leg, position) in trade.legs() {
             let pricing = self.inner.price_leg(
+                trade.symbol(),
                 &leg.strike,
                 leg.expiration,
                 leg.option_type,

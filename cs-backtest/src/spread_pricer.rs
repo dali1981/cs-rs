@@ -124,6 +124,7 @@ impl SpreadPricer {
         let pricing_provider = self.pricing_model.to_provider_with_rate(self.bs_config.risk_free_rate);
 
         let short_pricing = self.price_leg(
+            spread.symbol(),
             &spread.short_leg.strike,
             spread.short_leg.expiration,
             spread.short_leg.option_type,
@@ -135,6 +136,7 @@ impl SpreadPricer {
         )?;
 
         let long_pricing = self.price_leg(
+            spread.symbol(),
             &spread.long_leg.strike,
             spread.long_leg.expiration,
             spread.long_leg.option_type,
@@ -158,6 +160,7 @@ impl SpreadPricer {
     /// Price a single option leg (public for use by iron butterfly pricer)
     pub fn price_leg(
         &self,
+        symbol: &str,
         strike: &Strike,
         expiration: NaiveDate,
         option_type: OptionType,
@@ -235,11 +238,13 @@ impl SpreadPricer {
                             .collect();
 
                         warn!(
+                            symbol = symbol,
                             surface_points = surface.points().len(),
                             matching_type_points = matching_type.len(),
                             option_type = opt_type_str,
                             target_strike = strike_f64,
                             target_expiration = %expiration,
+                            pricing_time = %pricing_time,
                             all_points = ?all_points,
                             "IV surface interpolation failed"
                         );

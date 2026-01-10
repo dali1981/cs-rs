@@ -81,6 +81,7 @@ impl StranglePricer {
         let pricing_provider = self.inner.pricing_model().to_provider_with_rate(self.inner.risk_free_rate());
 
         let call = self.inner.price_leg(
+            strangle.symbol(),
             &strangle.call_leg.strike,
             strangle.call_leg.expiration,
             strangle.call_leg.option_type,
@@ -92,6 +93,7 @@ impl StranglePricer {
         )?;
 
         let put = self.inner.price_leg(
+            strangle.symbol(),
             &strangle.put_leg.strike,
             strangle.put_leg.expiration,
             strangle.put_leg.option_type,
@@ -180,6 +182,7 @@ impl ButterflyPricer {
         let pricing_provider = self.inner.pricing_model().to_provider_with_rate(self.inner.risk_free_rate());
 
         let short_call = self.inner.price_leg(
+            butterfly.symbol(),
             &butterfly.short_call.strike,
             butterfly.short_call.expiration,
             butterfly.short_call.option_type,
@@ -191,6 +194,7 @@ impl ButterflyPricer {
         )?;
 
         let short_put = self.inner.price_leg(
+            butterfly.symbol(),
             &butterfly.short_put.strike,
             butterfly.short_put.expiration,
             butterfly.short_put.option_type,
@@ -202,6 +206,7 @@ impl ButterflyPricer {
         )?;
 
         let long_upper_call = self.inner.price_leg(
+            butterfly.symbol(),
             &butterfly.long_upper_call.strike,
             butterfly.long_upper_call.expiration,
             butterfly.long_upper_call.option_type,
@@ -213,6 +218,7 @@ impl ButterflyPricer {
         )?;
 
         let long_lower_put = self.inner.price_leg(
+            butterfly.symbol(),
             &butterfly.long_lower_put.strike,
             butterfly.long_lower_put.expiration,
             butterfly.long_lower_put.option_type,
@@ -309,6 +315,7 @@ impl CondorPricer {
         let pricing_provider = self.inner.pricing_model().to_provider_with_rate(self.inner.risk_free_rate());
 
         let near_call = self.inner.price_leg(
+            condor.symbol(),
             &condor.near_call.strike,
             condor.near_call.expiration,
             condor.near_call.option_type,
@@ -320,6 +327,7 @@ impl CondorPricer {
         )?;
 
         let near_put = self.inner.price_leg(
+            condor.symbol(),
             &condor.near_put.strike,
             condor.near_put.expiration,
             condor.near_put.option_type,
@@ -331,6 +339,7 @@ impl CondorPricer {
         )?;
 
         let far_upper_call = self.inner.price_leg(
+            condor.symbol(),
             &condor.far_upper_call.strike,
             condor.far_upper_call.expiration,
             condor.far_upper_call.option_type,
@@ -342,6 +351,7 @@ impl CondorPricer {
         )?;
 
         let far_lower_put = self.inner.price_leg(
+            condor.symbol(),
             &condor.far_lower_put.strike,
             condor.far_lower_put.expiration,
             condor.far_lower_put.option_type,
@@ -438,6 +448,7 @@ impl IronCondorPricer {
         let pricing_provider = self.inner.pricing_model().to_provider_with_rate(self.inner.risk_free_rate());
 
         let near_call = self.inner.price_leg(
+            condor.symbol(),
             &condor.near_call.strike,
             condor.near_call.expiration,
             condor.near_call.option_type,
@@ -449,6 +460,7 @@ impl IronCondorPricer {
         )?;
 
         let near_put = self.inner.price_leg(
+            condor.symbol(),
             &condor.near_put.strike,
             condor.near_put.expiration,
             condor.near_put.option_type,
@@ -460,6 +472,7 @@ impl IronCondorPricer {
         )?;
 
         let far_upper_call = self.inner.price_leg(
+            condor.symbol(),
             &condor.far_upper_call.strike,
             condor.far_upper_call.expiration,
             condor.far_upper_call.option_type,
@@ -471,6 +484,7 @@ impl IronCondorPricer {
         )?;
 
         let far_lower_put = self.inner.price_leg(
+            condor.symbol(),
             &condor.far_lower_put.strike,
             condor.far_lower_put.expiration,
             condor.far_lower_put.option_type,

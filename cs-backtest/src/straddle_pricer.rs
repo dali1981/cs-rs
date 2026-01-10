@@ -65,6 +65,7 @@ impl StraddlePricer {
 
         // Price call leg
         let call_pricing = self.spread_pricer.price_leg(
+            straddle.symbol(),
             &straddle.call_leg.strike,
             straddle.call_leg.expiration,
             straddle.call_leg.option_type,
@@ -77,6 +78,7 @@ impl StraddlePricer {
 
         // Price put leg
         let put_pricing = self.spread_pricer.price_leg(
+            straddle.symbol(),
             &straddle.put_leg.strike,
             straddle.put_leg.expiration,
             straddle.put_leg.option_type,

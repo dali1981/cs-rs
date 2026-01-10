@@ -147,25 +147,55 @@ impl<'a> TradeSimulator<'a> {
         .await;
 
         // 4. Price at entry
+        tracing::debug!(
+            symbol = self.symbol,
+            time = %self.entry_time,
+            phase = "entry",
+            "Pricing trade at entry"
+        );
         let entry_pricing = pricer.price_with_surface(
             trade,
             &entry_chain,
             entry_spot.to_f64(),
             self.entry_time,
             entry_surface.as_ref(),
-        )?;
+        ).map_err(|e| {
+            tracing::warn!(
+                symbol = self.symbol,
+                time = %self.entry_time,
+                phase = "entry",
+                error = %e,
+                "Failed to price trade at entry"
+            );
+            e
+        })?;
 
         // 5. Validate entry
         T::validate_entry(&entry_pricing, self.config)?;
 
         // 6. Price at exit
+        tracing::debug!(
+            symbol = self.symbol,
+            time = %self.exit_time,
+            phase = "exit",
+            "Pricing trade at exit"
+        );
         let exit_pricing = pricer.price_with_surface(
             trade,
             &exit_chain,
             exit_spot.to_f64(),
             self.exit_time,
             exit_surface.as_ref(),
-        )?;
+        ).map_err(|e| {
+            tracing::warn!(
+                symbol = self.symbol,
+                time = %self.exit_time,
+                phase = "exit",
+                error = %e,
+                "Failed to price trade at exit"
+            );
+            e
+        })?;
 
         // 7. Return raw simulation output
         let output = SimulationOutput::new(

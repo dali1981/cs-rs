@@ -72,6 +72,7 @@ impl CalendarStraddlePricer {
 
         // Price short call
         let short_call = self.spread_pricer.price_leg(
+            straddle.symbol(),
             &straddle.short_call.strike,
             straddle.short_call.expiration,
             straddle.short_call.option_type,
@@ -84,6 +85,7 @@ impl CalendarStraddlePricer {
 
         // Price short put
         let short_put = self.spread_pricer.price_leg(
+            straddle.symbol(),
             &straddle.short_put.strike,
             straddle.short_put.expiration,
             straddle.short_put.option_type,
@@ -96,6 +98,7 @@ impl CalendarStraddlePricer {
 
         // Price long call
         let long_call = self.spread_pricer.price_leg(
+            straddle.symbol(),
             &straddle.long_call.strike,
             straddle.long_call.expiration,
             straddle.long_call.option_type,
@@ -108,6 +111,7 @@ impl CalendarStraddlePricer {
 
         // Price long put
         let long_put = self.spread_pricer.price_leg(
+            straddle.symbol(),
             &straddle.long_put.strike,
             straddle.long_put.expiration,
             straddle.long_put.option_type,

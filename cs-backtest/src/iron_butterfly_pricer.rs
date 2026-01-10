@@ -62,6 +62,7 @@ impl IronButterflyPricer {
 
         // Price all 4 legs
         let short_call = self.inner.price_leg(
+            butterfly.symbol(),
             &butterfly.short_call.strike,
             butterfly.short_call.expiration,
             butterfly.short_call.option_type,
@@ -73,6 +74,7 @@ impl IronButterflyPricer {
         )?;
 
         let short_put = self.inner.price_leg(
+            butterfly.symbol(),
             &butterfly.short_put.strike,
             butterfly.short_put.expiration,
             butterfly.short_put.option_type,
@@ -84,6 +86,7 @@ impl IronButterflyPricer {
         )?;
 
         let long_call = self.inner.price_leg(
+            butterfly.symbol(),
             &butterfly.long_call.strike,
             butterfly.long_call.expiration,
             butterfly.long_call.option_type,
@@ -95,6 +98,7 @@ impl IronButterflyPricer {
         )?;
 
         let long_put = self.inner.price_leg(
+            butterfly.symbol(),
             &butterfly.long_put.strike,
             butterfly.long_put.expiration,
             butterfly.long_put.option_type,
