@@ -9,6 +9,7 @@ use cs_domain::pnl::{TradePnlRecord, PnlStatistics, ToPnlRecord};
 use crate::config::{BacktestConfig, SelectionType};
 use crate::execution::ExecutionConfig;
 use crate::rules::RuleEvaluator;
+use crate::bpr::HasBprTimeline;
 use crate::trade_strategy::{
     TradeExecutionOutcome, TradeStrategy, StrategyDispatch,
     CalendarSpreadStrategy, IronButterflyStrategy, StraddleStrategy,
@@ -622,7 +623,7 @@ where
     ) -> Result<BacktestResult<R>, BacktestError>
     where
         S: TradeStrategy<R> + Sync,
-        R: TradeResultMethods + Send + Clone,
+        R: TradeResultMethods + TradeResult + ApplyCosts + HasBprTimeline + Send + Clone,
     {
         let mut all_results: Vec<R> = Vec::new();
         let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
@@ -842,7 +843,7 @@ where
     ) -> Vec<TradeExecutionOutcome<R>>
     where
         S: TradeStrategy<R> + Sync,
-        R: TradeResultMethods + Send,
+        R: TradeResultMethods + TradeResult + ApplyCosts + HasBprTimeline + Send,
     {
         crate::execution::run_batch(tradable_events, self.config.parallel, |tradable| {
             let tradable = *tradable;
@@ -875,7 +876,7 @@ where
     ) -> Vec<TradeExecutionOutcome<R>>
     where
         S: TradeStrategy<R> + Sync,
-        R: TradeResultMethods + Send,
+        R: TradeResultMethods + TradeResult + ApplyCosts + HasBprTimeline + Send,
     {
         crate::execution::run_batch(events, self.config.parallel, |event| {
             let entry_time = strategy.entry_datetime(event);
@@ -910,7 +911,7 @@ where
     ) -> Result<Vec<EarningsEvent>, BacktestError>
     where
         S: TradeStrategy<R>,
-        R: TradeResultMethods + Send,
+        R: TradeResultMethods + TradeResult + ApplyCosts + HasBprTimeline + Send,
     {
         let lookahead = strategy.lookahead_days();
 

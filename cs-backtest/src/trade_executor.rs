@@ -512,7 +512,7 @@ where
 
     /// Compute P&L attribution from hedge history
     ///
-    /// Collects daily snapshots and attributes P&L to Greeks components.
+    /// Delegates to standalone `compute_position_attribution` function.
     async fn compute_attribution(
         &self,
         trade: &T,
@@ -524,38 +524,24 @@ where
         let attr_config = self.attribution_config.as_ref()
             .ok_or("Attribution config not set")?;
 
-        let symbol = cs_domain::CompositeTrade::symbol(trade).to_string();
         let contract_multiplier = self.hedge_config
             .as_ref()
             .map(|c| c.contract_multiplier)
             .unwrap_or(100);
 
-        // Create snapshot collector
-        let mut collector = crate::attribution::SnapshotCollector::new(
+        crate::attribution::compute_position_attribution(
             trade.clone(),
+            hedge_position,
+            entry_time,
+            exit_time,
+            actual_pnl,
+            attr_config,
             self.options_repo.clone(),
             self.equity_repo.clone(),
-            symbol,
-            attr_config.clone(),
             contract_multiplier,
-            0.05, // risk_free_rate
-        );
-
-        // Set hedge timeline from completed hedging
-        collector.set_hedge_timeline(&hedge_position.hedges);
-
-        // TODO: Set entry vol for EntryIV/EntryHV modes
-        // This would require passing entry IV/HV from the hedging phase
-
-        // Collect daily snapshots
-        collector.collect(entry_time, exit_time).await?;
-
-        // Build attribution
-        collector
-            .build_attribution(actual_pnl)
-            .ok_or_else(|| "No snapshots collected for attribution".to_string())
+        )
+        .await
     }
-
 
     /// Compute HV at a specific time using recent price history
     async fn compute_hv_at_time(
