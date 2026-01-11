@@ -1,0 +1,52 @@
+# Calendar Spread Strategy with Preset Trading Costs
+# Using simple preset instead of composite to test if costs work
+
+min_market_cap = 10_000_000_000  # $10 billion
+
+[strategy]
+spread_type = "calendar"
+selection_type = "delta"
+target_delta = 0.50
+wing_width = 10.0
+
+[timing]
+timing_strategy = "PreEarnings"
+entry_days_before = 7
+exit_days_before = 2
+
+[selection]
+min_short_dte = 7
+max_short_dte = 15
+min_long_dte = 15
+max_long_dte = 45
+min_iv_ratio = 1.5
+
+[pricing]
+model = "sticky_strike"
+vol_model = "linear"
+
+# Entry rules: Market-level (require market data)
+[[rules.market]]
+type = "iv_slope"
+short_dte = 7
+long_dte = 30
+threshold_pp = 0.05
+
+[[rules.market]]
+type = "max_entry_iv"
+threshold = 1.5
+
+# Simpler trading costs - use preset
+[trading_costs]
+model = "preset"
+name = "ibkr"
+
+# Attribution
+[attribution]
+enabled = true
+snapshot_times = "open_close"
+
+# Margin
+[margin]
+mode = "regt"
+use_maintenance = true
