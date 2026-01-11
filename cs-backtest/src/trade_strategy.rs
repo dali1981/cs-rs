@@ -175,10 +175,11 @@ where
     /// 5. Price and simulate with hedging
     /// 6. **Apply trading costs**
     /// 7. Attach BPR timeline and hedge results
+    /// 8. **Compute P&L attribution** (if configured)
     fn execute_trade<'a>(
         &'a self,
-        options_repo: &'a dyn OptionsDataRepository,
-        equity_repo: &'a dyn EquityDataRepository,
+        options_repo: Arc<dyn OptionsDataRepository>,
+        equity_repo: Arc<dyn EquityDataRepository>,
         selector: &'a dyn StrikeSelector,
         criteria: &'a ExpirationCriteria,
         exec_config: &'a ExecutionConfig,
@@ -192,8 +193,8 @@ where
 
         Box::pin(async move {
             let simulator = TradeSimulator::new(
-                options_repo,
-                equity_repo,
+                options_repo.as_ref(),
+                equity_repo.as_ref(),
                 &event.symbol,
                 entry_time,
                 exit_time,
@@ -231,7 +232,7 @@ where
                 return TradeExecutionOutcome::Dropped(error);
             }
 
-            // 6. Execute common flow (pricing, simulation, costs, hedge results)
+            // 6. Execute common flow (pricing, simulation, costs, hedge results, attribution)
             execute_common(
                 trade,
                 pricer,
@@ -239,8 +240,8 @@ where
                 &simulator,
                 &rule_evaluator,
                 &timing,
-                options_repo,
-                equity_repo,
+                options_repo.clone(),
+                equity_repo.clone(),
                 exec_config,
                 event,
                 entry_time,
@@ -409,7 +410,8 @@ async fn maybe_attach_bpr_timeline<T, Pr, R>(
 /// Common execution flow for all strategies
 ///
 /// This function handles the common execution logic after trade selection,
-/// including pricing, simulation, cost application, and hedge result handling.
+/// including pricing, simulation, cost application, hedge result handling,
+/// and P&L attribution computation.
 ///
 /// # Type Parameters
 /// - `T`: The trade type (CalendarSpread, LongStraddle, etc.)
@@ -417,7 +419,7 @@ async fn maybe_attach_bpr_timeline<T, Pr, R>(
 /// - `R`: The result type (CalendarSpreadResult, StraddleResult, etc.)
 ///
 /// # Returns
-/// `TradeExecutionOutcome<R>` - the trade result with costs applied
+/// `TradeExecutionOutcome<R>` - the trade result with costs and attribution applied
 async fn execute_common<T, Pr, R>(
     trade: T,
     pricer: Pr,
@@ -425,8 +427,8 @@ async fn execute_common<T, Pr, R>(
     simulator: &TradeSimulator<'_>,
     rule_evaluator: &RuleEvaluator,
     timing: &TimingStrategy,
-    options_repo: &dyn OptionsDataRepository,
-    equity_repo: &dyn EquityDataRepository,
+    options_repo: Arc<dyn OptionsDataRepository>,
+    equity_repo: Arc<dyn EquityDataRepository>,
     exec_config: &ExecutionConfig,
     event: &EarningsEvent,
     entry_time: DateTime<Utc>,
@@ -473,8 +475,8 @@ where
     let sim = match simulate_with_hedging_prepriced(
         &trade,
         &pricer,
-        options_repo,
-        equity_repo,
+        options_repo.as_ref(),
+        equity_repo.as_ref(),
         entry_time,
         exit_time,
         exec_config.hedge_config.as_ref(),
@@ -528,8 +530,8 @@ where
         &mut result,
         &trade,
         &pricer,
-        options_repo,
-        equity_repo,
+        options_repo.as_ref(),
+        equity_repo.as_ref(),
         entry_time,
         exit_time,
         timing,
@@ -539,11 +541,38 @@ where
     )
     .await;
 
-    // 7. Apply hedge results if present
+    // 7. Apply hedge results and compute attribution if present
     if let Some(pos) = sim.hedge_position {
         let hedge_pnl = pos.calculate_pnl(sim.exit_spot);
         let total_pnl = TradeResult::pnl(&result) + hedge_pnl - pos.total_cost;
-        result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
+
+        // 8. Compute P&L attribution if configured AND hedges occurred
+        let attribution = match exec_config.attribution_config.as_ref() {
+            Some(attr_config) if attr_config.enabled && !pos.hedges.is_empty() => {
+                match crate::attribution::compute_position_attribution(
+                    trade.clone(),
+                    &pos,
+                    entry_time,
+                    exit_time,
+                    total_pnl,
+                    attr_config,
+                    options_repo.clone(),
+                    equity_repo.clone(),
+                    CONTRACT_MULTIPLIER,
+                )
+                .await
+                {
+                    Ok(attr) => Some(attr),
+                    Err(err) => {
+                        tracing::debug!(error = %err, "Attribution computation failed");
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+
+        result.apply_hedge_results(pos, hedge_pnl, total_pnl, attribution);
     }
 
     TradeExecutionOutcome::Executed(result)

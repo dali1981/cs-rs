@@ -845,12 +845,14 @@ where
         S: TradeStrategy<R> + Sync,
         R: TradeResultMethods + TradeResult + ApplyCosts + HasBprTimeline + Send,
     {
+        let options_repo = Arc::clone(&self.options_repo);
+        let equity_repo = Arc::clone(&self.equity_repo);
         crate::execution::run_batch(tradable_events, self.config.parallel, |tradable| {
             let tradable = *tradable;
             let event = &tradable.event;
             strategy.execute_trade(
-                self.options_repo.as_ref(),
-                self.equity_repo.as_ref(),
+                Arc::clone(&options_repo) as Arc<dyn OptionsDataRepository>,
+                Arc::clone(&equity_repo) as Arc<dyn EquityDataRepository>,
                 selector,
                 criteria,
                 exec_config,
@@ -878,12 +880,14 @@ where
         S: TradeStrategy<R> + Sync,
         R: TradeResultMethods + TradeResult + ApplyCosts + HasBprTimeline + Send,
     {
+        let options_repo = Arc::clone(&self.options_repo);
+        let equity_repo = Arc::clone(&self.equity_repo);
         crate::execution::run_batch(events, self.config.parallel, |event| {
             let entry_time = strategy.entry_datetime(event);
             let exit_time = strategy.exit_datetime(event);
             strategy.execute_trade(
-                self.options_repo.as_ref(),
-                self.equity_repo.as_ref(),
+                Arc::clone(&options_repo) as Arc<dyn OptionsDataRepository>,
+                Arc::clone(&equity_repo) as Arc<dyn EquityDataRepository>,
                 selector,
                 criteria,
                 exec_config,
