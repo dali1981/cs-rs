@@ -139,6 +139,27 @@ impl CapitalRequirement {
         }
     }
 
+    /// Create a requirement using premium magnitude as the capital basis.
+    ///
+    /// This is a placeholder for strategies without a proper margin model.
+    pub fn for_premium_basis(net_premium: Decimal) -> Self {
+        let premium = net_premium.abs();
+        let is_credit = net_premium < Decimal::ZERO;
+        let (calculation_method, breakdown) = if is_credit {
+            // Use premium magnitude as a conservative proxy for capital.
+            (CapitalCalculationMethod::CreditReceived, CapitalBreakdown::credit(premium, premium))
+        } else {
+            (CapitalCalculationMethod::LongOptionDebit, CapitalBreakdown::debit(premium))
+        };
+
+        Self {
+            initial_requirement: premium,
+            maintenance_requirement: premium,
+            calculation_method,
+            breakdown,
+        }
+    }
+
     /// Add hedge capital requirement
     pub fn with_hedge(mut self, hedge_capital: Decimal) -> Self {
         self.initial_requirement += hedge_capital;

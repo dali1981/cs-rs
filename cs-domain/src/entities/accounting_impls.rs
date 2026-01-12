@@ -5,15 +5,25 @@
 
 use rust_decimal::Decimal;
 
-use crate::accounting::HasAccounting;
+use crate::accounting::{CapitalRequirement, HasAccounting};
 use crate::entities::{
-    CalendarSpreadResult, CalendarStraddleResult, IronButterflyResult, StraddleResult,
+    CalendarSpreadResult, CalendarStraddleResult, IronButterflyDirection, IronButterflyResult,
+    StraddleResult,
 };
 
 impl HasAccounting for StraddleResult {
-    fn capital_required(&self) -> Decimal {
-        // entry_debit is ALREADY per-contract (multiplied by 100 in execution)
-        self.entry_debit
+    fn capital_required(&self) -> CapitalRequirement {
+        // Use premium magnitude as the capital basis for now.
+        CapitalRequirement::for_premium_basis(self.entry_debit)
+    }
+
+    fn entry_cash_flow(&self) -> Decimal {
+        // Signed cash flow: pay debit (negative), receive credit (positive).
+        -self.entry_debit
+    }
+
+    fn exit_cash_flow(&self) -> Decimal {
+        self.exit_credit
     }
 
     fn realized_pnl(&self) -> Decimal {
@@ -40,10 +50,16 @@ impl HasAccounting for StraddleResult {
 }
 
 impl HasAccounting for CalendarSpreadResult {
-    fn capital_required(&self) -> Decimal {
-        // entry_cost is ALREADY per-contract (multiplied by 100 in execution)
-        // entry_cost is positive for debit, negative for credit
-        self.entry_cost.abs()
+    fn capital_required(&self) -> CapitalRequirement {
+        CapitalRequirement::for_premium_basis(self.entry_cost)
+    }
+
+    fn entry_cash_flow(&self) -> Decimal {
+        -self.entry_cost
+    }
+
+    fn exit_cash_flow(&self) -> Decimal {
+        self.exit_value
     }
 
     fn realized_pnl(&self) -> Decimal {
@@ -66,22 +82,36 @@ impl HasAccounting for CalendarSpreadResult {
 }
 
 impl HasAccounting for IronButterflyResult {
-    fn capital_required(&self) -> Decimal {
-        // entry_credit is ALREADY per-contract (multiplied by 100 in execution)
-        // Iron butterfly is a CREDIT strategy
-        // Capital = max loss (wing width) - credit received
-        // For now, use the credit as a proxy (should be refined with wing width)
-        //
-        // If entry_credit > 0, it's a credit received
-        // Capital at risk = wing_width - credit (but we don't have wing_width here)
-        // As a conservative estimate, use the credit received
-        // This should be improved to use actual max loss calculation
-        self.entry_credit.abs()
+    fn capital_required(&self) -> CapitalRequirement {
+        // Use max loss when available (short); otherwise use debit magnitude (long).
+        match self.direction {
+            IronButterflyDirection::Short => {
+                CapitalRequirement::for_credit(self.entry_credit.abs(), self.max_loss.abs())
+            }
+            IronButterflyDirection::Long => CapitalRequirement::for_debit(self.entry_credit.abs()),
+        }
+    }
+
+    fn entry_cash_flow(&self) -> Decimal {
+        // entry_credit is signed: positive credit for short, negative debit for long.
+        self.entry_credit
+    }
+
+    fn exit_cash_flow(&self) -> Decimal {
+        let magnitude = self.exit_cost.abs();
+        match self.direction {
+            IronButterflyDirection::Short => -magnitude,
+            IronButterflyDirection::Long => magnitude,
+        }
     }
 
     fn realized_pnl(&self) -> Decimal {
         // pnl is ALREADY per-contract (multiplied by 100 in execution)
         self.total_pnl_with_hedge.unwrap_or(self.pnl)
+    }
+
+    fn max_loss(&self) -> Option<Decimal> {
+        Some(self.max_loss.abs())
     }
 
     fn hedge_pnl(&self) -> Option<Decimal> {
@@ -99,11 +129,16 @@ impl HasAccounting for IronButterflyResult {
 }
 
 impl HasAccounting for CalendarStraddleResult {
-    fn capital_required(&self) -> Decimal {
-        // entry_cost is ALREADY per-contract (multiplied by 100 in execution)
-        // Calendar straddle: long far-term straddle - short near-term straddle
-        // entry_cost is the net debit paid
-        self.entry_cost.abs()
+    fn capital_required(&self) -> CapitalRequirement {
+        CapitalRequirement::for_premium_basis(self.entry_cost)
+    }
+
+    fn entry_cash_flow(&self) -> Decimal {
+        -self.entry_cost
+    }
+
+    fn exit_cash_flow(&self) -> Decimal {
+        self.exit_value
     }
 
     fn realized_pnl(&self) -> Decimal {
@@ -178,6 +213,9 @@ mod tests {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,
+            direction: None,
+            bpr_timeline: None,
         }
     }
 
@@ -187,7 +225,7 @@ mod tests {
         let result = make_straddle_result(dec!(250), dec!(50));
 
         // Capital is the entry_debit directly (already per-contract)
-        assert_eq!(result.capital_required(), dec!(250));
+        assert_eq!(result.capital_required().initial_requirement, dec!(250));
     }
 
     #[test]

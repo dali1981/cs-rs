@@ -125,6 +125,8 @@ mod tests {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
+            cost_summary: None,
+            bpr_timeline: None,
         }
     }
 

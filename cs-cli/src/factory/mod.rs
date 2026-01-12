@@ -3,5 +3,5 @@
 mod repository_factory;
 mod use_case_factory;
 
-pub use repository_factory::RepositoryFactory;
+pub use repository_factory::{RepositoryFactory, DataRepositoryFactory};
 pub use use_case_factory::UseCaseFactory;

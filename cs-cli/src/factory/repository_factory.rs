@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use cs_domain::{
-    EarningsRepository,
+    EarningsRepository, OptionsDataRepository, EquityDataRepository,
     infrastructure::{
         FinqOptionsRepository, FinqEquityRepository,
         EarningsReaderAdapter, ParquetEarningsRepository,
@@ -12,6 +12,20 @@ use cs_domain::{
 
 /// Factory for creating repository instances
 pub struct RepositoryFactory;
+
+/// Provider trait for building data repositories (pluggable for tests/alt providers)
+pub trait DataRepositoryFactory {
+    type OptionsRepo: OptionsDataRepository;
+    type EquityRepo: EquityDataRepository;
+
+    fn create_options_repo(&self, data_dir: &PathBuf) -> Self::OptionsRepo;
+    fn create_equity_repo(&self, data_dir: &PathBuf) -> Self::EquityRepo;
+    fn create_earnings_repo(
+        &self,
+        earnings_dir: Option<&PathBuf>,
+        earnings_file: Option<&PathBuf>,
+    ) -> Box<dyn EarningsRepository>;
+}
 
 impl RepositoryFactory {
     /// Create options repository
@@ -43,5 +57,26 @@ impl RepositoryFactory {
                 .join("trading_project/nasdaq_earnings/data");
             Box::new(EarningsReaderAdapter::new(default_dir))
         }
+    }
+}
+
+impl DataRepositoryFactory for RepositoryFactory {
+    type OptionsRepo = FinqOptionsRepository;
+    type EquityRepo = FinqEquityRepository;
+
+    fn create_options_repo(&self, data_dir: &PathBuf) -> Self::OptionsRepo {
+        RepositoryFactory::create_options_repo(data_dir)
+    }
+
+    fn create_equity_repo(&self, data_dir: &PathBuf) -> Self::EquityRepo {
+        RepositoryFactory::create_equity_repo(data_dir)
+    }
+
+    fn create_earnings_repo(
+        &self,
+        earnings_dir: Option<&PathBuf>,
+        earnings_file: Option<&PathBuf>,
+    ) -> Box<dyn EarningsRepository> {
+        RepositoryFactory::create_earnings_repo(earnings_dir, earnings_file)
     }
 }

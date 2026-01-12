@@ -3,7 +3,10 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use thiserror::Error;
-use cs_domain::{OptionStrategy, RepositoryError, TradingCostConfig, TradingCostCalculator, HedgeConfig};
+use cs_domain::{
+    OptionStrategy, RepositoryError, TradingCostConfig, TradingCostCalculator, HedgeConfig,
+    MarginConfig,
+};
 use crate::spread_pricer::PricingError;
 
 /// Errors that can occur during trade execution
@@ -36,6 +39,9 @@ pub struct ExecutionConfig {
 
     /// Delta hedging configuration (None = hedging disabled)
     pub hedge_config: Option<HedgeConfig>,
+
+    /// Margin & buying power configuration (IBKR-like)
+    pub margin_config: MarginConfig,
 }
 
 impl ExecutionConfig {
@@ -47,6 +53,7 @@ impl ExecutionConfig {
             min_credit: None,
             trading_costs: TradingCostConfig::default(),
             hedge_config: None,
+            margin_config: MarginConfig::default(),
         }
     }
 
@@ -58,6 +65,7 @@ impl ExecutionConfig {
             min_credit: None,
             trading_costs: TradingCostConfig::default(),
             hedge_config: None,
+            margin_config: MarginConfig::default(),
         }
     }
 
@@ -69,6 +77,7 @@ impl ExecutionConfig {
             min_credit: Some(Decimal::new(10, 2)),
             trading_costs: TradingCostConfig::default(),
             hedge_config: None,
+            margin_config: MarginConfig::default(),
         }
     }
 
@@ -80,12 +89,19 @@ impl ExecutionConfig {
             min_credit: None,
             trading_costs: TradingCostConfig::default(),
             hedge_config: None,
+            margin_config: MarginConfig::default(),
         }
     }
 
     /// Enable hedging on this config (builder pattern)
     pub fn with_hedging(mut self, hedge_config: HedgeConfig) -> Self {
         self.hedge_config = Some(hedge_config);
+        self
+    }
+
+    /// Enable margin/buying power computation (IBKR-like)
+    pub fn with_margin_config(mut self, margin_config: MarginConfig) -> Self {
+        self.margin_config = margin_config;
         self
     }
 

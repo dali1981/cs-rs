@@ -328,7 +328,18 @@ impl SpreadPricer {
             } else {
                 0.30 // Default 30% IV
             };
-            debug!("Using estimated IV {:.2} for Greeks (market IV computation failed)", atm_estimate);
+            debug!(
+                symbol = symbol,
+                strike = strike_f64,
+                expiration = %expiration,
+                option_type = opt_type_str,
+                market_price = market_price,
+                spot = spot_price,
+                pricing_time = %pricing_time,
+                ttm = ttm,
+                iv_estimate = atm_estimate,
+                "Using estimated IV for Greeks (market IV computation failed)"
+            );
             atm_estimate
         });
 

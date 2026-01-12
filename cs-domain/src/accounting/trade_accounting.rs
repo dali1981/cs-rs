@@ -87,6 +87,10 @@ pub struct TradeAccounting {
 
     /// Return on capital deployed (as decimal, e.g., 0.10 = 10%)
     pub return_on_capital: f64,
+
+    /// Maximum loss (defined-risk strategies)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_loss: Option<Decimal>,
 }
 
 impl TradeAccounting {
@@ -121,6 +125,7 @@ impl TradeAccounting {
             hedge_pnl: None,
             realized_pnl,
             return_on_capital,
+            max_loss: None,
         }
     }
 
@@ -158,6 +163,7 @@ impl TradeAccounting {
             hedge_pnl: None,
             realized_pnl,
             return_on_capital,
+            max_loss: None,
         }
     }
 
@@ -188,7 +194,41 @@ impl TradeAccounting {
             hedge_pnl: None,
             realized_pnl: pnl,
             return_on_capital,
+            max_loss: None,
         }
+    }
+
+    /// Create accounting from explicit cash flows and capital requirement.
+    pub fn from_cashflows(
+        capital_required: CapitalRequirement,
+        entry_cash_flow: Decimal,
+        exit_cash_flow: Decimal,
+        realized_pnl: Decimal,
+    ) -> Self {
+        let return_on_capital = if capital_required.initial_requirement.is_zero() {
+            0.0
+        } else {
+            (realized_pnl / capital_required.initial_requirement)
+                .to_f64()
+                .unwrap_or(0.0)
+        };
+
+        Self {
+            capital_required,
+            entry_cash_flow,
+            exit_cash_flow,
+            transaction_costs: Decimal::ZERO,
+            hedge_pnl: None,
+            realized_pnl,
+            return_on_capital,
+            max_loss: None,
+        }
+    }
+
+    /// Add max loss data (for defined-risk strategies).
+    pub fn with_max_loss(mut self, max_loss: Decimal) -> Self {
+        self.max_loss = Some(max_loss.abs());
+        self
     }
 
     /// Add hedge P&L to the accounting
@@ -232,6 +272,25 @@ impl TradeAccounting {
     /// Get the capital deployed
     pub fn capital_deployed(&self) -> Decimal {
         self.capital_required.initial_requirement
+    }
+
+    /// Return denominator based on a chosen basis.
+    pub fn return_basis_value(&self, basis: super::ReturnBasis) -> Option<Decimal> {
+        match basis {
+            super::ReturnBasis::Premium => Some(self.entry_cash_flow.abs()),
+            super::ReturnBasis::CapitalRequired => Some(self.capital_required.initial_requirement),
+            super::ReturnBasis::MaxLoss => self.max_loss,
+            super::ReturnBasis::BprPeak | super::ReturnBasis::BprAvg => None,
+        }
+    }
+
+    /// Return on a selected basis (pnl / basis).
+    pub fn return_on_basis(&self, basis: super::ReturnBasis) -> Option<f64> {
+        let denom = self.return_basis_value(basis)?;
+        if denom.is_zero() {
+            return None;
+        }
+        Some((self.realized_pnl / denom).to_f64().unwrap_or(0.0))
     }
 
     /// Get total P&L including hedge

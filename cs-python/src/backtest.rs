@@ -2,10 +2,11 @@ use pyo3::prelude::*;
 use std::path::PathBuf;
 use chrono::NaiveDate;
 
-use cs_backtest::{BacktestConfig, BacktestUseCase, StrategyType};
+use cs_backtest::{BacktestConfig, BacktestUseCase};
 use cs_domain::{
     infrastructure::{ParquetEarningsRepository, FinqEquityRepository, FinqOptionsRepository},
     TimingConfig, TradeSelectionCriteria,
+    ReturnBasis,
 };
 use finq_core::OptionType;
 
@@ -229,25 +230,30 @@ impl PyBacktestUseCase {
             )),
         };
 
-        // Parse strategy
-        let strategy = match self.config.strategy.to_lowercase().as_str() {
-            "atm" => StrategyType::ATM,
-            _ => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+        if self.config.strategy.to_lowercase() != "atm" {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
                 "strategy must be 'atm'"
-            )),
-        };
+            ));
+        }
 
         // Create Rust config
         let data_dir = PathBuf::from(&self.config.data_dir);
         let rust_config = BacktestConfig {
             data_dir: data_dir.clone(),
             earnings_dir: data_dir.clone(),  // Use same directory for earnings in Python
+            earnings_file: None,
             timing: TimingConfig {
                 entry_hour: self.config.entry_hour,
                 entry_minute: self.config.entry_minute,
                 exit_hour: self.config.exit_hour,
                 exit_minute: self.config.exit_minute,
             },
+            timing_strategy: None,
+            entry_days_before: None,
+            exit_days_before: None,
+            entry_offset: None,
+            holding_days: None,
+            exit_days_after: None,
             selection: TradeSelectionCriteria {
                 min_short_dte: self.config.min_short_dte,
                 max_short_dte: self.config.max_short_dte,
@@ -257,7 +263,8 @@ impl PyBacktestUseCase {
                 min_iv_ratio: self.config.min_iv_ratio,
                 max_bid_ask_spread_pct: None,
             },
-            strategy,
+            spread: cs_backtest::SpreadType::Calendar,
+            selection_strategy: cs_backtest::SelectionType::ATM,
             symbols: self.config.symbols.clone(),
             min_market_cap: self.config.min_market_cap,
             parallel: self.config.parallel,
@@ -269,6 +276,19 @@ impl PyBacktestUseCase {
             strike_match_mode: cs_domain::StrikeMatchMode::default(),
             max_entry_iv: None,
             wing_width: self.config.wing_width,
+            straddle_entry_days: 5,
+            straddle_exit_days: 1,
+            min_notional: None,
+            min_straddle_dte: 7,
+            min_entry_price: None,
+            max_entry_price: None,
+            post_earnings_holding_days: 5,
+            hedge_config: cs_domain::HedgeConfig::default(),
+            attribution_config: None,
+            trading_costs: cs_domain::TradingCostConfig::default(),
+            rules: cs_domain::FileRulesConfig::default(),
+            return_basis: ReturnBasis::default(),
+            margin: cs_domain::MarginConfig::default(),
         };
 
         // Create repositories

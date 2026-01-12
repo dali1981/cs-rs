@@ -56,7 +56,10 @@ pub use campaign::{
 pub use config::{FilterCriteria, PositionSpec, PositionStructure, StrikeSelection};
 pub use accounting::{
     TradeAccounting, TradeStatistics, CapitalRequirement, CapitalBreakdown,
-    CapitalCalculationMethod, MarginCalculator, HasAccounting,
+    CapitalCalculationMethod, MarginCalculator, HasAccounting, ReturnBasis,
+    BprInputs, BprSnapshot, BprSummary, BprTimeline, OptionLegInput, OptionRight, HedgeInput,
+    MarginConfig, MarginMode, StockMarginConfig, StockMarginMode, OptionsMarginConfig,
+    margin_engine_for_config,
 };
 pub use trading_costs::{
     TradingCost, TradingCostBreakdown, TradeSide, TradingContext, LegContext,

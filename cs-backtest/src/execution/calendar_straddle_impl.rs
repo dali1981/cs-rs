@@ -200,6 +200,7 @@ impl ExecutableTrade for CalendarStraddle {
             total_pnl_with_hedge: None,
             position_attribution: None,
             cost_summary: None,  // Costs applied separately via ApplyCosts trait
+            bpr_timeline: None,
         }
     }
 
@@ -258,6 +259,7 @@ impl ExecutableTrade for CalendarStraddle {
             total_pnl_with_hedge: None,
             position_attribution: None,
             cost_summary: None,
+            bpr_timeline: None,
         }
     }
 }

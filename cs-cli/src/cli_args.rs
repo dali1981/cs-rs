@@ -25,6 +25,8 @@ pub struct CliOverrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attribution: Option<CliAttribution>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<CliMetrics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub strike_match_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub symbols: Option<Vec<String>>,
@@ -188,4 +190,11 @@ pub struct CliAttribution {
     /// Snapshot times: open_close or close_only
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot_times: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(default)]
+pub struct CliMetrics {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_basis: Option<String>,
 }

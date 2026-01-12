@@ -26,6 +26,11 @@ impl RuleEvaluator {
         self.config.has_market_rules()
     }
 
+    /// Check if there are trade-level rules (need entry pricing)
+    pub fn has_trade_rules(&self) -> bool {
+        !self.config.trade.is_empty()
+    }
+
     /// Evaluate all event-level rules (AND logic)
     ///
     /// Returns true if all rules pass, false if any rule fails.
@@ -86,6 +91,44 @@ impl RuleEvaluator {
         Ok(true)
     }
 
+    /// Evaluate market rules and return the first failed rule name (if any)
+    ///
+    /// Returns Ok(None) if all rules pass or if no market rules are configured.
+    pub fn eval_market_rules_with_reason(
+        &self,
+        event: &EarningsEvent,
+        data: &PreparedData,
+    ) -> Result<Option<String>, RuleError> {
+        if self.config.market.is_empty() {
+            return Ok(None);
+        }
+
+        for rule in &self.config.market {
+            match self.eval_market_rule(rule, data) {
+                Ok(true) => continue,
+                Ok(false) => {
+                    tracing::debug!(
+                        symbol = %event.symbol,
+                        rule = rule.name(),
+                        "Market rule failed"
+                    );
+                    return Ok(Some(rule.name().to_string()));
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        symbol = %event.symbol,
+                        rule = rule.name(),
+                        error = %e,
+                        "Market rule evaluation error"
+                    );
+                    return Err(e);
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Evaluate all trade-level rules (AND logic)
     ///
     /// Returns true if all rules pass, false if any rule fails.
@@ -109,6 +152,31 @@ impl RuleEvaluator {
         true
     }
 
+    /// Evaluate trade rules and return the first failed rule name (if any)
+    pub fn eval_trade_rules_with_reason(
+        &self,
+        event: &EarningsEvent,
+        entry_price: f64,
+    ) -> Option<String> {
+        if self.config.trade.is_empty() {
+            return None;
+        }
+
+        for rule in &self.config.trade {
+            if !rule.eval_price(entry_price) {
+                tracing::debug!(
+                    symbol = %event.symbol,
+                    rule = rule.name(),
+                    entry_price = entry_price,
+                    "Trade rule failed"
+                );
+                return Some(rule.name().to_string());
+            }
+        }
+
+        None
+    }
+
     /// Evaluate a single market rule
     fn eval_market_rule(
         &self,
@@ -127,17 +195,36 @@ impl RuleEvaluator {
                     iv_short = iv_short,
                     long_dte = long_dte,
                     iv_long = iv_long,
-                    threshold = threshold_pp,
+                    threshold = *threshold_pp,
                     "Evaluating IV slope rule"
                 );
 
-                Ok(iv_short > iv_long + threshold_pp)
+                let passes = iv_short > iv_long + *threshold_pp;
+                if !passes {
+                    tracing::debug!(
+                        short_dte = short_dte,
+                        iv_short = iv_short,
+                        long_dte = long_dte,
+                        iv_long = iv_long,
+                        threshold = *threshold_pp,
+                        "IV slope rule failed"
+                    );
+                }
+                Ok(passes)
             }
 
             MarketRule::MaxEntryIv { threshold } => {
                 let atm_iv = get_front_month_atm_iv(&data.surface)
                     .ok_or(RuleError::MissingData { rule: "max_entry_iv", field: "ATM IV" })?;
-                Ok(atm_iv <= *threshold)
+                let passes = atm_iv <= *threshold;
+                if !passes {
+                    tracing::debug!(
+                        atm_iv = atm_iv,
+                        threshold = *threshold,
+                        "Max entry IV rule failed"
+                    );
+                }
+                Ok(passes)
             }
 
             MarketRule::MinIvRatio { short_dte, long_dte, threshold } => {
@@ -151,7 +238,19 @@ impl RuleEvaluator {
                 }
 
                 let ratio = iv_short / iv_long;
-                Ok(ratio >= *threshold)
+                let passes = ratio >= *threshold;
+                if !passes {
+                    tracing::debug!(
+                        short_dte = short_dte,
+                        iv_short = iv_short,
+                        long_dte = long_dte,
+                        iv_long = iv_long,
+                        ratio = ratio,
+                        threshold = *threshold,
+                        "IV ratio rule failed"
+                    );
+                }
+                Ok(passes)
             }
 
             MarketRule::IvVsHv { hv_window_days: _, min_ratio: _ } => {
@@ -175,23 +274,16 @@ impl RuleEvaluator {
 ///
 /// Finds the closest expiration to the target DTE and returns its ATM IV.
 fn get_atm_iv_at_dte(surface: &IVSurface, target_dte: u16) -> Option<f64> {
-    let as_of = surface.as_of_time().date_naive();
-    let target_dte_i64 = target_dte as i64;
+    let target_days = target_dte as i32;
+    let call_iv = surface.get_iv_by_moneyness_ttm(1.0, target_days, true);
+    let put_iv = surface.get_iv_by_moneyness_ttm(1.0, target_days, false);
 
-    // Find closest expiration to target DTE
-    let expirations = surface.expirations();
-    if expirations.is_empty() {
-        return None;
+    match (call_iv, put_iv) {
+        (Some(call), Some(put)) => Some((call + put) / 2.0),
+        (Some(call), None) => Some(call),
+        (None, Some(put)) => Some(put),
+        (None, None) => None,
     }
-
-    let closest_exp = expirations.iter()
-        .min_by_key(|exp| {
-            let dte = (**exp - as_of).num_days();
-            (dte - target_dte_i64).abs()
-        })?;
-
-    // Get ATM IV for this expiration
-    get_atm_iv_for_expiration(surface, *closest_exp)
 }
 
 /// Get ATM IV for a specific expiration date

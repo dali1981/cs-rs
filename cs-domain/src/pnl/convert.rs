@@ -18,8 +18,8 @@ impl ToPnlRecord for StraddleResult {
     fn to_pnl_record(&self) -> TradePnlRecord {
         let duration_days = (self.exit_time - self.entry_time).num_days();
 
-        // Option premium is the entry debit
-        let option_premium = self.entry_debit;
+        // Option premium is the entry debit magnitude
+        let option_premium = self.entry_debit.abs();
 
         // Option P&L (before hedge)
         let option_pnl = self.pnl;

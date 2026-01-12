@@ -10,7 +10,7 @@ use crate::config::{BacktestConfig, SelectionType};
 use crate::execution::ExecutionConfig;
 use crate::rules::RuleEvaluator;
 use crate::trade_strategy::{
-    TradeStrategy, StrategyDispatch,
+    TradeExecutionOutcome, TradeStrategy, StrategyDispatch,
     CalendarSpreadStrategy, IronButterflyStrategy, StraddleStrategy,
     PostEarningsStraddleStrategy, CalendarStraddleStrategy,
 };
@@ -23,6 +23,8 @@ pub struct BacktestResult<R> {
     pub total_entries: usize,
     pub total_opportunities: usize,
     pub dropped_events: Vec<TradeGenerationError>,
+    pub return_basis: ReturnBasis,
+    pub margin_config: MarginConfig,
 }
 
 /// Unified backtest result that can hold any strategy result type
@@ -296,54 +298,64 @@ impl<R: TradeResultMethods> BacktestResult<R> {
 
 // Additional methods for types that implement HasAccounting
 impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
-    /// Capital-weighted return (THE CORRECT METRIC)
+    /// Capital-weighted return using the configured return basis.
     ///
     /// This weights each trade's return by the capital deployed, ensuring that
     /// trades with larger positions contribute proportionally more to the
     /// overall return calculation.
     ///
-    /// Formula: sum(capital_i * return_i) / sum(capital_i)
+    /// Formula: sum(basis_i * return_i) / sum(basis_i)
     ///
     /// This fixes the issue where simple mean return can show positive returns
     /// while total P&L is negative (when larger positions have losses).
     pub fn capital_weighted_return(&self) -> f64 {
         use rust_decimal::prelude::ToPrimitive;
 
-        let weighted_sum: f64 = self.results.iter()
-            .map(|r| {
-                let capital = r.capital_required().to_f64().unwrap_or(0.0);
-                let return_pct = r.return_on_capital();
-                capital * return_pct
-            })
-            .sum();
+        let mut weighted_sum = 0.0;
+        let mut total_basis = 0.0;
 
-        let total_capital: f64 = self.results.iter()
-            .map(|r| r.capital_required().to_f64().unwrap_or(0.0))
-            .sum();
+        for r in &self.results {
+            let Some(basis) = r.return_basis_value(self.return_basis) else { continue };
+            let Some(ret) = r.return_on_basis(self.return_basis) else { continue };
 
-        if total_capital > 0.0 {
-            weighted_sum / total_capital
+            let basis_f = basis.to_f64().unwrap_or(0.0);
+            if basis_f > 0.0 {
+                weighted_sum += basis_f * ret;
+                total_basis += basis_f;
+            }
+        }
+
+        if total_basis > 0.0 {
+            weighted_sum / total_basis
         } else {
             0.0
         }
     }
 
-    /// Total capital deployed across all trades
+    /// Total basis deployed across all trades
     pub fn total_capital_deployed(&self) -> Decimal {
         self.results.iter()
-            .map(|r| r.capital_required())
+            .filter_map(|r| r.return_basis_value(self.return_basis))
             .sum()
     }
 
-    /// Return on total capital (total P&L / total capital)
+    /// Return on total basis (total P&L / total basis)
     pub fn return_on_capital(&self) -> f64 {
         use rust_decimal::prelude::ToPrimitive;
-        let total_capital = self.total_capital_deployed();
-        if total_capital.is_zero() {
+        let mut total_basis = Decimal::ZERO;
+        let mut total_pnl = Decimal::ZERO;
+
+        for r in &self.results {
+            if let Some(basis) = r.return_basis_value(self.return_basis) {
+                total_basis += basis;
+                total_pnl += r.realized_pnl();
+            }
+        }
+
+        if total_basis.is_zero() {
             return 0.0;
         }
-        let total_pnl = self.total_pnl_with_hedge();
-        (total_pnl / total_capital).to_f64().unwrap_or(0.0)
+        (total_pnl / total_basis).to_f64().unwrap_or(0.0)
     }
 
     /// Profit factor (gross profit / gross loss)
@@ -374,7 +386,7 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
         use rust_decimal::prelude::ToPrimitive;
 
         let returns: Vec<f64> = self.results.iter()
-            .map(|r| r.return_on_capital())
+            .filter_map(|r| r.return_on_basis(self.return_basis))
             .collect();
 
         if returns.len() < 2 {
@@ -402,7 +414,16 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
             .map(|r| r.to_accounting())
             .collect();
 
-        cs_domain::TradeStatistics::from_trades(&accountings)
+        cs_domain::TradeStatistics::from_trades_with_basis(&accountings, self.return_basis)
+    }
+
+    /// Number of trades that provide the configured return basis.
+    pub fn return_basis_coverage(&self) -> (usize, usize) {
+        let total = self.results.len();
+        let supported = self.results.iter()
+            .filter(|r| r.return_basis_value(self.return_basis).is_some())
+            .count();
+        (supported, total)
     }
 }
 
@@ -620,7 +641,9 @@ where
 
         // 1. Determine trading range and timing spec
         let trading_range = self.config.trading_range();
-        let timing_spec = self.config.timing_spec();
+        let timing_spec = self.config
+            .timing_spec()
+            .map_err(|e| BacktestError::Config(e.to_string()))?;
         let filter_criteria = self.config.filter_criteria();
 
         info!(
@@ -767,13 +790,19 @@ where
 
         // 7. Collect and apply post-execution filters
         let min_iv_ratio = self.config.selection.min_iv_ratio;
-        for (result_opt, tradable) in batch_results.into_iter().zip(filtered_events.iter()) {
-            if let Some(result) = result_opt {
-                if strategy.apply_filter(&result, min_iv_ratio) {
-                    all_results.push(result);
-                } else if let Some(error) = strategy.create_filter_error(&result, &tradable.event) {
+        for (outcome, tradable) in batch_results.into_iter().zip(filtered_events.iter()) {
+            match outcome {
+                TradeExecutionOutcome::Executed(result) => {
+                    if strategy.apply_filter(&result, min_iv_ratio) {
+                        all_results.push(result);
+                    } else if let Some(error) = strategy.create_filter_error(&result, &tradable.event) {
+                        dropped_events.push(error);
+                    }
+                }
+                TradeExecutionOutcome::Dropped(error) => {
                     dropped_events.push(error);
                 }
+                TradeExecutionOutcome::Skipped => {}
             }
         }
 
@@ -795,6 +824,8 @@ where
             total_entries,
             total_opportunities,
             dropped_events,
+            return_basis: self.config.return_basis,
+            margin_config: self.config.margin.clone(),
         })
     }
 
@@ -808,19 +839,14 @@ where
         selector: &dyn StrikeSelector,
         criteria: &ExpirationCriteria,
         exec_config: &ExecutionConfig,
-    ) -> Vec<Option<R>>
+    ) -> Vec<TradeExecutionOutcome<R>>
     where
         S: TradeStrategy<R> + Sync,
         R: TradeResultMethods + Send,
     {
-        let events: Vec<&EarningsEvent> = tradable_events.iter().map(|te| &te.event).collect();
-
-        crate::execution::run_batch(&events, self.config.parallel, |event| {
-            // Find the corresponding TradableEvent for this event
-            let tradable = tradable_events.iter()
-                .find(|te| te.symbol() == event.symbol && te.earnings_date() == event.earnings_date)
-                .expect("TradableEvent must exist for every event");
-
+        crate::execution::run_batch(tradable_events, self.config.parallel, |tradable| {
+            let tradable = *tradable;
+            let event = &tradable.event;
             strategy.execute_trade(
                 self.options_repo.as_ref(),
                 self.equity_repo.as_ref(),
@@ -846,7 +872,7 @@ where
         selector: &dyn StrikeSelector,
         criteria: &ExpirationCriteria,
         exec_config: &ExecutionConfig,
-    ) -> Vec<Option<R>>
+    ) -> Vec<TradeExecutionOutcome<R>>
     where
         S: TradeStrategy<R> + Sync,
         R: TradeResultMethods + Send,
@@ -977,7 +1003,9 @@ where
         };
 
         // Add trading costs and hedging config from backtest config
-        let config = base_config.with_trading_costs(self.config.trading_costs.clone());
+        let config = base_config
+            .with_trading_costs(self.config.trading_costs.clone())
+            .with_margin_config(self.config.margin.clone());
 
         // Add hedging if enabled
         if self.config.hedge_config.is_enabled() {
@@ -1123,6 +1151,8 @@ where
 pub enum BacktestError {
     #[error("Repository error: {0}")]
     Repository(String),
+    #[error("Config error: {0}")]
+    Config(String),
     #[error("Strategy error: {0}")]
     Strategy(String),
     #[error("Pricing error: {0}")]

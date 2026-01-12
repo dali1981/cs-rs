@@ -4,8 +4,10 @@ use chrono::NaiveDate;
 use cs_analytics::{PricingModel, InterpolationMode};
 use cs_domain::{
     TimingConfig, TradeSelectionCriteria, StrikeMatchMode, HedgeConfig, AttributionConfig,
-    TradingRange, TradingPeriodSpec, FilterCriteria, TradingCostConfig, FileRulesConfig,
+    TradingRange, TradingPeriodSpec, FilterCriteria, TradingCostConfig, FileRulesConfig, ReturnBasis,
+    MarginConfig,
 };
+use thiserror::Error;
 
 // Infrastructure config types (separated into submodules)
 mod data_source;
@@ -13,6 +15,18 @@ mod execution;
 
 pub use data_source::DataSourceConfig;
 pub use execution::ExecutionConfig;
+
+#[derive(Debug, Error)]
+pub enum TimingSpecError {
+    #[error("Invalid {field} time: {hour:02}:{minute:02}")]
+    InvalidTime {
+        field: &'static str,
+        hour: u32,
+        minute: u32,
+    },
+    #[error("Unknown timing strategy: {0}")]
+    UnknownStrategy(String),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestConfig {
@@ -113,6 +127,12 @@ pub struct BacktestConfig {
     /// Entry rules configuration (filters trades before/during execution)
     #[serde(default)]
     pub rules: FileRulesConfig,
+    /// Return denominator used for capital-weighted metrics
+    #[serde(default)]
+    pub return_basis: ReturnBasis,
+    /// Margin & buying power configuration (IBKR-like)
+    #[serde(default)]
+    pub margin: MarginConfig,
 }
 
 fn default_wing_width() -> f64 {
@@ -253,6 +273,8 @@ impl Default for BacktestConfig {
             attribution_config: None, // No attribution by default
             trading_costs: TradingCostConfig::default(), // No costs by default (explicit opt-in)
             rules: FileRulesConfig::default(), // No entry rules by default
+            return_basis: ReturnBasis::default(),
+            margin: MarginConfig::default(),
         }
     }
 }
@@ -360,7 +382,7 @@ impl BacktestConfig {
     /// Priority order (for backward compatibility):
     /// 1. NEW PATH: Use generic timing_strategy if provided
     /// 2. LEGACY PATH: Convert spread-specific params to timing spec
-    pub fn timing_spec(&self) -> TradingPeriodSpec {
+    pub fn timing_spec(&self) -> Result<TradingPeriodSpec, TimingSpecError> {
         use chrono::NaiveTime;
 
         // Helper to get entry/exit times from config
@@ -369,41 +391,49 @@ impl BacktestConfig {
             self.timing.entry_minute,
             0,
         )
-        .unwrap();
+        .ok_or(TimingSpecError::InvalidTime {
+            field: "entry_time",
+            hour: self.timing.entry_hour,
+            minute: self.timing.entry_minute,
+        })?;
         let exit_time = NaiveTime::from_hms_opt(
             self.timing.exit_hour,
             self.timing.exit_minute,
             0,
         )
-        .unwrap();
+        .ok_or(TimingSpecError::InvalidTime {
+            field: "exit_time",
+            hour: self.timing.exit_hour,
+            minute: self.timing.exit_minute,
+        })?;
 
         // 1. NEW PATH: Use generic timing_strategy if provided
         if let Some(strategy) = &self.timing_strategy {
             return match strategy.as_str() {
-                "PreEarnings" => TradingPeriodSpec::PreEarnings {
+                "PreEarnings" => Ok(TradingPeriodSpec::PreEarnings {
                     entry_days_before: self.entry_days_before.unwrap_or(5),
                     exit_days_before: self.exit_days_before.unwrap_or(1),
                     entry_time,
                     exit_time,
-                },
-                "PostEarnings" => TradingPeriodSpec::PostEarnings {
+                }),
+                "PostEarnings" => Ok(TradingPeriodSpec::PostEarnings {
                     entry_offset: self.entry_offset.unwrap_or(0),
                     holding_days: self.holding_days.unwrap_or(5),
                     entry_time,
                     exit_time,
-                },
-                "CrossEarnings" => TradingPeriodSpec::CrossEarnings {
+                }),
+                "CrossEarnings" => Ok(TradingPeriodSpec::CrossEarnings {
                     entry_days_before: self.entry_days_before.unwrap_or(1),
                     exit_days_after: self.exit_days_after.unwrap_or(1),
                     entry_time,
                     exit_time,
-                },
-                _ => panic!("Unknown timing strategy: {}", strategy),
+                }),
+                _ => Err(TimingSpecError::UnknownStrategy(strategy.clone())),
             };
         }
 
         // 2. LEGACY PATH: Convert spread-specific params (backward compatible)
-        match self.spread {
+        Ok(match self.spread {
             SpreadType::Straddle | SpreadType::ShortStraddle => {
                 // Pre-earnings straddle (long or short)
                 TradingPeriodSpec::PreEarnings {
@@ -431,7 +461,7 @@ impl BacktestConfig {
                 entry_time,
                 exit_time,
             },
-        }
+        })
     }
 }
 
