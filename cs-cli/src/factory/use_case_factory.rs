@@ -5,27 +5,56 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use cs_backtest::{
-    BacktestUseCase, BacktestConfig,
+    BacktestUseCase, BacktestConfig, DataSourceConfig,
     CampaignUseCase, CampaignConfig,
     GenerateIvTimeSeriesUseCase,
     EarningsAnalysisUseCase,
 };
 use cs_domain::{OptionsDataRepository, EquityDataRepository};
-use cs_domain::infrastructure::{FinqOptionsRepository, FinqEquityRepository};
+use cs_domain::infrastructure::{
+    FinqOptionsRepository, FinqEquityRepository,
+    IbOptionsRepository, IbEquityRepository,
+};
 
-use super::{RepositoryFactory, DataRepositoryFactory};
+use super::{RepositoryFactory, IbRepositoryFactory, DataRepositoryFactory};
+
+/// Enum wrapper for backtest use cases with different repository types
+pub enum BacktestUseCaseEnum {
+    Finq(BacktestUseCase<FinqOptionsRepository, FinqEquityRepository>),
+    Ib(BacktestUseCase<IbOptionsRepository, IbEquityRepository>),
+}
+
+impl BacktestUseCaseEnum {
+    pub async fn execute(&self) -> Result<cs_backtest::UnifiedBacktestResult, cs_backtest::BacktestError> {
+        match self {
+            Self::Finq(uc) => uc.execute().await,
+            Self::Ib(uc) => uc.execute().await,
+        }
+    }
+}
 
 /// Factory for creating use case instances with all dependencies wired up
 pub struct UseCaseFactory;
 
 impl UseCaseFactory {
     /// Create a backtest use case with all dependencies
+    /// Dispatches to appropriate repository factory based on config.data_source
     /// Earnings repos are constructed from config.earnings_file and config.earnings_dir
     pub fn create_backtest(
         config: BacktestConfig,
-    ) -> Result<BacktestUseCase<FinqOptionsRepository, FinqEquityRepository>> {
-        let factory = RepositoryFactory;
-        Self::create_backtest_with_factory(&factory, config)
+    ) -> Result<BacktestUseCaseEnum> {
+        match &config.data_source {
+            DataSourceConfig::Finq { data_dir: _ } => {
+                let factory = RepositoryFactory;
+                let use_case = Self::create_backtest_with_factory(&factory, config)?;
+                Ok(BacktestUseCaseEnum::Finq(use_case))
+            }
+            DataSourceConfig::Ib { data_dir: _ } => {
+                let factory = IbRepositoryFactory;
+                let use_case = Self::create_backtest_with_factory(&factory, config)?;
+                Ok(BacktestUseCaseEnum::Ib(use_case))
+            }
+        }
     }
 
     /// Create a backtest use case with a custom repository factory
@@ -38,8 +67,9 @@ impl UseCaseFactory {
         F::OptionsRepo: OptionsDataRepository + 'static,
         F::EquityRepo: EquityDataRepository + 'static,
     {
-        let options_repo = factory.create_options_repo(&config.data_dir);
-        let equity_repo = factory.create_equity_repo(&config.data_dir);
+        let data_dir = config.data_source.data_dir();
+        let options_repo = factory.create_options_repo(data_dir);
+        let equity_repo = factory.create_equity_repo(data_dir);
 
         // Get earnings file/dir from config
         let earnings_repo = factory.create_earnings_repo(

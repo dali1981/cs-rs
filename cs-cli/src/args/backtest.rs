@@ -13,6 +13,14 @@ pub struct BacktestArgs {
     #[arg(long, short = 'c')]
     pub conf: Vec<PathBuf>,
 
+    /// Market data source provider (finq or ib)
+    #[arg(long, default_value = "finq")]
+    pub data_source: String,
+
+    /// IB data directory (when using --data-source ib)
+    #[arg(long, env = "IB_DATA_DIR")]
+    pub ib_data_dir: Option<PathBuf>,
+
     /// Earnings data directory (for earnings-rs adapter)
     #[arg(long, env = "EARNINGS_DATA_DIR", conflicts_with = "earnings_file")]
     pub earnings_dir: Option<PathBuf>,

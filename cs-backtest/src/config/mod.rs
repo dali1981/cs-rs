@@ -30,7 +30,12 @@ pub enum TimingSpecError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestConfig {
-    pub data_dir: PathBuf,
+    /// Market data source (options and equity)
+    #[serde(default)]
+    pub data_source: DataSourceConfig,
+    /// DEPRECATED: Use data_source instead. Kept for backward compatibility.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_dir: Option<PathBuf>,
     pub earnings_dir: PathBuf,
     /// Optional earnings file (takes precedence over earnings_dir)
     #[serde(default)]
@@ -232,7 +237,8 @@ impl SelectionType {
 impl Default for BacktestConfig {
     fn default() -> Self {
         Self {
-            data_dir: PathBuf::from("data"),
+            data_source: DataSourceConfig::default(),
+            data_dir: None,
             earnings_dir: dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("trading_project/nasdaq_earnings/data"),
@@ -285,13 +291,9 @@ impl BacktestConfig {
         TradingRange::new(self.start_date, self.end_date)
     }
 
-    /// Extract DataSourceConfig (infrastructure)
-    pub fn data_source(&self) -> DataSourceConfig {
-        DataSourceConfig {
-            data_dir: self.data_dir.clone(),
-            earnings_dir: self.earnings_dir.clone(),
-            earnings_file: self.earnings_file.clone(),
-        }
+    /// Get market data source configuration
+    pub fn market_data_source(&self) -> &DataSourceConfig {
+        &self.data_source
     }
 
     /// Extract ExecutionConfig (runtime)

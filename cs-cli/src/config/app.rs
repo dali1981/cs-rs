@@ -368,7 +368,9 @@ impl AppConfig {
         use chrono::NaiveDate;
 
         cs_backtest::BacktestConfig {
-            data_dir: self.paths.data_dir.clone(),
+            // data_source will be set by BacktestConfigBuilder based on CLI args
+            data_source: cs_backtest::DataSourceConfig::default(),
+            data_dir: Some(self.paths.data_dir.clone()),
             earnings_dir: self.paths.earnings_dir.clone(),
             // These will be set by BacktestConfigBuilder from CLI args
             earnings_file: None,
