@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 use cs_domain::*;
 use polars::prelude::DataFrame;
 use cs_analytics::IVSurface;
+use tracing::warn;
 use crate::execution::{ExecutionConfig, ExecutableTrade, TradePricer, SimulationOutput, ExecutionError};
 use crate::iv_surface_builder::build_iv_surface_minute_aligned;
 
@@ -79,23 +80,44 @@ impl<'a> TradeSimulator<'a> {
     /// This is the common setup needed by all trade types.
     pub async fn prepare(&self) -> Option<PreparedData> {
         // Get option chain at entry time
-        let entry_chain = self.options_repo
+        let entry_chain = match self.options_repo
             .get_option_bars_at_time(self.symbol, self.entry_time)
             .await
-            .ok()?;
+        {
+            Ok(chain) => chain,
+            Err(e) => {
+                warn!("Skipping {}: No option chain data at {} - {}",
+                    self.symbol, self.entry_time, e);
+                return None;
+            }
+        };
 
         // Build IV surface from chain
-        let surface = build_iv_surface_minute_aligned(
+        let surface = match build_iv_surface_minute_aligned(
             &entry_chain,
             self.equity_repo,
             self.symbol,
-        ).await?;
+        ).await {
+            Some(surf) => surf,
+            None => {
+                warn!("Skipping {}: Failed to build IV surface at {}",
+                    self.symbol, self.entry_time);
+                return None;
+            }
+        };
 
         // Get spot price at entry time
-        let spot = self.equity_repo
+        let spot = match self.equity_repo
             .get_spot_price(self.symbol, self.entry_time)
             .await
-            .ok()?;
+        {
+            Ok(price) => price,
+            Err(e) => {
+                warn!("Skipping {}: No equity/spot data at {} - {}",
+                    self.symbol, self.entry_time, e);
+                return None;
+            }
+        };
 
         Some(PreparedData { spot, surface, entry_chain })
     }
