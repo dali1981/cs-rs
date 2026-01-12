@@ -48,3 +48,19 @@ mlruns/
 !tests/fixtures/*.parquet
 out*.json
 .cargo/
+
+# Backtest results and analysis outputs
+*.json
+!Cargo.json
+!**/fixtures/**/*.json
+!**/test*/**/*.json
+
+# Charts and visualizations
+*.png
+*.jpg
+*.jpeg
+*.svg
+
+# Analysis scripts (temporary)
+analyze_*.py
+compare_*.py
