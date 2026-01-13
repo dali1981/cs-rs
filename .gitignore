@@ -25,7 +25,11 @@ wheels/
 .installed.cfg
 *.egg
 venv/
+.venv/
 ENV/
+*.py
+pyproject.toml
+uv.lock
 
 # IDE
 .vscode/
@@ -39,28 +43,49 @@ ENV/
 Thumbs.db
 
 # Project specific
+.cargo/
+.claude/
 data/
 results/
 mlruns/
+
+# Output files
 *.parquet
 *.csv
-!tests/fixtures/*.csv
-!tests/fixtures/*.parquet
-out*.json
-.cargo/
-
-# Backtest results and analysis outputs
 *.json
-!Cargo.json
-!**/fixtures/**/*.json
-!**/test*/**/*.json
 
-# Charts and visualizations
+# Config files (keep Cargo.toml)
+*.toml
+!Cargo.toml
+!*/Cargo.toml
+
+# Charts and images
 *.png
 *.jpg
 *.jpeg
 *.svg
 
-# Analysis scripts (temporary)
-analyze_*.py
-compare_*.py
+# Documentation (keep only README.md)
+*.md
+!README.md
+
+# Analysis and research
+docs/
+specs/
+scripts/
+simulation/
+tickets/
+output/
+custom_earnings/
+
+# Test outputs and results
+campaign_results*/
+*_test/
+*_test_*/
+*_output/
+test_*/
+
+# Temporary files
+*.bak
+*.tmp
+*.txt
