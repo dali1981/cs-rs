@@ -224,7 +224,14 @@ where
             // 4. Select trade (strategy-specific)
             let trade = match self.select_trade(&ctx) {
                 Some(trade) => trade,
-                None => return TradeExecutionOutcome::Skipped,
+                None => {
+                    tracing::warn!(
+                        symbol = event.symbol,
+                        entry_time = %entry_time,
+                        "Trade selection failed - no suitable trade found"
+                    );
+                    return TradeExecutionOutcome::Skipped;
+                }
             };
 
             // 5. Validate selection (strategy-specific, e.g., DTE checks)

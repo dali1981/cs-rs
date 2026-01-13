@@ -6,6 +6,7 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use polars::prelude::*;
 use rust_decimal::Decimal;
+use tracing::{debug, trace, warn};
 
 use cs_analytics::{bs_implied_volatility, BSConfig, IVPoint, IVSurface};
 use cs_domain::{MarketTime, TradingDate, TradingTimestamp};
@@ -127,20 +128,74 @@ pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository + ?Sized>(
     let bs_config = BSConfig::default();
     let market_close = MarketTime::new(16, 0);
 
+    let total_options = chain_df.height();
+    debug!("Building IV surface for {} with {} options in chain", symbol, total_options);
+
     // Extract columns including timestamp
-    let strikes = chain_df.column("strike").ok()?.f64().ok()?;
-    let expirations = chain_df.column("expiration").ok()?.date().ok()?;
-    let closes = chain_df.column("close").ok()?.f64().ok()?;
-    let option_types = chain_df.column("option_type").ok()?.str().ok()?;
+    let strikes = match chain_df.column("strike").ok().and_then(|c| c.f64().ok()) {
+        Some(s) => s,
+        None => {
+            warn!("Failed to extract 'strike' column for {}", symbol);
+            return None;
+        }
+    };
+    let expirations = match chain_df.column("expiration").ok().and_then(|c| c.date().ok()) {
+        Some(e) => e,
+        None => {
+            warn!("Failed to extract 'expiration' column for {}", symbol);
+            return None;
+        }
+    };
+    let closes = match chain_df.column("close").ok().and_then(|c| c.f64().ok()) {
+        Some(c) => c,
+        None => {
+            warn!("Failed to extract 'close' column for {}", symbol);
+            return None;
+        }
+    };
+    let option_types = match chain_df.column("option_type").ok().and_then(|c| c.str().ok()) {
+        Some(o) => o,
+        None => {
+            warn!("Failed to extract 'option_type' column for {}", symbol);
+            return None;
+        }
+    };
 
     // Cast datetime[ms] to i64 to get milliseconds since epoch
-    let ts_col = chain_df.column("timestamp").ok()?;
-    let ts_cast = ts_col.cast(&polars::prelude::DataType::Int64).ok()?;
-    let timestamps_ms = ts_cast.i64().ok()?;
+    let ts_col = match chain_df.column("timestamp").ok() {
+        Some(c) => c,
+        None => {
+            warn!("Failed to extract 'timestamp' column for {}", symbol);
+            return None;
+        }
+    };
+    let ts_cast = match ts_col.cast(&polars::prelude::DataType::Int64).ok() {
+        Some(c) => c,
+        None => {
+            warn!("Failed to cast 'timestamp' column to Int64 for {}", symbol);
+            return None;
+        }
+    };
+    let timestamps_ms = match ts_cast.i64().ok() {
+        Some(t) => t,
+        None => {
+            warn!("Failed to extract Int64 values from timestamp column for {}", symbol);
+            return None;
+        }
+    };
 
     let mut points = Vec::new();
     let mut latest_timestamp: Option<DateTime<Utc>> = None;
     let mut latest_spot: Option<Decimal> = None;
+
+    // Track failure reasons
+    let mut skipped_missing_data = 0;
+    let mut skipped_invalid_prices = 0;
+    let mut skipped_no_spot = 0;
+    let mut skipped_decimal_conversion = 0;
+    let mut skipped_expired = 0;
+    let mut skipped_iv_calc_failed = 0;
+    let mut skipped_iv_validation = 0;
 
     for i in 0..chain_df.height() {
         // Extract row data, skip if any value is missing
@@ -152,11 +207,16 @@ pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository + ?Sized>(
             timestamps_ms.get(i),
         ) {
             (Some(s), Some(e), Some(c), Some(t), Some(ts)) => (s, e, c, t, ts),
-            _ => continue,
+            _ => {
+                skipped_missing_data += 1;
+                continue;
+            }
         };
 
         // Skip invalid data
         if close <= 0.0 || strike_f64 <= 0.0 {
+            skipped_invalid_prices += 1;
+            trace!("Option {}: invalid price (close={}, strike={})", i, close, strike_f64);
             continue;
         }
 
@@ -167,12 +227,22 @@ pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository + ?Sized>(
         // Look up spot price at this option's trade timestamp
         let spot_price = match equity_repo.get_spot_price(symbol, opt_timestamp).await {
             Ok(sp) => sp,
-            Err(_) => continue, // Skip if no spot price available
+            Err(e) => {
+                skipped_no_spot += 1;
+                if skipped_no_spot <= 3 {
+                    debug!("Option {}: no spot price at {} - {}", i, opt_timestamp, e);
+                }
+                continue;
+            }
         };
         let spot_f64 = spot_price.to_f64();
         let spot_decimal = match Decimal::try_from(spot_f64) {
             Ok(d) => d,
-            Err(_) => continue,
+            Err(e) => {
+                skipped_decimal_conversion += 1;
+                debug!("Option {}: decimal conversion failed for spot {} - {}", i, spot_f64, e);
+                continue;
+            }
         };
 
         // Track latest timestamp and its spot for surface-level metadata
@@ -188,7 +258,9 @@ pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository + ?Sized>(
         // Calculate time to maturity from this option's timestamp
         let ttm = calculate_ttm(opt_timestamp, expiration, &market_close);
         if ttm <= 0.0 {
-            continue; // Skip expired options
+            skipped_expired += 1;
+            trace!("Option {}: expired (ttm={})", i, ttm);
+            continue;
         }
 
         // Calculate IV from market price using per-option spot
@@ -201,17 +273,32 @@ pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository + ?Sized>(
             &bs_config,
         ) {
             Some(v) => v,
-            None => continue,
+            None => {
+                skipped_iv_calc_failed += 1;
+                if skipped_iv_calc_failed <= 3 {
+                    debug!("Option {}: IV calculation failed (spot={}, strike={}, close={}, ttm={}, is_call={})",
+                           i, spot_f64, strike_f64, close, ttm, is_call);
+                }
+                continue;
+            }
         };
 
         // Skip unreasonable IVs
         if !validate_iv_for_surface(iv) {
+            skipped_iv_validation += 1;
+            if skipped_iv_validation <= 3 {
+                debug!("Option {}: IV {} failed validation (bounds: 0.01-5.0)", i, iv);
+            }
             continue;
         }
 
         let strike_decimal = match Decimal::try_from(strike_f64) {
             Ok(d) => d,
-            Err(_) => continue,
+            Err(e) => {
+                skipped_decimal_conversion += 1;
+                debug!("Option {}: decimal conversion failed for strike {} - {}", i, strike_f64, e);
+                continue;
+            }
         };
 
         points.push(IVPoint {
@@ -231,7 +318,22 @@ pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository + ?Sized>(
         });
     }
 
+    debug!(
+        "IV surface for {}: processed {}, collected {} valid points. Skipped: {} missing data, {} invalid prices, {} no spot, {} decimal conv, {} expired, {} IV calc failed, {} IV validation",
+        symbol, total_options, points.len(),
+        skipped_missing_data, skipped_invalid_prices, skipped_no_spot,
+        skipped_decimal_conversion, skipped_expired, skipped_iv_calc_failed,
+        skipped_iv_validation
+    );
+
     if points.is_empty() {
+        warn!(
+            "No valid IV points for {} (all {} options skipped). Breakdown: missing_data={}, invalid_prices={}, no_spot={}, decimal_conv={}, expired={}, iv_calc_failed={}, iv_validation={}",
+            symbol, total_options,
+            skipped_missing_data, skipped_invalid_prices, skipped_no_spot,
+            skipped_decimal_conversion, skipped_expired, skipped_iv_calc_failed,
+            skipped_iv_validation
+        );
         return None;
     }
 

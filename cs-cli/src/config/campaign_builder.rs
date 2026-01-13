@@ -50,10 +50,13 @@ impl CampaignConfigBuilder {
                 PathsConfig::default().data_dir
             });
 
-        // Earnings directory (use default if no file specified)
-        let earnings_dir = dirs::home_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("trading_project/nasdaq_earnings/data");
+        // Build unified earnings source config
+        let earnings_source = if let Some(ref file) = args.earnings_file {
+            cs_backtest::EarningsSourceConfig::file(file.clone())
+        } else {
+            // Default to provider with TradingView
+            cs_backtest::EarningsSourceConfig::default()
+        };
 
         // Build period policy (simplified - just use args directly)
         let period_policy = PeriodPolicy::EarningsOnly {
@@ -79,8 +82,7 @@ impl CampaignConfigBuilder {
 
         let config = CampaignConfig {
             data_dir,
-            earnings_dir,
-            earnings_file: args.earnings_file.clone(),
+            earnings_source,
             symbols: args.symbols.clone(),
             start_date,
             end_date,

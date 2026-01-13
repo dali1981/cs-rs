@@ -8,9 +8,9 @@ use rust_decimal::prelude::ToPrimitive;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::datetime::{TradingDate, TradingTimestamp};
+use crate::datetime::TradingDate;
 use crate::repositories::{OptionsDataRepository, RepositoryError};
-use crate::value_objects::Strike;
+use crate::value_objects::{Strike, CallPut};
 
 pub struct IbOptionsRepository {
     db: ParquetDatabase,
@@ -59,12 +59,13 @@ impl IbOptionsRepository {
             .collect();
         let option_types: Vec<&str> = snapshots.iter()
             .map(|s| match s.option_type {
-                IbOptionType::Call => "C",
-                IbOptionType::Put => "P",
+                IbOptionType::Call => CallPut::Call.as_str(),
+                IbOptionType::Put => CallPut::Put.as_str(),
             })
             .collect();
+        // IV surface builder expects milliseconds (multiplies by 1M to get nanos)
         let timestamps: Vec<i64> = snapshots.iter()
-            .map(|s| TradingTimestamp::from_datetime_utc(s.timestamp).to_nanos())
+            .map(|s| s.timestamp.timestamp_millis())
             .collect();
         let closes: Vec<f64> = snapshots.iter().map(|s| s.close).collect();
         let opens: Vec<f64> = snapshots.iter().map(|s| s.open).collect();
@@ -72,9 +73,14 @@ impl IbOptionsRepository {
         let lows: Vec<f64> = snapshots.iter().map(|s| s.low).collect();
         let volumes: Vec<i64> = snapshots.iter().map(|s| s.volume).collect();
 
+        // Cast expiration to Date type (IV surface builder expects Date, not Int32)
+        let expiration_series = Series::new("expiration", expirations)
+            .cast(&DataType::Date)
+            .map_err(|e| RepositoryError::Polars(format!("Failed to cast expiration to Date: {}", e)))?;
+
         DataFrame::new(vec![
             Series::new("strike", strikes),
-            Series::new("expiration", expirations),
+            expiration_series,
             Series::new("option_type", option_types),
             Series::new("timestamp", timestamps),
             Series::new("close", closes),

@@ -35,7 +35,7 @@ pub mod attribution;
 pub mod rules;  // Rule evaluation for entry filtering
 
 // Config
-pub use config::{BacktestConfig, SpreadType, SelectionType, DataSourceConfig};
+pub use config::{BacktestConfig, SpreadType, SelectionType, DataSourceConfig, EarningsSourceConfig, EarningsProvider};
 pub use campaign_config::CampaignConfig;
 
 // Use cases

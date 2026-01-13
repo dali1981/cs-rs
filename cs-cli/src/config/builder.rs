@@ -96,15 +96,26 @@ impl BacktestConfigBuilder {
             config.start_date = Self::parse_date(&args.start)?;
             config.end_date = Self::parse_date(&args.end)?;
 
-            // Set earnings_file if provided (takes precedence over earnings_dir)
-            if let Some(ref earnings_file) = args.earnings_file {
-                config.earnings_file = Some(earnings_file.clone());
-            }
+            // Build unified EarningsSourceConfig from CLI args
+            // Priority: file > provider
+            use cs_backtest::{EarningsSourceConfig, EarningsProvider};
 
-            // Set earnings_dir if provided
-            if let Some(ref earnings_dir) = args.earnings_dir {
-                config.earnings_dir = earnings_dir.clone();
-            }
+            config.earnings_source = if let Some(ref earnings_file) = args.earnings_file {
+                // File variant takes precedence
+                EarningsSourceConfig::file(earnings_file.clone())
+            } else {
+                // Provider variant: get directory and source
+                let dir = args.earnings_dir.clone()
+                    .or_else(|| std::env::var("EARNINGS_DATA_DIR").ok().map(PathBuf::from))
+                    .unwrap_or_else(|| {
+                        dirs::home_dir()
+                            .unwrap_or_else(|| PathBuf::from("."))
+                            .join("trading_project/nasdaq_earnings/data")
+                    });
+                let source = EarningsProvider::from_str(&args.earnings_source)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                EarningsSourceConfig::provider(source, dir)
+            };
 
             // Apply CLI rules (override TOML rules if any CLI rule flags are set)
             if args.rules.has_rules() {

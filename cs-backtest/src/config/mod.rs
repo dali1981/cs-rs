@@ -11,9 +11,11 @@ use thiserror::Error;
 
 // Infrastructure config types (separated into submodules)
 mod data_source;
+mod earnings_source;
 mod execution;
 
 pub use data_source::DataSourceConfig;
+pub use earnings_source::{EarningsSourceConfig, EarningsProvider};
 pub use execution::ExecutionConfig;
 
 #[derive(Debug, Error)]
@@ -36,10 +38,9 @@ pub struct BacktestConfig {
     /// DEPRECATED: Use data_source instead. Kept for backward compatibility.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<PathBuf>,
-    pub earnings_dir: PathBuf,
-    /// Optional earnings file (takes precedence over earnings_dir)
+    /// Earnings calendar data source (file or provider-based)
     #[serde(default)]
-    pub earnings_file: Option<PathBuf>,
+    pub earnings_source: EarningsSourceConfig,
     /// Backtest start date
     pub start_date: NaiveDate,
     /// Backtest end date
@@ -239,10 +240,7 @@ impl Default for BacktestConfig {
         Self {
             data_source: DataSourceConfig::default(),
             data_dir: None,
-            earnings_dir: dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("trading_project/nasdaq_earnings/data"),
-            earnings_file: None,
+            earnings_source: EarningsSourceConfig::default(),
             // Default to 2020-01-01 to 2020-12-31 (will be overridden by CLI)
             start_date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             end_date: NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
@@ -474,10 +472,11 @@ mod tests {
     #[test]
     fn test_backtest_config_default() {
         let config = BacktestConfig::default();
-        assert_eq!(config.data_dir, PathBuf::from("data"));
         assert!(config.parallel);
         assert!(matches!(config.spread, SpreadType::Calendar));
         assert!(matches!(config.selection_strategy, SelectionType::ATM));
+        // Earnings source defaults to Provider with TradingView
+        assert!(!config.earnings_source.is_file());
     }
 
     #[test]
@@ -486,7 +485,7 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: BacktestConfig = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(config.data_dir, deserialized.data_dir);
         assert_eq!(config.parallel, deserialized.parallel);
+        assert!(!deserialized.earnings_source.is_file());
     }
 }

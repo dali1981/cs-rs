@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use cs_backtest::EarningsSourceConfig;
 use cs_domain::{
     EarningsRepository, OptionsDataRepository, EquityDataRepository,
     infrastructure::{
@@ -28,20 +29,22 @@ impl IbRepositoryFactory {
             .map_err(|e| format!("Failed to create IB equity repository: {}", e))
     }
 
-    /// Create earnings repository (same as Finq - earnings data is provider-agnostic)
+    /// Create earnings repository based on unified configuration
     pub fn create_earnings_repo(
-        earnings_dir: Option<&PathBuf>,
-        earnings_file: Option<&PathBuf>,
+        earnings_source: &EarningsSourceConfig,
     ) -> Box<dyn EarningsRepository> {
-        if let Some(file) = earnings_file {
-            Box::new(ParquetEarningsRepository::new(file.clone()))
-        } else if let Some(dir) = earnings_dir {
-            Box::new(EarningsReaderAdapter::new(dir.clone()))
-        } else {
-            let default_dir = dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("trading_project/nasdaq_earnings/data");
-            Box::new(EarningsReaderAdapter::new(default_dir))
+        match earnings_source {
+            EarningsSourceConfig::File { path } => {
+                // Custom file (parquet)
+                Box::new(ParquetEarningsRepository::new(path.clone()))
+            }
+            EarningsSourceConfig::Provider { dir, source } => {
+                // Use earnings-rs adapter with configured source
+                Box::new(EarningsReaderAdapter::with_source(
+                    dir.clone(),
+                    source.to_earnings_rs()
+                ))
+            }
         }
     }
 }
@@ -62,9 +65,8 @@ impl DataRepositoryFactory for IbRepositoryFactory {
 
     fn create_earnings_repo(
         &self,
-        earnings_dir: Option<&PathBuf>,
-        earnings_file: Option<&PathBuf>,
+        earnings_source: &EarningsSourceConfig,
     ) -> Box<dyn EarningsRepository> {
-        IbRepositoryFactory::create_earnings_repo(earnings_dir, earnings_file)
+        IbRepositoryFactory::create_earnings_repo(earnings_source)
     }
 }

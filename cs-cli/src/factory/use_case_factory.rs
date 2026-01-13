@@ -71,11 +71,8 @@ impl UseCaseFactory {
         let options_repo = factory.create_options_repo(data_dir);
         let equity_repo = factory.create_equity_repo(data_dir);
 
-        // Get earnings file/dir from config
-        let earnings_repo = factory.create_earnings_repo(
-            Some(&config.earnings_dir),
-            config.earnings_file.as_ref(),
-        );
+        // Create earnings repository from unified config
+        let earnings_repo = factory.create_earnings_repo(&config.earnings_source);
 
         Ok(BacktestUseCase::new(
             earnings_repo,
@@ -86,18 +83,14 @@ impl UseCaseFactory {
     }
 
     /// Create a campaign use case with all dependencies
-    /// Earnings repos are constructed from config.earnings_file and config.earnings_dir
     pub fn create_campaign(
         config: CampaignConfig,
     ) -> Result<CampaignUseCase> {
         let options_repo = Arc::new(RepositoryFactory::create_options_repo(&config.data_dir));
         let equity_repo = Arc::new(RepositoryFactory::create_equity_repo(&config.data_dir));
 
-        // Get earnings file/dir from config
-        let earnings_repo = RepositoryFactory::create_earnings_repo(
-            Some(&config.earnings_dir),
-            config.earnings_file.as_ref(),
-        );
+        // Create earnings repository from unified config
+        let earnings_repo = RepositoryFactory::create_earnings_repo(&config.earnings_source);
 
         Ok(CampaignUseCase::new(
             earnings_repo,

@@ -8,14 +8,15 @@ use cs_domain::{
     value_objects::{IronButterflyConfig, MultiLegStrategyConfig},
     PeriodPolicy, ExpirationPolicy,
 };
+use crate::config::EarningsSourceConfig;
 
 /// Configuration for running a trading campaign
 #[derive(Debug, Clone)]
 pub struct CampaignConfig {
     // Data sources
     pub data_dir: PathBuf,
-    pub earnings_dir: PathBuf,
-    pub earnings_file: Option<PathBuf>,
+    /// Unified earnings source configuration (file or provider-based)
+    pub earnings_source: EarningsSourceConfig,
 
     // Campaign parameters
     pub symbols: Vec<String>,
@@ -53,10 +54,7 @@ impl Default for CampaignConfig {
 
         Self {
             data_dir: PathBuf::from("data"),
-            earnings_dir: dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("trading_project/nasdaq_earnings/data"),
-            earnings_file: None,
+            earnings_source: EarningsSourceConfig::default(),
             symbols: Vec::new(),
             start_date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             end_date: NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),

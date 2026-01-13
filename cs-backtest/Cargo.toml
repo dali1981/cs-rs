@@ -8,6 +8,7 @@ cs-analytics = { workspace = true }
 cs-domain = { workspace = true }
 finq-core = { workspace = true }
 finq-flatfiles = { workspace = true }
+earnings-rs = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 rayon = { workspace = true }
