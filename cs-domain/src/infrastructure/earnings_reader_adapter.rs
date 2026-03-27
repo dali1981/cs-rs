@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use std::path::PathBuf;
+use tracing::debug;
 
 use crate::entities::EarningsEvent as DomainEarningsEvent;
 use crate::repositories::{EarningsRepository, RepositoryError};
@@ -77,10 +78,14 @@ impl EarningsRepository for EarningsReaderAdapter {
         end_date: NaiveDate,
         symbols: Option<&[String]>,
     ) -> Result<Vec<DomainEarningsEvent>, RepositoryError> {
+        debug!("Loading earnings: range={} to {}, symbols={:?}, source={:?}",
+            start_date, end_date, symbols, self.source);
+
         // Build load options
         let mut options = earnings_rs::LoadOptions::new().source(self.source);
 
         if let Some(syms) = symbols {
+            debug!("Filtering earnings for {} symbols: {:?}", syms.len(), syms);
             options = options.symbols(syms.iter().map(|s| s.as_str()));
         }
 
@@ -90,8 +95,13 @@ impl EarningsRepository for EarningsReaderAdapter {
             .load_range(start_date, end_date, Some(options))
             .map_err(|e| RepositoryError::Parse(format!("earnings-rs error: {}", e)))?;
 
+        debug!("earnings-rs returned {} events", events.len());
+
         // Convert to domain events
-        Ok(events.into_iter().map(Self::convert_event).collect())
+        let domain_events: Vec<_> = events.into_iter().map(Self::convert_event).collect();
+        debug!("Converted to {} domain events", domain_events.len());
+
+        Ok(domain_events)
     }
 }
 

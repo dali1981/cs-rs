@@ -53,15 +53,13 @@ impl CommandHandler for BacktestCommand {
             "default (~/polygon/data)"
         };
 
+        println!("  Data source: {:?}", config.data_source);
         println!("  Data directory: {} (from {})",
-            style(config.data_dir.display()).cyan(),
+            style(config.data_source.data_dir().display()).cyan(),
             style(data_dir_source).dim());
 
-        if let Some(earnings_file) = &config.earnings_file {
-            println!("  Earnings file: {}", style(earnings_file.display()).cyan());
-        } else {
-            println!("  Earnings directory: {}", style(config.earnings_dir.display()).cyan());
-        }
+        // Display earnings source configuration
+        println!("  Earnings source: {}", style(&config.earnings_source).cyan());
 
         println!("  Strategy: {:?}", config.spread);
         println!("  Selection: {:?}", config.selection_strategy);

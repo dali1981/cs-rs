@@ -130,6 +130,7 @@ impl CampaignUseCase {
             trading_costs: cs_domain::TradingCostConfig::default(),
             hedge_config: None,
             margin_config: cs_domain::MarginConfig::default(),
+            attribution_config: None,
         };
 
         Ok(SessionExecutor::new(

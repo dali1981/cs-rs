@@ -368,10 +368,11 @@ impl AppConfig {
         use chrono::NaiveDate;
 
         cs_backtest::BacktestConfig {
-            data_dir: self.paths.data_dir.clone(),
-            earnings_dir: self.paths.earnings_dir.clone(),
-            // These will be set by BacktestConfigBuilder from CLI args
-            earnings_file: None,
+            // data_source will be set by BacktestConfigBuilder based on CLI args
+            data_source: cs_backtest::DataSourceConfig::default(),
+            data_dir: Some(self.paths.data_dir.clone()),
+            // earnings_source will be set by BacktestConfigBuilder from CLI args
+            earnings_source: cs_backtest::EarningsSourceConfig::default(),
             start_date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             end_date: NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
             timing: cs_domain::TimingConfig {

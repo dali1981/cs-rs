@@ -211,11 +211,25 @@ impl StrikeSelector for DeltaStrategy {
         option_type: OptionType,
         criteria: &ExpirationCriteria,
     ) -> Result<CalendarSpread, SelectionError> {
+        tracing::debug!(
+            symbol = surface.underlying(),
+            surface_points = surface.points().len(),
+            option_type = ?option_type,
+            target_delta = self.target_delta,
+            "Delta selection: starting calendar spread selection"
+        );
+
         // Build delta-parameterized surface
         let delta_surface = DeltaVolSurface::from_iv_surface(surface, self.risk_free_rate);
 
         // Get expirations from surface
         let expirations = surface.expirations();
+        tracing::debug!(
+            symbol = surface.underlying(),
+            expirations = ?expirations,
+            reference_date = %surface.as_of_time().date_naive(),
+            "Delta selection: available expirations"
+        );
 
         // Select expirations based on criteria (use surface as_of_time as reference)
         let (short_exp, long_exp) = super::select_expirations(
@@ -225,7 +239,21 @@ impl StrikeSelector for DeltaStrategy {
             criteria.max_short_dte,
             criteria.min_long_dte,
             criteria.max_long_dte,
-        )?;
+        ).map_err(|e| {
+            tracing::warn!(
+                symbol = surface.underlying(),
+                error = %e,
+                "Delta selection: expiration selection failed"
+            );
+            e
+        })?;
+
+        tracing::debug!(
+            symbol = surface.underlying(),
+            short_exp = %short_exp,
+            long_exp = %long_exp,
+            "Delta selection: selected expirations"
+        );
 
         // Determine target delta (fixed or via scanning)
         let target_delta = match self.scan_mode {

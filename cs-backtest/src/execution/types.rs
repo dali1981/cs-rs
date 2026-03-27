@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 use thiserror::Error;
 use cs_domain::{
     OptionStrategy, RepositoryError, TradingCostConfig, TradingCostCalculator, HedgeConfig,
-    MarginConfig,
+    MarginConfig, AttributionConfig,
 };
 use crate::spread_pricer::PricingError;
 
@@ -42,6 +42,9 @@ pub struct ExecutionConfig {
 
     /// Margin & buying power configuration (IBKR-like)
     pub margin_config: MarginConfig,
+
+    /// P&L attribution configuration (None = attribution disabled)
+    pub attribution_config: Option<AttributionConfig>,
 }
 
 impl ExecutionConfig {
@@ -54,6 +57,7 @@ impl ExecutionConfig {
             trading_costs: TradingCostConfig::default(),
             hedge_config: None,
             margin_config: MarginConfig::default(),
+            attribution_config: None,
         }
     }
 
@@ -66,6 +70,7 @@ impl ExecutionConfig {
             trading_costs: TradingCostConfig::default(),
             hedge_config: None,
             margin_config: MarginConfig::default(),
+            attribution_config: None,
         }
     }
 
@@ -78,6 +83,7 @@ impl ExecutionConfig {
             trading_costs: TradingCostConfig::default(),
             hedge_config: None,
             margin_config: MarginConfig::default(),
+            attribution_config: None,
         }
     }
 
@@ -90,6 +96,7 @@ impl ExecutionConfig {
             trading_costs: TradingCostConfig::default(),
             hedge_config: None,
             margin_config: MarginConfig::default(),
+            attribution_config: None,
         }
     }
 
@@ -102,6 +109,12 @@ impl ExecutionConfig {
     /// Enable margin/buying power computation (IBKR-like)
     pub fn with_margin_config(mut self, margin_config: MarginConfig) -> Self {
         self.margin_config = margin_config;
+        self
+    }
+
+    /// Enable P&L attribution (builder pattern)
+    pub fn with_attribution(mut self, attribution_config: AttributionConfig) -> Self {
+        self.attribution_config = Some(attribution_config);
         self
     }
 

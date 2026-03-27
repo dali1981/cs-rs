@@ -29,6 +29,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
@@ -37,6 +38,7 @@ use cs_domain::strike_selection::{StrikeSelector, ExpirationCriteria};
 use crate::config::BacktestConfig;
 use crate::bpr::{build_bpr_timeline, BprPricingContext, HasBprTimeline};
 use crate::execution::{ExecutionConfig, ExecutableTrade, TradePricer};
+use crate::execution::cost_helpers::{apply_costs_to_result, ToTradingContext};
 use crate::timing_strategy::TimingStrategy;
 use crate::backtest_use_case::{TradeResultMethods, TradeGenerationError};
 use crate::backtest_use_case_helpers::{PreparedData, TradeSimulator};
@@ -47,53 +49,99 @@ use crate::composite_pricer::{
 };
 use crate::rules::RuleEvaluator;
 
+/// Context for trade selection - contains all inputs needed for selection and validation
+#[derive(Clone)]
+pub struct SelectionContext<'a> {
+    pub selector: &'a dyn StrikeSelector,
+    pub data: &'a PreparedData,
+    pub criteria: &'a ExpirationCriteria,
+    pub event: &'a EarningsEvent,
+    pub entry_time: DateTime<Utc>,
+}
+
 /// Core trait for trade execution strategies
 ///
 /// Each strategy encapsulates:
 /// - Timing logic (when to enter/exit)
-/// - Trade execution logic (how to execute the specific trade type)
-/// - Result filtering (IV ratio filters, etc.)
+/// - Trade selection logic (strategy-specific)
+/// - Common execution flow (pricing, simulation, cost application)
 ///
-/// Validation config (ExecutionConfig) is passed to execute_trade, not owned by strategy.
-pub trait TradeStrategy<R: TradeResultMethods + Send>: Send + Sync {
+/// # Associated Types
+/// - `Trade`: The trade type (CalendarSpread, LongStraddle, etc.)
+/// - `Pricer`: The pricer type for this trade
+///
+/// # Default Implementation
+/// The `execute_trade` method has a default implementation that:
+/// 1. Prepares market data
+/// 2. Checks market-level rules
+/// 3. Calls `select_trade` (strategy-specific)
+/// 4. Calls `validate_selection` (optional, for DTE checks etc.)
+/// 5. Prices and simulates the trade
+/// 6. **Applies trading costs**
+/// 7. Attaches BPR timeline and hedge results
+///
+/// Strategies only need to implement the required methods.
+pub trait TradeStrategy<R>: Send + Sync
+where
+    R: TradeResultMethods + TradeResult + ApplyCosts + HasBprTimeline + Send,
+{
+    /// The trade type this strategy works with
+    type Trade: ExecutableTrade<Pricing = CompositePricing, Result = R, Pricer = Self::Pricer>
+        + CompositeTrade
+        + Clone
+        + Send
+        + Sync;
+
+    /// The pricer type for this trade
+    type Pricer: TradePricer<Trade = Self::Trade, Pricing = CompositePricing> + Send + Sync + 'static;
+
+    // ========================================================================
+    // Required methods - each strategy must implement these
+    // ========================================================================
+
     /// Get the timing strategy for this trade type
     fn timing(&self) -> &TimingStrategy;
 
-    /// Execute a single trade
-    fn execute_trade<'a>(
-        &'a self,
-        options_repo: &'a dyn OptionsDataRepository,
-        equity_repo: &'a dyn EquityDataRepository,
-        selector: &'a dyn StrikeSelector,
-        criteria: &'a ExpirationCriteria,
-        exec_config: &'a ExecutionConfig,
-        event: &'a EarningsEvent,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<R>> + Send + 'a>>;
+    /// Get the rule evaluator for entry/trade rules
+    fn rule_evaluator(&self) -> &RuleEvaluator;
+
+    /// Create the pricer for this strategy
+    fn create_pricer(&self) -> Self::Pricer;
+
+    /// Select a trade using strategy-specific logic
+    ///
+    /// Returns `None` if no valid trade can be selected.
+    fn select_trade(&self, ctx: &SelectionContext<'_>) -> Option<Self::Trade>;
+
+    // ========================================================================
+    // Optional methods with defaults
+    // ========================================================================
+
+    /// Validate the selected trade (e.g., DTE range checks for straddles)
+    ///
+    /// Default: no validation (always passes)
+    fn validate_selection(
+        &self,
+        _trade: &Self::Trade,
+        _ctx: &SelectionContext<'_>,
+    ) -> Result<(), TradeGenerationError> {
+        Ok(())
+    }
 
     /// Apply post-execution filters to the result
     ///
     /// Returns `true` if the result passes all filters, `false` if it should be dropped.
-    /// Default implementation passes all results.
-    ///
-    /// `min_iv_ratio` is passed from config to enable IV ratio filtering without
-    /// storing filter config in strategy structs.
     fn apply_filter(&self, _result: &R, _min_iv_ratio: Option<f64>) -> bool {
         true
     }
 
     /// Create a filter rejection error for dropped trades
-    ///
-    /// Called when `apply_filter` returns `false` to create an error record.
     fn create_filter_error(&self, result: &R, event: &EarningsEvent) -> Option<TradeGenerationError> {
         let _ = (result, event);
         None
     }
 
     /// Calculate lookahead days for earnings loading
-    ///
-    /// Different strategies need different lookahead windows based on their timing.
     fn lookahead_days(&self) -> i64 {
         self.timing().lookahead_days()
     }
@@ -111,6 +159,103 @@ pub trait TradeStrategy<R: TradeResultMethods + Send>: Send + Sync {
     /// Get exit datetime for an event
     fn exit_datetime(&self, event: &EarningsEvent) -> DateTime<Utc> {
         self.timing().exit_datetime(event)
+    }
+
+    // ========================================================================
+    // Default execute_trade implementation
+    // ========================================================================
+
+    /// Execute a single trade
+    ///
+    /// This default implementation handles the common execution flow:
+    /// 1. Prepare market data
+    /// 2. Check market-level rules
+    /// 3. Select trade (calls `select_trade`)
+    /// 4. Validate selection (calls `validate_selection`)
+    /// 5. Price and simulate with hedging
+    /// 6. **Apply trading costs**
+    /// 7. Attach BPR timeline and hedge results
+    /// 8. **Compute P&L attribution** (if configured)
+    fn execute_trade<'a>(
+        &'a self,
+        options_repo: Arc<dyn OptionsDataRepository>,
+        equity_repo: Arc<dyn EquityDataRepository>,
+        selector: &'a dyn StrikeSelector,
+        criteria: &'a ExpirationCriteria,
+        exec_config: &'a ExecutionConfig,
+        event: &'a EarningsEvent,
+        entry_time: DateTime<Utc>,
+        exit_time: DateTime<Utc>,
+    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<R>> + Send + 'a>> {
+        let timing = self.timing().clone();
+        let rule_evaluator = self.rule_evaluator().clone();
+        let pricer = self.create_pricer();
+
+        Box::pin(async move {
+            let simulator = TradeSimulator::new(
+                options_repo.as_ref(),
+                equity_repo.as_ref(),
+                &event.symbol,
+                entry_time,
+                exit_time,
+                exec_config,
+            );
+
+            // 1. Prepare market data
+            let data = match simulator.prepare().await {
+                Some(data) => data,
+                None => return TradeExecutionOutcome::Skipped,
+            };
+
+            // 2. Check market-level entry rules
+            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
+
+            // 3. Build selection context
+            let ctx = SelectionContext {
+                selector,
+                data: &data,
+                criteria,
+                event,
+                entry_time,
+            };
+
+            // 4. Select trade (strategy-specific)
+            let trade = match self.select_trade(&ctx) {
+                Some(trade) => trade,
+                None => {
+                    tracing::warn!(
+                        symbol = event.symbol,
+                        entry_time = %entry_time,
+                        "Trade selection failed - no suitable trade found"
+                    );
+                    return TradeExecutionOutcome::Skipped;
+                }
+            };
+
+            // 5. Validate selection (strategy-specific, e.g., DTE checks)
+            if let Err(error) = self.validate_selection(&trade, &ctx) {
+                return TradeExecutionOutcome::Dropped(error);
+            }
+
+            // 6. Execute common flow (pricing, simulation, costs, hedge results, attribution)
+            execute_common(
+                trade,
+                pricer,
+                &data,
+                &simulator,
+                &rule_evaluator,
+                &timing,
+                options_repo.clone(),
+                equity_repo.clone(),
+                exec_config,
+                event,
+                entry_time,
+                exit_time,
+            )
+            .await
+        })
     }
 }
 
@@ -266,6 +411,181 @@ async fn maybe_attach_bpr_timeline<T, Pr, R>(
 }
 
 // ============================================================================
+// Common Execution Helper
+// ============================================================================
+
+/// Common execution flow for all strategies
+///
+/// This function handles the common execution logic after trade selection,
+/// including pricing, simulation, cost application, hedge result handling,
+/// and P&L attribution computation.
+///
+/// # Type Parameters
+/// - `T`: The trade type (CalendarSpread, LongStraddle, etc.)
+/// - `Pr`: The pricer type (must produce CompositePricing)
+/// - `R`: The result type (CalendarSpreadResult, StraddleResult, etc.)
+///
+/// # Returns
+/// `TradeExecutionOutcome<R>` - the trade result with costs and attribution applied
+async fn execute_common<T, Pr, R>(
+    trade: T,
+    pricer: Pr,
+    data: &PreparedData,
+    simulator: &TradeSimulator<'_>,
+    rule_evaluator: &RuleEvaluator,
+    timing: &TimingStrategy,
+    options_repo: Arc<dyn OptionsDataRepository>,
+    equity_repo: Arc<dyn EquityDataRepository>,
+    exec_config: &ExecutionConfig,
+    event: &EarningsEvent,
+    entry_time: DateTime<Utc>,
+    exit_time: DateTime<Utc>,
+) -> TradeExecutionOutcome<R>
+where
+    T: ExecutableTrade<Pricer = Pr, Pricing = CompositePricing, Result = R> + CompositeTrade + Clone + Send + Sync,
+    Pr: TradePricer<Trade = T, Pricing = CompositePricing> + Send + Sync,
+    R: TradeResultMethods + TradeResult + ApplyCosts + HasBprTimeline + Send,
+{
+    // 1. Price entry
+    let entry_pricing = match pricer.price_with_surface(
+        &trade,
+        &data.entry_chain,
+        data.spot.to_f64(),
+        entry_time,
+        Some(&data.surface),
+    ) {
+        Ok(pricing) => pricing,
+        Err(err) => {
+            return TradeExecutionOutcome::Executed(
+                trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
+            );
+        }
+    };
+
+    // 2. Check trade-level rules
+    let entry_price = entry_price_per_contract(&entry_pricing);
+    if let Err(error) = passes_trade_rules(rule_evaluator, event, entry_price) {
+        return TradeExecutionOutcome::Dropped(error);
+    }
+
+    // 3. Simulate WITH HEDGING
+    let bpr_entry_context = BprPricingContext {
+        ts: entry_time,
+        spot: data.spot.value,
+        pricing: entry_pricing.clone(),
+    };
+    let entry_context = EntryPricingContext {
+        pricing: entry_pricing,
+        spot: data.spot.to_f64(),
+        surface_time: Some(data.surface.as_of_time()),
+    };
+    let sim = match simulate_with_hedging_prepriced(
+        &trade,
+        &pricer,
+        options_repo.as_ref(),
+        equity_repo.as_ref(),
+        entry_time,
+        exit_time,
+        exec_config.hedge_config.as_ref(),
+        timing,
+        entry_context,
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(err) => {
+            return TradeExecutionOutcome::Executed(
+                trade.to_failed_result(&simulator.failed_output(), Some(event), err),
+            );
+        }
+    };
+
+    // 4. Build result
+    let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
+    let mut result = trade.to_result(
+        sim.entry_pricing.clone(),
+        sim.exit_pricing.clone(),
+        &crate::execution::SimulationOutput::new(
+            sim.entry_time,
+            sim.exit_time,
+            sim.entry_spot,
+            sim.exit_spot,
+            sim.entry_surface_time,
+            sim.exit_surface_time,
+        ),
+        Some(event),
+    );
+
+    // 5. APPLY TRADING COSTS (the fix!)
+    if exec_config.has_trading_costs() {
+        apply_costs_to_result(
+            &mut result,
+            &sim.entry_pricing,
+            &sim.exit_pricing,
+            &event.symbol,
+            sim.entry_spot,
+            sim.exit_spot,
+            sim.entry_time,
+            sim.exit_time,
+            T::trade_type(),
+            exec_config,
+        );
+    }
+
+    // 6. Attach BPR timeline
+    maybe_attach_bpr_timeline(
+        &mut result,
+        &trade,
+        &pricer,
+        options_repo.as_ref(),
+        equity_repo.as_ref(),
+        entry_time,
+        exit_time,
+        timing,
+        sim.hedge_position.as_ref(),
+        Some(&bpr_contexts),
+        exec_config,
+    )
+    .await;
+
+    // 7. Apply hedge results and compute attribution if present
+    if let Some(pos) = sim.hedge_position {
+        let hedge_pnl = pos.calculate_pnl(sim.exit_spot);
+        let total_pnl = TradeResult::pnl(&result) + hedge_pnl - pos.total_cost;
+
+        // 8. Compute P&L attribution if configured AND hedges occurred
+        let attribution = match exec_config.attribution_config.as_ref() {
+            Some(attr_config) if attr_config.enabled && !pos.hedges.is_empty() => {
+                match crate::attribution::compute_position_attribution(
+                    trade.clone(),
+                    &pos,
+                    entry_time,
+                    exit_time,
+                    total_pnl,
+                    attr_config,
+                    options_repo.clone(),
+                    equity_repo.clone(),
+                    CONTRACT_MULTIPLIER,
+                )
+                .await
+                {
+                    Ok(attr) => Some(attr),
+                    Err(err) => {
+                        tracing::debug!(error = %err, "Attribution computation failed");
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+
+        result.apply_hedge_results(pos, hedge_pnl, total_pnl, attribution);
+    }
+
+    TradeExecutionOutcome::Executed(result)
+}
+
+// ============================================================================
 // Concrete Strategy Implementations
 // ============================================================================
 
@@ -295,142 +615,27 @@ impl CalendarSpreadStrategy {
 }
 
 impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
+    type Trade = CalendarSpread;
+    type Pricer = CalendarSpreadPricer;
+
     fn timing(&self) -> &TimingStrategy {
         &self.timing
     }
 
-    fn execute_trade<'a>(
-        &'a self,
-        options_repo: &'a dyn OptionsDataRepository,
-        equity_repo: &'a dyn EquityDataRepository,
-        selector: &'a dyn StrikeSelector,
-        criteria: &'a ExpirationCriteria,
-        exec_config: &'a ExecutionConfig,
-        event: &'a EarningsEvent,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<CalendarSpreadResult>> + Send + 'a>> {
-        let option_type = self.option_type;
-        let timing = self.timing.clone();
-        let rule_evaluator = self.rule_evaluator.clone();
-        Box::pin(async move {
-            let simulator = TradeSimulator::new(
-                options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
-            );
-
-            // 1. Prepare market data
-            let data = match simulator.prepare().await {
-                Some(data) => data,
-                None => return TradeExecutionOutcome::Skipped,
-            };
-
-            // 2. Check market-level entry rules
-            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            // 2. Select trade
-            let trade = match selector
-                .select_calendar_spread(&data.spot, &data.surface, option_type, criteria)
-                .ok()
-            {
-                Some(trade) => trade,
-                None => return TradeExecutionOutcome::Skipped,
-            };
-
-            let pricer = CalendarSpreadPricer::new();
-            let entry_pricing = match pricer.price_with_surface(
-                &trade,
-                &data.entry_chain,
-                data.spot.to_f64(),
-                entry_time,
-                Some(&data.surface),
-            ) {
-                Ok(pricing) => pricing,
-                Err(err) => {
-                    return TradeExecutionOutcome::Executed(
-                        trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
-                    );
-                }
-            };
-
-            let entry_price = entry_price_per_contract(&entry_pricing);
-            if let Err(error) = passes_trade_rules(&rule_evaluator, event, entry_price) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            // 3. Simulate WITH HEDGING
-            let bpr_entry_context = BprPricingContext {
-                ts: entry_time,
-                spot: data.spot.value,
-                pricing: entry_pricing.clone(),
-            };
-            let entry_context = EntryPricingContext {
-                pricing: entry_pricing,
-                spot: data.spot.to_f64(),
-                surface_time: Some(data.surface.as_of_time()),
-            };
-            let sim = match simulate_with_hedging_prepriced(
-                &trade,
-                &pricer,
-                options_repo,
-                equity_repo,
-                entry_time,
-                exit_time,
-                exec_config.hedge_config.as_ref(),
-                &timing,
-                entry_context,
-            ).await {
-                Ok(s) => s,
-                Err(err) => {
-                    return TradeExecutionOutcome::Executed(
-                        trade.to_failed_result(&simulator.failed_output(), Some(event), err),
-                    );
-                }
-            };
-
-            // 4. Build result with hedge data
-            let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
-            let mut result = trade.to_result(
-                sim.entry_pricing,
-                sim.exit_pricing,
-                &crate::execution::SimulationOutput::new(
-                    sim.entry_time,
-                    sim.exit_time,
-                    sim.entry_spot,
-                    sim.exit_spot,
-                    sim.entry_surface_time,
-                    sim.exit_surface_time,
-                ),
-                Some(event),
-            );
-
-            maybe_attach_bpr_timeline(
-                &mut result,
-                &trade,
-                &pricer,
-                options_repo,
-                equity_repo,
-                entry_time,
-                exit_time,
-                &timing,
-                sim.hedge_position.as_ref(),
-                Some(&bpr_contexts),
-                exec_config,
-            )
-            .await;
-
-            // 5. Apply hedge results if present
-            if let Some(pos) = sim.hedge_position {
-                let hedge_pnl = pos.calculate_pnl(sim.exit_spot);
-                let total_pnl = result.pnl + hedge_pnl - pos.total_cost;
-                result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
-            }
-
-            TradeExecutionOutcome::Executed(result)
-        })
+    fn rule_evaluator(&self) -> &RuleEvaluator {
+        &self.rule_evaluator
     }
 
+    fn create_pricer(&self) -> Self::Pricer {
+        CalendarSpreadPricer::new()
+    }
+
+    fn select_trade(&self, ctx: &SelectionContext<'_>) -> Option<Self::Trade> {
+        ctx.selector
+            .select_calendar_spread(&ctx.data.spot, &ctx.data.surface, self.option_type, ctx.criteria)
+            .ok()
+    }
+    // Uses default execute_trade implementation
 }
 
 /// Iron Butterfly Strategy
@@ -460,147 +665,33 @@ impl IronButterflyStrategy {
 }
 
 impl TradeStrategy<IronButterflyResult> for IronButterflyStrategy {
+    type Trade = IronButterfly;
+    type Pricer = IronButterflyCompositePricer;
+
     fn timing(&self) -> &TimingStrategy {
         &self.timing
     }
 
-    fn execute_trade<'a>(
-        &'a self,
-        options_repo: &'a dyn OptionsDataRepository,
-        equity_repo: &'a dyn EquityDataRepository,
-        selector: &'a dyn StrikeSelector,
-        criteria: &'a ExpirationCriteria,
-        exec_config: &'a ExecutionConfig,
-        event: &'a EarningsEvent,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<IronButterflyResult>> + Send + 'a>> {
-        let wing_width = self.wing_width;
-        let min_short_dte = criteria.min_short_dte;
-        let max_short_dte = criteria.max_short_dte;
-        let timing = self.timing.clone();
-        let rule_evaluator = self.rule_evaluator.clone();
-        Box::pin(async move {
-            let simulator = TradeSimulator::new(
-                options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
-            );
-
-            // 1. Prepare market data
-            let data = match simulator.prepare().await {
-                Some(data) => data,
-                None => return TradeExecutionOutcome::Skipped,
-            };
-
-            // 2. Check market-level entry rules
-            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            // 2. Select trade
-            let trade = selector.select_iron_butterfly(
-                &data.spot,
-                &data.surface,
-                wing_width,
-                min_short_dte,
-                max_short_dte,
-            ).ok();
-            let trade = match trade {
-                Some(trade) => trade,
-                None => return TradeExecutionOutcome::Skipped,
-            };
-
-            let pricer = IronButterflyCompositePricer::new();
-            let entry_pricing = match pricer.price_with_surface(
-                &trade,
-                &data.entry_chain,
-                data.spot.to_f64(),
-                entry_time,
-                Some(&data.surface),
-            ) {
-                Ok(pricing) => pricing,
-                Err(err) => {
-                    return TradeExecutionOutcome::Executed(
-                        trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
-                    );
-                }
-            };
-
-            let entry_price = entry_price_per_contract(&entry_pricing);
-            if let Err(error) = passes_trade_rules(&rule_evaluator, event, entry_price) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            // 3. Simulate WITH HEDGING
-            let bpr_entry_context = BprPricingContext {
-                ts: entry_time,
-                spot: data.spot.value,
-                pricing: entry_pricing.clone(),
-            };
-            let entry_context = EntryPricingContext {
-                pricing: entry_pricing,
-                spot: data.spot.to_f64(),
-                surface_time: Some(data.surface.as_of_time()),
-            };
-            let sim = match simulate_with_hedging_prepriced(
-                &trade,
-                &pricer,
-                options_repo,
-                equity_repo,
-                entry_time,
-                exit_time,
-                exec_config.hedge_config.as_ref(),
-                &timing,
-                entry_context,
-            ).await {
-                Ok(s) => s,
-                Err(err) => {
-                    return TradeExecutionOutcome::Executed(
-                        trade.to_failed_result(&simulator.failed_output(), Some(event), err),
-                    );
-                }
-            };
-
-            // 4. Build result with hedge data
-            let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
-            let mut result = trade.to_result(
-                sim.entry_pricing,
-                sim.exit_pricing,
-                &crate::execution::SimulationOutput::new(
-                    sim.entry_time,
-                    sim.exit_time,
-                    sim.entry_spot,
-                    sim.exit_spot,
-                    sim.entry_surface_time,
-                    sim.exit_surface_time,
-                ),
-                Some(event),
-            );
-
-            maybe_attach_bpr_timeline(
-                &mut result,
-                &trade,
-                &pricer,
-                options_repo,
-                equity_repo,
-                entry_time,
-                exit_time,
-                &timing,
-                sim.hedge_position.as_ref(),
-                Some(&bpr_contexts),
-                exec_config,
-            )
-            .await;
-
-            // 5. Apply hedge results if present
-            if let Some(pos) = sim.hedge_position {
-                let hedge_pnl = pos.calculate_pnl(sim.exit_spot);
-                let total_pnl = result.pnl + hedge_pnl - pos.total_cost;
-                result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
-            }
-
-            TradeExecutionOutcome::Executed(result)
-        })
+    fn rule_evaluator(&self) -> &RuleEvaluator {
+        &self.rule_evaluator
     }
+
+    fn create_pricer(&self) -> Self::Pricer {
+        IronButterflyCompositePricer::new()
+    }
+
+    fn select_trade(&self, ctx: &SelectionContext<'_>) -> Option<Self::Trade> {
+        ctx.selector
+            .select_iron_butterfly(
+                &ctx.data.spot,
+                &ctx.data.surface,
+                self.wing_width,
+                ctx.criteria.min_short_dte,
+                ctx.criteria.max_short_dte,
+            )
+            .ok()
+    }
+    // Uses default execute_trade implementation
 }
 
 /// Long Iron Butterfly Strategy (buy ATM straddle, sell wings - profits from volatility)
@@ -630,147 +721,33 @@ impl LongIronButterflyStrategy {
 }
 
 impl TradeStrategy<IronButterflyResult> for LongIronButterflyStrategy {
+    type Trade = LongIronButterfly;
+    type Pricer = LongIronButterflyCompositePricer;
+
     fn timing(&self) -> &TimingStrategy {
         &self.timing
     }
 
-    fn execute_trade<'a>(
-        &'a self,
-        options_repo: &'a dyn OptionsDataRepository,
-        equity_repo: &'a dyn EquityDataRepository,
-        selector: &'a dyn StrikeSelector,
-        criteria: &'a ExpirationCriteria,
-        exec_config: &'a ExecutionConfig,
-        event: &'a EarningsEvent,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<IronButterflyResult>> + Send + 'a>> {
-        let wing_width = self.wing_width;
-        let min_short_dte = criteria.min_short_dte;
-        let max_short_dte = criteria.max_short_dte;
-        let timing = self.timing.clone();
-        let rule_evaluator = self.rule_evaluator.clone();
-        Box::pin(async move {
-            let simulator = TradeSimulator::new(
-                options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
-            );
-
-            // 1. Prepare market data
-            let data = match simulator.prepare().await {
-                Some(data) => data,
-                None => return TradeExecutionOutcome::Skipped,
-            };
-
-            // 2. Check market-level entry rules
-            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            // 2. Select trade (LONG iron butterfly)
-            let trade = selector.select_long_iron_butterfly(
-                &data.spot,
-                &data.surface,
-                wing_width,
-                min_short_dte,
-                max_short_dte,
-            ).ok();
-            let trade = match trade {
-                Some(trade) => trade,
-                None => return TradeExecutionOutcome::Skipped,
-            };
-
-            let pricer = LongIronButterflyCompositePricer::new();
-            let entry_pricing = match pricer.price_with_surface(
-                &trade,
-                &data.entry_chain,
-                data.spot.to_f64(),
-                entry_time,
-                Some(&data.surface),
-            ) {
-                Ok(pricing) => pricing,
-                Err(err) => {
-                    return TradeExecutionOutcome::Executed(
-                        trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
-                    );
-                }
-            };
-
-            let entry_price = entry_price_per_contract(&entry_pricing);
-            if let Err(error) = passes_trade_rules(&rule_evaluator, event, entry_price) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            // 3. Simulate WITH HEDGING
-            let bpr_entry_context = BprPricingContext {
-                ts: entry_time,
-                spot: data.spot.value,
-                pricing: entry_pricing.clone(),
-            };
-            let entry_context = EntryPricingContext {
-                pricing: entry_pricing,
-                spot: data.spot.to_f64(),
-                surface_time: Some(data.surface.as_of_time()),
-            };
-            let sim = match simulate_with_hedging_prepriced(
-                &trade,
-                &pricer,
-                options_repo,
-                equity_repo,
-                entry_time,
-                exit_time,
-                exec_config.hedge_config.as_ref(),
-                &timing,
-                entry_context,
-            ).await {
-                Ok(s) => s,
-                Err(err) => {
-                    return TradeExecutionOutcome::Executed(
-                        trade.to_failed_result(&simulator.failed_output(), Some(event), err),
-                    );
-                }
-            };
-
-            // 4. Build result with hedge data
-            let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
-            let mut result = trade.to_result(
-                sim.entry_pricing,
-                sim.exit_pricing,
-                &crate::execution::SimulationOutput::new(
-                    sim.entry_time,
-                    sim.exit_time,
-                    sim.entry_spot,
-                    sim.exit_spot,
-                    sim.entry_surface_time,
-                    sim.exit_surface_time,
-                ),
-                Some(event),
-            );
-
-            maybe_attach_bpr_timeline(
-                &mut result,
-                &trade,
-                &pricer,
-                options_repo,
-                equity_repo,
-                entry_time,
-                exit_time,
-                &timing,
-                sim.hedge_position.as_ref(),
-                Some(&bpr_contexts),
-                exec_config,
-            )
-            .await;
-
-            // 5. Apply hedge results if present
-            if let Some(pos) = sim.hedge_position {
-                let hedge_pnl = pos.calculate_pnl(sim.exit_spot);
-                let total_pnl = result.pnl + hedge_pnl - pos.total_cost;
-                result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
-            }
-
-            TradeExecutionOutcome::Executed(result)
-        })
+    fn rule_evaluator(&self) -> &RuleEvaluator {
+        &self.rule_evaluator
     }
+
+    fn create_pricer(&self) -> Self::Pricer {
+        LongIronButterflyCompositePricer::new()
+    }
+
+    fn select_trade(&self, ctx: &SelectionContext<'_>) -> Option<Self::Trade> {
+        ctx.selector
+            .select_long_iron_butterfly(
+                &ctx.data.spot,
+                &ctx.data.surface,
+                self.wing_width,
+                ctx.criteria.min_short_dte,
+                ctx.criteria.max_short_dte,
+            )
+            .ok()
+    }
+    // Uses default execute_trade implementation
 }
 
 /// Long Straddle Strategy (pre-earnings)
@@ -795,159 +772,44 @@ impl LongStraddleStrategy {
 }
 
 impl TradeStrategy<StraddleResult> for LongStraddleStrategy {
+    type Trade = LongStraddle;
+    type Pricer = CompositePricer;
+
     fn timing(&self) -> &TimingStrategy {
         &self.timing
     }
 
-    fn execute_trade<'a>(
-        &'a self,
-        options_repo: &'a dyn OptionsDataRepository,
-        equity_repo: &'a dyn EquityDataRepository,
-        selector: &'a dyn StrikeSelector,
-        criteria: &'a ExpirationCriteria,
-        exec_config: &'a ExecutionConfig,
-        event: &'a EarningsEvent,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<StraddleResult>> + Send + 'a>> {
-        let min_short_dte = criteria.min_short_dte;
-        let max_short_dte = criteria.max_short_dte;
-        let timing = self.timing.clone();
-        let rule_evaluator = self.rule_evaluator.clone();
-        Box::pin(async move {
-            tracing::debug!(
-                symbol = %event.symbol,
-                "LongStraddleStrategy::execute_trade called"
-            );
-
-            let simulator = TradeSimulator::new(
-                options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
-            );
-
-            // 1. Prepare market data
-            let data = match simulator.prepare().await {
-                Some(data) => data,
-                None => return TradeExecutionOutcome::Skipped,
-            };
-
-            // 2. Check market-level entry rules (IV slope, etc.)
-            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            // 3. Select trade (LONG straddle)
-            let entry_date = entry_time.date_naive();
-            let min_expiration = (entry_date + chrono::Duration::days(min_short_dte as i64))
-                .max(entry_date);
-            let trade = match selector
-                .select_long_straddle(&data.spot, &data.surface, min_expiration)
-                .ok()
-            {
-                Some(trade) => trade,
-                None => return TradeExecutionOutcome::Skipped,
-            };
-
-            if let Err(error) = ensure_straddle_max_dte(
-                event,
-                entry_date,
-                trade.expiration(),
-                max_short_dte,
-            ) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            let pricer = CompositePricer::default();
-            let entry_pricing = match pricer.price_with_surface(
-                &trade,
-                &data.entry_chain,
-                data.spot.to_f64(),
-                entry_time,
-                Some(&data.surface),
-            ) {
-                Ok(pricing) => pricing,
-                Err(err) => {
-                    return TradeExecutionOutcome::Executed(
-                        trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
-                    );
-                }
-            };
-
-            let entry_price = entry_price_per_contract(&entry_pricing);
-            if let Err(error) = passes_trade_rules(&rule_evaluator, event, entry_price) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            // 4. Simulate WITH HEDGING (integrated into execution loop)
-            let bpr_entry_context = BprPricingContext {
-                ts: entry_time,
-                spot: data.spot.value,
-                pricing: entry_pricing.clone(),
-            };
-            let entry_context = EntryPricingContext {
-                pricing: entry_pricing,
-                spot: data.spot.to_f64(),
-                surface_time: Some(data.surface.as_of_time()),
-            };
-            let sim = match simulate_with_hedging_prepriced(
-                &trade,
-                &pricer,
-                options_repo,
-                equity_repo,
-                entry_time,
-                exit_time,
-                exec_config.hedge_config.as_ref(),
-                &timing,
-                entry_context,
-            ).await {
-                Ok(s) => s,
-                Err(err) => {
-                    return TradeExecutionOutcome::Executed(
-                        trade.to_failed_result(&simulator.failed_output(), Some(event), err),
-                    );
-                }
-            };
-
-            // 4. Build result with hedge data
-            let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
-            let mut result = trade.to_result(
-                sim.entry_pricing,
-                sim.exit_pricing,
-                &crate::execution::SimulationOutput::new(
-                    sim.entry_time,
-                    sim.exit_time,
-                    sim.entry_spot,
-                    sim.exit_spot,
-                    sim.entry_surface_time,
-                    sim.exit_surface_time,
-                ),
-                Some(event),
-            );
-
-            maybe_attach_bpr_timeline(
-                &mut result,
-                &trade,
-                &pricer,
-                options_repo,
-                equity_repo,
-                entry_time,
-                exit_time,
-                &timing,
-                sim.hedge_position.as_ref(),
-                Some(&bpr_contexts),
-                exec_config,
-            )
-            .await;
-
-            // 5. Apply hedge results if present
-            if let Some(pos) = sim.hedge_position {
-                let hedge_pnl = pos.calculate_pnl(sim.exit_spot);
-                let total_pnl = result.pnl + hedge_pnl - pos.total_cost;
-                result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
-            }
-
-            TradeExecutionOutcome::Executed(result)
-        })
+    fn rule_evaluator(&self) -> &RuleEvaluator {
+        &self.rule_evaluator
     }
+
+    fn create_pricer(&self) -> Self::Pricer {
+        CompositePricer::default()
+    }
+
+    fn select_trade(&self, ctx: &SelectionContext<'_>) -> Option<Self::Trade> {
+        let entry_date = ctx.entry_time.date_naive();
+        let min_expiration = (entry_date + chrono::Duration::days(ctx.criteria.min_short_dte as i64))
+            .max(entry_date);
+        ctx.selector
+            .select_long_straddle(&ctx.data.spot, &ctx.data.surface, min_expiration)
+            .ok()
+    }
+
+    fn validate_selection(
+        &self,
+        trade: &Self::Trade,
+        ctx: &SelectionContext<'_>,
+    ) -> Result<(), TradeGenerationError> {
+        let entry_date = ctx.entry_time.date_naive();
+        ensure_straddle_max_dte(
+            ctx.event,
+            entry_date,
+            trade.expiration(),
+            ctx.criteria.max_short_dte,
+        )
+    }
+    // Uses default execute_trade implementation
 }
 
 /// Short Straddle Strategy (pre-earnings)
@@ -972,159 +834,44 @@ impl ShortStraddleStrategy {
 }
 
 impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
+    type Trade = ShortStraddle;
+    type Pricer = ShortStraddlePricer;
+
     fn timing(&self) -> &TimingStrategy {
         &self.timing
     }
 
-    fn execute_trade<'a>(
-        &'a self,
-        options_repo: &'a dyn OptionsDataRepository,
-        equity_repo: &'a dyn EquityDataRepository,
-        selector: &'a dyn StrikeSelector,
-        criteria: &'a ExpirationCriteria,
-        exec_config: &'a ExecutionConfig,
-        event: &'a EarningsEvent,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<StraddleResult>> + Send + 'a>> {
-        let min_short_dte = criteria.min_short_dte;
-        let max_short_dte = criteria.max_short_dte;
-        let timing = self.timing.clone();
-        let rule_evaluator = self.rule_evaluator.clone();
-        Box::pin(async move {
-            tracing::debug!(
-                symbol = %event.symbol,
-                "ShortStraddleStrategy::execute_trade called"
-            );
-
-            let simulator = TradeSimulator::new(
-                options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
-            );
-
-            // 1. Prepare market data
-            let data = match simulator.prepare().await {
-                Some(data) => data,
-                None => return TradeExecutionOutcome::Skipped,
-            };
-
-            // 2. Check market-level entry rules (IV slope, etc.)
-            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            // 3. Select trade (SHORT straddle)
-            let entry_date = entry_time.date_naive();
-            let min_expiration = (entry_date + chrono::Duration::days(min_short_dte as i64))
-                .max(entry_date);
-            let trade = match selector
-                .select_short_straddle(&data.spot, &data.surface, min_expiration)
-                .ok()
-            {
-                Some(trade) => trade,
-                None => return TradeExecutionOutcome::Skipped,
-            };
-
-            if let Err(error) = ensure_straddle_max_dte(
-                event,
-                entry_date,
-                trade.expiration(),
-                max_short_dte,
-            ) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            let pricer = ShortStraddlePricer::default();
-            let entry_pricing = match pricer.price_with_surface(
-                &trade,
-                &data.entry_chain,
-                data.spot.to_f64(),
-                entry_time,
-                Some(&data.surface),
-            ) {
-                Ok(pricing) => pricing,
-                Err(err) => {
-                    return TradeExecutionOutcome::Executed(
-                        trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
-                    );
-                }
-            };
-
-            let entry_price = entry_price_per_contract(&entry_pricing);
-            if let Err(error) = passes_trade_rules(&rule_evaluator, event, entry_price) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            // 3. Simulate WITH HEDGING (integrated into execution loop)
-            let bpr_entry_context = BprPricingContext {
-                ts: entry_time,
-                spot: data.spot.value,
-                pricing: entry_pricing.clone(),
-            };
-            let entry_context = EntryPricingContext {
-                pricing: entry_pricing,
-                spot: data.spot.to_f64(),
-                surface_time: Some(data.surface.as_of_time()),
-            };
-            let sim = match simulate_with_hedging_prepriced(
-                &trade,
-                &pricer,
-                options_repo,
-                equity_repo,
-                entry_time,
-                exit_time,
-                exec_config.hedge_config.as_ref(),
-                &timing,
-                entry_context,
-            ).await {
-                Ok(s) => s,
-                Err(err) => {
-                    return TradeExecutionOutcome::Executed(
-                        trade.to_failed_result(&simulator.failed_output(), Some(event), err),
-                    );
-                }
-            };
-
-            // 4. Build result with hedge data
-            let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
-            let mut result = trade.to_result(
-                sim.entry_pricing,
-                sim.exit_pricing,
-                &crate::execution::SimulationOutput::new(
-                    sim.entry_time,
-                    sim.exit_time,
-                    sim.entry_spot,
-                    sim.exit_spot,
-                    sim.entry_surface_time,
-                    sim.exit_surface_time,
-                ),
-                Some(event),
-            );
-
-            maybe_attach_bpr_timeline(
-                &mut result,
-                &trade,
-                &pricer,
-                options_repo,
-                equity_repo,
-                entry_time,
-                exit_time,
-                &timing,
-                sim.hedge_position.as_ref(),
-                Some(&bpr_contexts),
-                exec_config,
-            )
-            .await;
-
-            // 5. Apply hedge results if present
-            if let Some(pos) = sim.hedge_position {
-                let hedge_pnl = pos.calculate_pnl(sim.exit_spot);
-                let total_pnl = result.pnl + hedge_pnl - pos.total_cost;
-                result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
-            }
-
-            TradeExecutionOutcome::Executed(result)
-        })
+    fn rule_evaluator(&self) -> &RuleEvaluator {
+        &self.rule_evaluator
     }
+
+    fn create_pricer(&self) -> Self::Pricer {
+        ShortStraddlePricer::default()
+    }
+
+    fn select_trade(&self, ctx: &SelectionContext<'_>) -> Option<Self::Trade> {
+        let entry_date = ctx.entry_time.date_naive();
+        let min_expiration = (entry_date + chrono::Duration::days(ctx.criteria.min_short_dte as i64))
+            .max(entry_date);
+        ctx.selector
+            .select_short_straddle(&ctx.data.spot, &ctx.data.surface, min_expiration)
+            .ok()
+    }
+
+    fn validate_selection(
+        &self,
+        trade: &Self::Trade,
+        ctx: &SelectionContext<'_>,
+    ) -> Result<(), TradeGenerationError> {
+        let entry_date = ctx.entry_time.date_naive();
+        ensure_straddle_max_dte(
+            ctx.event,
+            entry_date,
+            trade.expiration(),
+            ctx.criteria.max_short_dte,
+        )
+    }
+    // Uses default execute_trade implementation
 }
 
 /// Backward compatibility alias
@@ -1150,154 +897,44 @@ impl PostEarningsStraddleStrategy {
 }
 
 impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
+    type Trade = LongStraddle;
+    type Pricer = CompositePricer;
+
     fn timing(&self) -> &TimingStrategy {
         &self.timing
     }
 
-    fn execute_trade<'a>(
-        &'a self,
-        options_repo: &'a dyn OptionsDataRepository,
-        equity_repo: &'a dyn EquityDataRepository,
-        selector: &'a dyn StrikeSelector,
-        criteria: &'a ExpirationCriteria,
-        exec_config: &'a ExecutionConfig,
-        event: &'a EarningsEvent,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<StraddleResult>> + Send + 'a>> {
-        let min_short_dte = criteria.min_short_dte;
-        let max_short_dte = criteria.max_short_dte;
-        let timing = self.timing.clone();
-        let rule_evaluator = self.rule_evaluator.clone();
-        Box::pin(async move {
-            let simulator = TradeSimulator::new(
-                options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
-            );
-
-            // 1. Prepare market data
-            let data = match simulator.prepare().await {
-                Some(data) => data,
-                None => return TradeExecutionOutcome::Skipped,
-            };
-
-            // 2. Check market-level entry rules
-            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            // 2. Select trade (post-earnings uses LONG straddle)
-            let entry_date = entry_time.date_naive();
-            let min_expiration = (entry_date + chrono::Duration::days(min_short_dte as i64))
-                .max(entry_date);
-            let trade = match selector
-                .select_long_straddle(&data.spot, &data.surface, min_expiration)
-                .ok()
-            {
-                Some(trade) => trade,
-                None => return TradeExecutionOutcome::Skipped,
-            };
-
-            if let Err(error) = ensure_straddle_max_dte(
-                event,
-                entry_date,
-                trade.expiration(),
-                max_short_dte,
-            ) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            let pricer = CompositePricer::default();
-            let entry_pricing = match pricer.price_with_surface(
-                &trade,
-                &data.entry_chain,
-                data.spot.to_f64(),
-                entry_time,
-                Some(&data.surface),
-            ) {
-                Ok(pricing) => pricing,
-                Err(err) => {
-                    return TradeExecutionOutcome::Executed(
-                        trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
-                    );
-                }
-            };
-
-            let entry_price = entry_price_per_contract(&entry_pricing);
-            if let Err(error) = passes_trade_rules(&rule_evaluator, event, entry_price) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            // 3. Simulate WITH HEDGING
-            let bpr_entry_context = BprPricingContext {
-                ts: entry_time,
-                spot: data.spot.value,
-                pricing: entry_pricing.clone(),
-            };
-            let entry_context = EntryPricingContext {
-                pricing: entry_pricing,
-                spot: data.spot.to_f64(),
-                surface_time: Some(data.surface.as_of_time()),
-            };
-            let sim = match simulate_with_hedging_prepriced(
-                &trade,
-                &pricer,
-                options_repo,
-                equity_repo,
-                entry_time,
-                exit_time,
-                exec_config.hedge_config.as_ref(),
-                &timing,
-                entry_context,
-            ).await {
-                Ok(s) => s,
-                Err(err) => {
-                    return TradeExecutionOutcome::Executed(
-                        trade.to_failed_result(&simulator.failed_output(), Some(event), err),
-                    );
-                }
-            };
-
-            // 4. Build result with hedge data
-            let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
-            let mut result = trade.to_result(
-                sim.entry_pricing,
-                sim.exit_pricing,
-                &crate::execution::SimulationOutput::new(
-                    sim.entry_time,
-                    sim.exit_time,
-                    sim.entry_spot,
-                    sim.exit_spot,
-                    sim.entry_surface_time,
-                    sim.exit_surface_time,
-                ),
-                Some(event),
-            );
-
-            maybe_attach_bpr_timeline(
-                &mut result,
-                &trade,
-                &pricer,
-                options_repo,
-                equity_repo,
-                entry_time,
-                exit_time,
-                &timing,
-                sim.hedge_position.as_ref(),
-                Some(&bpr_contexts),
-                exec_config,
-            )
-            .await;
-
-            // 5. Apply hedge results if present
-            if let Some(pos) = sim.hedge_position {
-                let hedge_pnl = pos.calculate_pnl(sim.exit_spot);
-                let total_pnl = result.pnl + hedge_pnl - pos.total_cost;
-                result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
-            }
-
-            TradeExecutionOutcome::Executed(result)
-        })
+    fn rule_evaluator(&self) -> &RuleEvaluator {
+        &self.rule_evaluator
     }
+
+    fn create_pricer(&self) -> Self::Pricer {
+        CompositePricer::default()
+    }
+
+    fn select_trade(&self, ctx: &SelectionContext<'_>) -> Option<Self::Trade> {
+        let entry_date = ctx.entry_time.date_naive();
+        let min_expiration = (entry_date + chrono::Duration::days(ctx.criteria.min_short_dte as i64))
+            .max(entry_date);
+        ctx.selector
+            .select_long_straddle(&ctx.data.spot, &ctx.data.surface, min_expiration)
+            .ok()
+    }
+
+    fn validate_selection(
+        &self,
+        trade: &Self::Trade,
+        ctx: &SelectionContext<'_>,
+    ) -> Result<(), TradeGenerationError> {
+        let entry_date = ctx.entry_time.date_naive();
+        ensure_straddle_max_dte(
+            ctx.event,
+            entry_date,
+            trade.expiration(),
+            ctx.criteria.max_short_dte,
+        )
+    }
+    // Uses default execute_trade implementation
 }
 
 /// Calendar Straddle Strategy
@@ -1316,141 +953,27 @@ impl CalendarStraddleStrategy {
 }
 
 impl TradeStrategy<CalendarStraddleResult> for CalendarStraddleStrategy {
+    type Trade = CalendarStraddle;
+    type Pricer = CalendarStraddleCompositePricer;
+
     fn timing(&self) -> &TimingStrategy {
         &self.timing
     }
 
-    fn execute_trade<'a>(
-        &'a self,
-        options_repo: &'a dyn OptionsDataRepository,
-        equity_repo: &'a dyn EquityDataRepository,
-        selector: &'a dyn StrikeSelector,
-        criteria: &'a ExpirationCriteria,
-        exec_config: &'a ExecutionConfig,
-        event: &'a EarningsEvent,
-        entry_time: DateTime<Utc>,
-        exit_time: DateTime<Utc>,
-    ) -> Pin<Box<dyn Future<Output = TradeExecutionOutcome<CalendarStraddleResult>> + Send + 'a>> {
-        let timing = self.timing.clone();
-        let rule_evaluator = self.rule_evaluator.clone();
-        Box::pin(async move {
-            let simulator = TradeSimulator::new(
-                options_repo, equity_repo, &event.symbol, entry_time, exit_time, exec_config,
-            );
-
-            // 1. Prepare market data
-            let data = match simulator.prepare().await {
-                Some(data) => data,
-                None => return TradeExecutionOutcome::Skipped,
-            };
-
-            // 2. Check market-level entry rules
-            if let Err(error) = passes_market_rules(&rule_evaluator, event, &data) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            // 2. Select trade
-            let trade = match selector
-                .select_calendar_straddle(&data.spot, &data.surface, criteria)
-                .ok()
-            {
-                Some(trade) => trade,
-                None => return TradeExecutionOutcome::Skipped,
-            };
-
-            let pricer = CalendarStraddleCompositePricer::new();
-            let entry_pricing = match pricer.price_with_surface(
-                &trade,
-                &data.entry_chain,
-                data.spot.to_f64(),
-                entry_time,
-                Some(&data.surface),
-            ) {
-                Ok(pricing) => pricing,
-                Err(err) => {
-                    return TradeExecutionOutcome::Executed(
-                        trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
-                    );
-                }
-            };
-
-            let entry_price = entry_price_per_contract(&entry_pricing);
-            if let Err(error) = passes_trade_rules(&rule_evaluator, event, entry_price) {
-                return TradeExecutionOutcome::Dropped(error);
-            }
-
-            // 3. Simulate WITH HEDGING
-            let bpr_entry_context = BprPricingContext {
-                ts: entry_time,
-                spot: data.spot.value,
-                pricing: entry_pricing.clone(),
-            };
-            let entry_context = EntryPricingContext {
-                pricing: entry_pricing,
-                spot: data.spot.to_f64(),
-                surface_time: Some(data.surface.as_of_time()),
-            };
-            let sim = match simulate_with_hedging_prepriced(
-                &trade,
-                &pricer,
-                options_repo,
-                equity_repo,
-                entry_time,
-                exit_time,
-                exec_config.hedge_config.as_ref(),
-                &timing,
-                entry_context,
-            ).await {
-                Ok(s) => s,
-                Err(err) => {
-                    return TradeExecutionOutcome::Executed(
-                        trade.to_failed_result(&simulator.failed_output(), Some(event), err),
-                    );
-                }
-            };
-
-            // 4. Build result with hedge data
-            let bpr_contexts = build_bpr_contexts(bpr_entry_context, &sim);
-            let mut result = trade.to_result(
-                sim.entry_pricing,
-                sim.exit_pricing,
-                &crate::execution::SimulationOutput::new(
-                    sim.entry_time,
-                    sim.exit_time,
-                    sim.entry_spot,
-                    sim.exit_spot,
-                    sim.entry_surface_time,
-                    sim.exit_surface_time,
-                ),
-                Some(event),
-            );
-
-            maybe_attach_bpr_timeline(
-                &mut result,
-                &trade,
-                &pricer,
-                options_repo,
-                equity_repo,
-                entry_time,
-                exit_time,
-                &timing,
-                sim.hedge_position.as_ref(),
-                Some(&bpr_contexts),
-                exec_config,
-            )
-            .await;
-
-            // 5. Apply hedge results if present
-            if let Some(pos) = sim.hedge_position {
-                let hedge_pnl = pos.calculate_pnl(sim.exit_spot);
-                let total_pnl = result.pnl + hedge_pnl - pos.total_cost;
-                result.apply_hedge_results(pos, hedge_pnl, total_pnl, None);
-            }
-
-            TradeExecutionOutcome::Executed(result)
-        })
+    fn rule_evaluator(&self) -> &RuleEvaluator {
+        &self.rule_evaluator
     }
 
+    fn create_pricer(&self) -> Self::Pricer {
+        CalendarStraddleCompositePricer::new()
+    }
+
+    fn select_trade(&self, ctx: &SelectionContext<'_>) -> Option<Self::Trade> {
+        ctx.selector
+            .select_calendar_straddle(&ctx.data.spot, &ctx.data.surface, ctx.criteria)
+            .ok()
+    }
+    // Uses default execute_trade implementation
 }
 
 // ============================================================================

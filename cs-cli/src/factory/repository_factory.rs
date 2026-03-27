@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use cs_backtest::EarningsSourceConfig;
 use cs_domain::{
     EarningsRepository, OptionsDataRepository, EquityDataRepository,
     infrastructure::{
@@ -22,8 +23,7 @@ pub trait DataRepositoryFactory {
     fn create_equity_repo(&self, data_dir: &PathBuf) -> Self::EquityRepo;
     fn create_earnings_repo(
         &self,
-        earnings_dir: Option<&PathBuf>,
-        earnings_file: Option<&PathBuf>,
+        earnings_source: &EarningsSourceConfig,
     ) -> Box<dyn EarningsRepository>;
 }
 
@@ -38,24 +38,22 @@ impl RepositoryFactory {
         FinqEquityRepository::new(data_dir.clone())
     }
 
-    /// Create earnings repository based on configuration
-    /// Priority: earnings_file > earnings_dir > default location
+    /// Create earnings repository based on unified configuration
     pub fn create_earnings_repo(
-        earnings_dir: Option<&PathBuf>,
-        earnings_file: Option<&PathBuf>,
+        earnings_source: &EarningsSourceConfig,
     ) -> Box<dyn EarningsRepository> {
-        if let Some(file) = earnings_file {
-            // Custom file takes precedence
-            Box::new(ParquetEarningsRepository::new(file.clone()))
-        } else if let Some(dir) = earnings_dir {
-            // Use earnings-rs adapter
-            Box::new(EarningsReaderAdapter::new(dir.clone()))
-        } else {
-            // Default location
-            let default_dir = dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("trading_project/nasdaq_earnings/data");
-            Box::new(EarningsReaderAdapter::new(default_dir))
+        match earnings_source {
+            EarningsSourceConfig::File { path } => {
+                // Custom file (parquet)
+                Box::new(ParquetEarningsRepository::new(path.clone()))
+            }
+            EarningsSourceConfig::Provider { dir, source } => {
+                // Use earnings-rs adapter with configured source
+                Box::new(EarningsReaderAdapter::with_source(
+                    dir.clone(),
+                    source.to_earnings_rs()
+                ))
+            }
         }
     }
 }
@@ -74,9 +72,8 @@ impl DataRepositoryFactory for RepositoryFactory {
 
     fn create_earnings_repo(
         &self,
-        earnings_dir: Option<&PathBuf>,
-        earnings_file: Option<&PathBuf>,
+        earnings_source: &EarningsSourceConfig,
     ) -> Box<dyn EarningsRepository> {
-        RepositoryFactory::create_earnings_repo(earnings_dir, earnings_file)
+        RepositoryFactory::create_earnings_repo(earnings_source)
     }
 }

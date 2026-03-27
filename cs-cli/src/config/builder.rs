@@ -59,10 +59,35 @@ impl BacktestConfigBuilder {
         // Convert AppConfig to BacktestConfig
         let mut config = app_config.to_backtest_config();
 
-        // Override data_dir if provided via global args (highest priority)
-        if let Some(ref global) = self.global {
-            if let Some(ref data_dir) = global.data_dir {
-                config.data_dir = data_dir.clone();
+        // Handle data source configuration from CLI args
+        if let Some(ref args) = self.args {
+            use cs_backtest::DataSourceConfig;
+
+            // Build DataSourceConfig based on --data-source flag
+            match args.data_source.to_lowercase().as_str() {
+                "ib" => {
+                    let ib_data_dir = args.ib_data_dir.clone()
+                        .or_else(|| std::env::var("IB_DATA_DIR").ok().map(std::path::PathBuf::from))
+                        .ok_or_else(|| anyhow::anyhow!(
+                            "IB data directory required when using --data-source ib. \
+                             Set --ib-data-dir or IB_DATA_DIR environment variable."
+                        ))?;
+                    config.data_source = DataSourceConfig::Ib { data_dir: ib_data_dir };
+                }
+                "finq" | _ => {
+                    // Default to Finq - use global data_dir or FINQ_DATA_DIR
+                    let finq_data_dir = if let Some(ref global) = self.global {
+                        global.data_dir.clone()
+                    } else {
+                        None
+                    }.or_else(|| std::env::var("FINQ_DATA_DIR").ok().map(std::path::PathBuf::from))
+                    .unwrap_or_else(|| {
+                        dirs::home_dir()
+                            .unwrap_or_else(|| std::path::PathBuf::from("."))
+                            .join("polygon/data")
+                    });
+                    config.data_source = DataSourceConfig::Finq { data_dir: finq_data_dir };
+                }
             }
         }
 
@@ -71,25 +96,31 @@ impl BacktestConfigBuilder {
             config.start_date = Self::parse_date(&args.start)?;
             config.end_date = Self::parse_date(&args.end)?;
 
-            // Set earnings_file if provided (takes precedence over earnings_dir)
-            if let Some(ref earnings_file) = args.earnings_file {
-                config.earnings_file = Some(earnings_file.clone());
-            }
+            // Build unified EarningsSourceConfig from CLI args
+            // Priority: file > provider
+            use cs_backtest::{EarningsSourceConfig, EarningsProvider};
 
-            // Set earnings_dir if provided
-            if let Some(ref earnings_dir) = args.earnings_dir {
-                config.earnings_dir = earnings_dir.clone();
-            }
+            config.earnings_source = if let Some(ref earnings_file) = args.earnings_file {
+                // File variant takes precedence
+                EarningsSourceConfig::file(earnings_file.clone())
+            } else {
+                // Provider variant: get directory and source
+                let dir = args.earnings_dir.clone()
+                    .or_else(|| std::env::var("EARNINGS_DATA_DIR").ok().map(PathBuf::from))
+                    .unwrap_or_else(|| {
+                        dirs::home_dir()
+                            .unwrap_or_else(|| PathBuf::from("."))
+                            .join("trading_project/nasdaq_earnings/data")
+                    });
+                let source = EarningsProvider::from_str(&args.earnings_source)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                EarningsSourceConfig::provider(source, dir)
+            };
 
             // Apply CLI rules (override TOML rules if any CLI rule flags are set)
             if args.rules.has_rules() {
                 config.rules = Self::build_file_rules_from_cli(&args.rules);
             }
-        }
-
-        // Validate required fields
-        if config.data_dir.as_os_str().is_empty() {
-            anyhow::bail!("Data directory is required. Set --data-dir or FINQ_DATA_DIR");
         }
 
         Ok(config)

@@ -107,6 +107,43 @@ impl EarningsTime {
     }
 }
 
+/// Option type: Call or Put
+///
+/// Domain enum for option type with canonical string representation.
+/// Use `as_str()` for DataFrame column values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CallPut {
+    Call,
+    Put,
+}
+
+impl CallPut {
+    /// Canonical string representation for DataFrame columns
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CallPut::Call => "call",
+            CallPut::Put => "put",
+        }
+    }
+
+    /// Check if this is a call option
+    pub fn is_call(&self) -> bool {
+        matches!(self, CallPut::Call)
+    }
+
+    /// Check if this is a put option
+    pub fn is_put(&self) -> bool {
+        matches!(self, CallPut::Put)
+    }
+}
+
+impl std::fmt::Display for CallPut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Spot price with metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpotPrice {

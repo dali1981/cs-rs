@@ -35,11 +35,11 @@ pub mod attribution;
 pub mod rules;  // Rule evaluation for entry filtering
 
 // Config
-pub use config::{BacktestConfig, SpreadType, SelectionType};
+pub use config::{BacktestConfig, SpreadType, SelectionType, DataSourceConfig, EarningsSourceConfig, EarningsProvider};
 pub use campaign_config::CampaignConfig;
 
 // Use cases
-pub use backtest_use_case::{BacktestUseCase, BacktestResult, UnifiedBacktestResult, SessionProgress, TradeGenerationError, TradeResultMethods};
+pub use backtest_use_case::{BacktestUseCase, BacktestResult, UnifiedBacktestResult, BacktestError, SessionProgress, TradeGenerationError, TradeResultMethods};
 pub use campaign_use_case::{CampaignUseCase, CampaignError, CampaignResult};
 pub use atm_iv_use_case::{GenerateIvTimeSeriesUseCase, IvTimeSeriesResult, IvTimeSeriesError};
 pub use minute_aligned_iv_use_case::{MinuteAlignedIvUseCase, MinuteAlignedIvResult, MinuteAlignedIvError};

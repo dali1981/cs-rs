@@ -11,9 +11,11 @@ use thiserror::Error;
 
 // Infrastructure config types (separated into submodules)
 mod data_source;
+mod earnings_source;
 mod execution;
 
 pub use data_source::DataSourceConfig;
+pub use earnings_source::{EarningsSourceConfig, EarningsProvider};
 pub use execution::ExecutionConfig;
 
 #[derive(Debug, Error)]
@@ -30,11 +32,15 @@ pub enum TimingSpecError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestConfig {
-    pub data_dir: PathBuf,
-    pub earnings_dir: PathBuf,
-    /// Optional earnings file (takes precedence over earnings_dir)
+    /// Market data source (options and equity)
     #[serde(default)]
-    pub earnings_file: Option<PathBuf>,
+    pub data_source: DataSourceConfig,
+    /// DEPRECATED: Use data_source instead. Kept for backward compatibility.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_dir: Option<PathBuf>,
+    /// Earnings calendar data source (file or provider-based)
+    #[serde(default)]
+    pub earnings_source: EarningsSourceConfig,
     /// Backtest start date
     pub start_date: NaiveDate,
     /// Backtest end date
@@ -232,11 +238,9 @@ impl SelectionType {
 impl Default for BacktestConfig {
     fn default() -> Self {
         Self {
-            data_dir: PathBuf::from("data"),
-            earnings_dir: dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("trading_project/nasdaq_earnings/data"),
-            earnings_file: None,
+            data_source: DataSourceConfig::default(),
+            data_dir: None,
+            earnings_source: EarningsSourceConfig::default(),
             // Default to 2020-01-01 to 2020-12-31 (will be overridden by CLI)
             start_date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
             end_date: NaiveDate::from_ymd_opt(2020, 12, 31).unwrap(),
@@ -285,13 +289,9 @@ impl BacktestConfig {
         TradingRange::new(self.start_date, self.end_date)
     }
 
-    /// Extract DataSourceConfig (infrastructure)
-    pub fn data_source(&self) -> DataSourceConfig {
-        DataSourceConfig {
-            data_dir: self.data_dir.clone(),
-            earnings_dir: self.earnings_dir.clone(),
-            earnings_file: self.earnings_file.clone(),
-        }
+    /// Get market data source configuration
+    pub fn market_data_source(&self) -> &DataSourceConfig {
+        &self.data_source
     }
 
     /// Extract ExecutionConfig (runtime)
@@ -472,10 +472,11 @@ mod tests {
     #[test]
     fn test_backtest_config_default() {
         let config = BacktestConfig::default();
-        assert_eq!(config.data_dir, PathBuf::from("data"));
         assert!(config.parallel);
         assert!(matches!(config.spread, SpreadType::Calendar));
         assert!(matches!(config.selection_strategy, SelectionType::ATM));
+        // Earnings source defaults to Provider with TradingView
+        assert!(!config.earnings_source.is_file());
     }
 
     #[test]
@@ -484,7 +485,7 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: BacktestConfig = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(config.data_dir, deserialized.data_dir);
         assert_eq!(config.parallel, deserialized.parallel);
+        assert!(!deserialized.earnings_source.is_file());
     }
 }
