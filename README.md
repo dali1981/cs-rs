@@ -3,6 +3,25 @@
 A quantitative research and backtesting engine for options volatility strategies,
 with realistic execution modeling, capital constraints, and risk attribution.
 
+## Quickstart (Demo)
+
+Run a backtest with embedded sample data (no external dependencies required):
+
+```bash
+cargo run --release --no-default-features --features demo -p cs-cli --bin cs -- \
+  backtest --conf configs/demo.toml --start 2024-11-06 --end 2024-11-20
+```
+
+Expected output:
+```
+Sample Trades:
+  1. NVDA | P&L: $-60.00 (-3.82%)
+```
+
+The demo uses real NVDA options data around the November 2024 earnings event
+(entry Nov 12, exit Nov 20). The small loss demonstrates realistic IV crush
+after earnings when the stock move doesn't exceed implied volatility expectations.
+
 ## Features
 
 - Volatility term structure analysis (IV7 / IV20 / IV30)
@@ -13,10 +32,9 @@ with realistic execution modeling, capital constraints, and risk attribution.
 - Delta hedging simulation
 - Portfolio-level aggregation across underlyings
 
-## Example
+## Full Usage Example
 
-Short front-week straddle when IV term structure is elevated,
-with configurable entry/exit timing and capital limits:
+With market data connected (requires `finq-rs` and `earnings-rs`):
 
 ```bash
 cargo run --release -- backtest \

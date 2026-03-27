@@ -8,22 +8,35 @@ use cs_backtest::{
     BacktestUseCase, BacktestConfig, DataSourceConfig,
     CampaignUseCase, CampaignConfig,
     GenerateIvTimeSeriesUseCase,
+    MinuteAlignedIvUseCase,
     EarningsAnalysisUseCase,
 };
 use cs_domain::{OptionsDataRepository, EquityDataRepository};
+
+// Full mode types
+#[cfg(feature = "full")]
 use cs_domain::infrastructure::{
     FinqOptionsRepository, FinqEquityRepository,
     IbOptionsRepository, IbEquityRepository,
 };
 
+// Demo mode types
+#[cfg(feature = "demo")]
+use cs_domain::infrastructure::{DemoOptionsRepository, DemoEquityRepository};
+
+#[cfg(feature = "full")]
 use super::{RepositoryFactory, IbRepositoryFactory, DataRepositoryFactory};
+#[cfg(feature = "demo")]
+use super::{RepositoryFactory, DataRepositoryFactory};
 
 /// Enum wrapper for backtest use cases with different repository types
+#[cfg(feature = "full")]
 pub enum BacktestUseCaseEnum {
     Finq(BacktestUseCase<FinqOptionsRepository, FinqEquityRepository>),
     Ib(BacktestUseCase<IbOptionsRepository, IbEquityRepository>),
 }
 
+#[cfg(feature = "full")]
 impl BacktestUseCaseEnum {
     pub async fn execute(&self) -> Result<cs_backtest::UnifiedBacktestResult, cs_backtest::BacktestError> {
         match self {
@@ -40,6 +53,7 @@ impl UseCaseFactory {
     /// Create a backtest use case with all dependencies
     /// Dispatches to appropriate repository factory based on config.data_source
     /// Earnings repos are constructed from config.earnings_file and config.earnings_dir
+    #[cfg(feature = "full")]
     pub fn create_backtest(
         config: BacktestConfig,
     ) -> Result<BacktestUseCaseEnum> {
@@ -55,6 +69,15 @@ impl UseCaseFactory {
                 Ok(BacktestUseCaseEnum::Ib(use_case))
             }
         }
+    }
+
+    /// Create a backtest use case with all dependencies (demo mode)
+    #[cfg(feature = "demo")]
+    pub fn create_backtest(
+        config: BacktestConfig,
+    ) -> Result<BacktestUseCase<DemoOptionsRepository, DemoEquityRepository>> {
+        let factory = RepositoryFactory;
+        Self::create_backtest_with_factory(&factory, config)
     }
 
     /// Create a backtest use case with a custom repository factory
@@ -83,6 +106,7 @@ impl UseCaseFactory {
     }
 
     /// Create a campaign use case with all dependencies
+    #[cfg(any(feature = "full", feature = "demo"))]
     pub fn create_campaign(
         config: CampaignConfig,
     ) -> Result<CampaignUseCase> {
@@ -101,9 +125,19 @@ impl UseCaseFactory {
     }
 
     /// Create ATM IV generation use case
+    #[cfg(feature = "full")]
     pub fn create_atm_iv(
         data_dir: &PathBuf,
     ) -> Result<GenerateIvTimeSeriesUseCase<FinqEquityRepository, FinqOptionsRepository>> {
+        let factory = RepositoryFactory;
+        Self::create_atm_iv_with_factory(&factory, data_dir)
+    }
+
+    /// Create ATM IV generation use case (demo mode)
+    #[cfg(feature = "demo")]
+    pub fn create_atm_iv(
+        data_dir: &PathBuf,
+    ) -> Result<GenerateIvTimeSeriesUseCase<DemoEquityRepository, DemoOptionsRepository>> {
         let factory = RepositoryFactory;
         Self::create_atm_iv_with_factory(&factory, data_dir)
     }
@@ -122,5 +156,39 @@ impl UseCaseFactory {
         let options_repo = factory.create_options_repo(data_dir);
 
         Ok(GenerateIvTimeSeriesUseCase::new(equity_repo, options_repo))
+    }
+
+    /// Create minute-aligned IV generation use case (default mode)
+    #[cfg(feature = "full")]
+    pub fn create_minute_aligned_iv(
+        data_dir: &PathBuf,
+    ) -> Result<MinuteAlignedIvUseCase<FinqEquityRepository, FinqOptionsRepository>> {
+        let factory = RepositoryFactory;
+        Self::create_minute_aligned_iv_with_factory(&factory, data_dir)
+    }
+
+    /// Create minute-aligned IV generation use case (demo mode)
+    #[cfg(feature = "demo")]
+    pub fn create_minute_aligned_iv(
+        data_dir: &PathBuf,
+    ) -> Result<MinuteAlignedIvUseCase<DemoEquityRepository, DemoOptionsRepository>> {
+        let factory = RepositoryFactory;
+        Self::create_minute_aligned_iv_with_factory(&factory, data_dir)
+    }
+
+    /// Create minute-aligned IV generation use case with a custom repository factory
+    pub fn create_minute_aligned_iv_with_factory<F>(
+        factory: &F,
+        data_dir: &PathBuf,
+    ) -> Result<MinuteAlignedIvUseCase<F::EquityRepo, F::OptionsRepo>>
+    where
+        F: DataRepositoryFactory,
+        F::OptionsRepo: OptionsDataRepository,
+        F::EquityRepo: EquityDataRepository,
+    {
+        let equity_repo = factory.create_equity_repo(data_dir);
+        let options_repo = factory.create_options_repo(data_dir);
+
+        Ok(MinuteAlignedIvUseCase::new(equity_repo, options_repo))
     }
 }

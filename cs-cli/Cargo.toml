@@ -3,14 +3,47 @@ name = "cs-cli"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["full"]
+# Full mode: all data providers available
+full = ["cs-domain/full", "cs-backtest/full"]
+# Demo mode: uses fixture data, no external data dependencies
+demo = ["cs-domain/demo", "cs-backtest/demo"]
+
 [[bin]]
 name = "cs"
 path = "src/main.rs"
 
+# Test binaries require full mode (use real data providers)
+[[bin]]
+name = "test_earnings"
+path = "src/bin/test_earnings.rs"
+required-features = ["full"]
+
+[[bin]]
+name = "debug_idxx"
+path = "src/bin/debug_idxx.rs"
+required-features = ["full"]
+
+[[bin]]
+name = "test_load_idxx"
+path = "src/bin/test_load_idxx.rs"
+required-features = ["full"]
+
+[[bin]]
+name = "view_atm_iv"
+path = "src/bin/view_atm_iv.rs"
+required-features = ["full"]
+
+[[bin]]
+name = "plot_atm_iv"
+path = "src/bin/plot_atm_iv.rs"
+required-features = ["full"]
+
 [dependencies]
 cs-analytics = { workspace = true }
-cs-domain = { workspace = true }
-cs-backtest = { workspace = true }
+cs-domain = { workspace = true, default-features = false }
+cs-backtest = { workspace = true, default-features = false }
 tokio = { workspace = true }
 clap = { workspace = true }
 async-trait = { workspace = true }

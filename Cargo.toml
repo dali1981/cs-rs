@@ -17,8 +17,8 @@ authors = ["Mohamed Ali"]
 [workspace.dependencies]
 # Internal crates
 cs-analytics = { path = "cs-analytics" }
-cs-domain = { path = "cs-domain" }
-cs-backtest = { path = "cs-backtest" }
+cs-domain = { path = "cs-domain", default-features = false }
+cs-backtest = { path = "cs-backtest", default-features = false }
 
 # External: finq-rs (path for dev, version for release)
 finq-core = { path = "../finq-rs/crates/finq-core" }

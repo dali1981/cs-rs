@@ -6,15 +6,6 @@ use console::style;
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
-use cs_backtest::{BacktestUseCase, EarningsAnalysisUseCase, GenerateIvTimeSeriesUseCase, MinuteAlignedIvUseCase};
-use cs_domain::{
-    infrastructure::{
-        EarningsReaderAdapter, FinqEquityRepository, FinqOptionsRepository,
-        ParquetEarningsRepository, ParquetResultsRepository,
-    },
-    value_objects::{AtmIvConfig, TimingConfig},
-    ResultsRepository,
-};
 
 // Keep existing modules for handler logic
 mod config;

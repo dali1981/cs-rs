@@ -3,12 +3,18 @@ name = "cs-backtest"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["full"]
+# Full mode: all data providers available
+full = ["cs-domain/full", "dep:earnings-rs"]
+# Demo mode: uses fixture data
+demo = ["cs-domain/demo"]
+
 [dependencies]
 cs-analytics = { workspace = true }
 cs-domain = { workspace = true }
 finq-core = { workspace = true }
-finq-flatfiles = { workspace = true }
-earnings-rs = { workspace = true }
+earnings-rs = { workspace = true, optional = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 rayon = { workspace = true }

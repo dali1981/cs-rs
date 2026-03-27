@@ -40,6 +40,7 @@ impl EarningsProvider {
     }
 
     /// Convert to earnings-rs DataSource
+    #[cfg(feature = "full")]
     pub fn to_earnings_rs(&self) -> earnings_rs::DataSource {
         match self {
             Self::Nasdaq => earnings_rs::DataSource::Nasdaq,

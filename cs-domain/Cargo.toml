@@ -3,11 +3,18 @@ name = "cs-domain"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["full"]
+# Full mode: uses finq-rs and earnings-rs for real data
+full = ["finq-flatfiles", "earnings-rs"]
+# Demo mode: uses embedded fixtures, no external data deps required
+demo = []
+
 [dependencies]
 cs-analytics = { workspace = true }
 finq-core = { workspace = true }
-finq-flatfiles = { workspace = true }
-earnings-rs = { workspace = true }
+finq-flatfiles = { workspace = true, optional = true }
+earnings-rs = { workspace = true, optional = true }
 ib-data-collector = { path = "../../trading_project/ib-data-collector" }
 rust_decimal = { workspace = true }
 rust_decimal_macros = { workspace = true }
