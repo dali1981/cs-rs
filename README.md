@@ -24,13 +24,29 @@ after earnings when the stock move doesn't exceed implied volatility expectation
 
 ## Features
 
+### Strategies
+- 8 spread types: calendar spreads, straddles (long/short), iron butterflies, calendar straddles, strangles, butterflies, condors, iron condors
+- Campaign system for declarative multi-symbol trade scheduling (daily, weekly, monthly entry policies)
+- Configurable entry/exit rules engine (IV slope, market cap, delta, DTE, bid-ask)
+
+### Analytics
 - Volatility term structure analysis (IV7 / IV20 / IV30)
+- P&L attribution by Greeks (delta, gamma, vega, theta)
+- IBKR-style margin and buying power (BPR) tracking
+
+### Execution
 - Event-driven options strategies (earnings-focused)
-- Multiple spread types: calendar spreads, straddles, iron butterflies
-- Configurable strategy rules via TOML configs or CLI flags
-- Realistic execution with transaction costs and slippage
-- Delta hedging simulation
-- Portfolio-level aggregation across underlyings
+- Realistic execution with transaction costs and slippage (commission, half-spread, IV-based, percentage models)
+- Delta hedging with pluggable providers (entry IV, market IV, historical HV, gamma approximation, historical average IV)
+- Portfolio-level aggregation across underlyings (per-symbol breakdown not yet implemented)
+
+### Configuration & Data
+- Configurable strategy rules via TOML configs or CLI flags (layered: multiple TOML files + CLI overrides)
+- Two data sources: finq-flatfiles and Interactive Brokers
+- Demo mode with embedded fixture data for testing without external dependencies
+
+### Integrations
+- Python bindings via PyO3 (`cs_rust` module: Black-Scholes pricing, Greeks, IV solver, backtest execution)
 
 ## Full Usage Example
 
@@ -68,12 +84,56 @@ infrastructure concerns are isolated at the boundaries.
 - Rayon (parallel backtesting)
 - CLI-based workflows
 
+## Feature Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `full` | Yes | Enables external data sources (`finq-flatfiles`, `earnings-rs`, `ib-data-collector`) |
+| `demo` | No | Uses embedded NVDA fixture data; no external dependencies required |
+
+```bash
+# Full build (default — requires finq-rs and earnings-rs)
+cargo build --release
+
+# Demo build (self-contained, no external data)
+cargo build --release --no-default-features --features demo -p cs-cli
+```
+
 ## Build
 
 ```bash
+# Build all crates
 cargo build --release
-cargo test
+
+# Build specific crate
+cargo build --release -p cs-backtest
+
+# Build Python bindings (requires maturin)
+cd cs-python && maturin develop --release
 ```
+
+## Testing
+
+```bash
+# Run all tests (demo mode — no external data needed)
+cargo test --no-default-features --features demo
+
+# Run all tests (full mode — requires data sources)
+cargo test
+
+# Run tests for a specific crate
+cargo test -p cs-analytics
+cargo test -p cs-domain
+
+# Run with debug logging
+RUST_LOG=debug cargo test -- --nocapture
+```
+
+**Test organization:**
+- **76 inline test modules** (`#[cfg(test)]`) across all crates — heaviest in cs-domain (52) and cs-analytics (17)
+- **Integration tests** in `cs-backtest/tests/` (real data execution paths)
+- **Fixtures** in `fixtures/` — NVDA options/equity parquet files + earnings CSV
+- **Example binaries** in `cs-domain/examples/` and `cs-cli/src/bin/` (data diagnostics, IV visualization)
 
 ## License
 
