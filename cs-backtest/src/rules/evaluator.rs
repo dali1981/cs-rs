@@ -333,16 +333,11 @@ fn get_front_month_atm_iv(surface: &IVSurface) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDate;
-    use cs_domain::EarningsTime;
 
     fn mock_event(symbol: &str, market_cap: Option<u64>) -> EarningsEvent {
-        EarningsEvent {
-            symbol: symbol.to_string(),
-            date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
-            time: EarningsTime::AfterClose,
-            market_cap,
-        }
+        cs_domain::builders::EarningsEventBuilder::new(symbol)
+            .market_cap_opt(market_cap)
+            .build()
     }
 
     #[test]
