@@ -2,6 +2,7 @@
 //
 // Generic trade execution, rolling strategies, backtesting.
 
+pub mod commands;
 pub mod config;
 pub mod campaign_config;
 pub mod bpr;
@@ -33,6 +34,9 @@ pub mod minute_aligned_iv_use_case;
 pub mod earnings_analysis_use_case;
 pub mod attribution;
 pub mod rules;  // Rule evaluation for entry filtering
+
+// Application commands (clean boundary between CLI/config and use cases)
+pub use commands::RunBacktestCommand;
 
 // Config
 pub use config::{BacktestConfig, SpreadType, SelectionType, DataSourceConfig, EarningsSourceConfig, EarningsProvider};

@@ -4,10 +4,25 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use chrono::NaiveDate;
 
-use cs_backtest::BacktestConfig;
+use cs_backtest::{BacktestConfig, DataSourceConfig, EarningsSourceConfig, RunBacktestCommand};
 use crate::args::{BacktestArgs, GlobalArgs};
 use crate::config::load_config;
 use crate::cli_args::CliOverrides;
+
+/// The result of building from CLI args and TOML config.
+///
+/// Separates the application command (business intent) from the infrastructure
+/// configuration (where data lives). The factory consumes both independently.
+///
+/// See ADR-0003: CLI/config types are DTOs, not domain entities.
+pub struct BacktestCommandBundle {
+    /// Business-intent command: what to backtest and how.
+    pub command: RunBacktestCommand,
+    /// Where market data (options, equity) comes from.
+    pub data_source: DataSourceConfig,
+    /// Where earnings calendar data comes from.
+    pub earnings_source: EarningsSourceConfig,
+}
 
 /// Builder for BacktestConfig from CLI args
 pub struct BacktestConfigBuilder {
@@ -47,8 +62,27 @@ impl BacktestConfigBuilder {
         Ok(self)
     }
 
-    /// Build and validate the config
-    pub fn build(self) -> Result<BacktestConfig> {
+    /// Build a `BacktestCommandBundle` separating business intent from infrastructure.
+    ///
+    /// Internally still uses figment to merge TOML + CLI overrides into a
+    /// `BacktestConfig`, then splits it into:
+    /// - `command`: business-intent fields only (`RunBacktestCommand`)
+    /// - `data_source`: where market data lives
+    /// - `earnings_source`: where earnings calendar data lives
+    ///
+    /// The factory receives these separately (see ADR-0003).
+    pub fn build(self) -> Result<BacktestCommandBundle> {
+        let config = self.build_raw_config()?;
+        let data_source = config.data_source.clone();
+        let earnings_source = config.earnings_source.clone();
+        let command = config.to_run_command();
+        Ok(BacktestCommandBundle { command, data_source, earnings_source })
+    }
+
+    /// Build the intermediate `BacktestConfig` (TOML DTO). Used internally and
+    /// retained for backward-compatible callers that need the raw config (e.g.
+    /// display logic that reads `config.data_source` before the use case runs).
+    pub fn build_raw_config(self) -> Result<BacktestConfig> {
         // Build CliOverrides from args
         let cli_overrides = self.build_cli_overrides();
 
@@ -61,8 +95,6 @@ impl BacktestConfigBuilder {
 
         // Handle data source configuration from CLI args
         if let Some(ref args) = self.args {
-            use cs_backtest::DataSourceConfig;
-
             // Build DataSourceConfig based on --data-source flag
             match args.data_source.to_lowercase().as_str() {
                 "ib" => {
@@ -98,13 +130,11 @@ impl BacktestConfigBuilder {
 
             // Build unified EarningsSourceConfig from CLI args
             // Priority: file > provider
-            use cs_backtest::{EarningsSourceConfig, EarningsProvider};
+            use cs_backtest::EarningsProvider;
 
             config.earnings_source = if let Some(ref earnings_file) = args.earnings_file {
-                // File variant takes precedence
                 EarningsSourceConfig::file(earnings_file.clone())
             } else {
-                // Provider variant: get directory and source
                 let dir = args.earnings_dir.clone()
                     .or_else(|| std::env::var("EARNINGS_DATA_DIR").ok().map(PathBuf::from))
                     .unwrap_or_else(|| {

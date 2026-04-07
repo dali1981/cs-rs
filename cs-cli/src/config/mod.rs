@@ -8,5 +8,5 @@ mod campaign_builder;
 pub use app::*;
 
 // Re-export builders
-pub use builder::BacktestConfigBuilder;
+pub use builder::{BacktestConfigBuilder, BacktestCommandBundle};
 pub use campaign_builder::CampaignConfigBuilder;

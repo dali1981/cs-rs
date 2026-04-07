@@ -284,6 +284,54 @@ impl Default for BacktestConfig {
 }
 
 impl BacktestConfig {
+    /// Convert to a `RunBacktestCommand`, stripping infrastructure concerns.
+    ///
+    /// `data_source` and `earnings_source` are NOT included in the command —
+    /// they are passed separately to the factory. The deprecated `data_dir`
+    /// field is never transferred.
+    ///
+    /// This is the explicit Application-layer mapping described in ADR-0003.
+    pub fn to_run_command(&self) -> crate::commands::RunBacktestCommand {
+        crate::commands::RunBacktestCommand {
+            start_date: self.start_date,
+            end_date: self.end_date,
+            spread: self.spread,
+            selection_strategy: self.selection_strategy,
+            selection: self.selection.clone(),
+            timing: self.timing,
+            timing_strategy: self.timing_strategy.clone(),
+            entry_days_before: self.entry_days_before,
+            exit_days_before: self.exit_days_before,
+            entry_offset: self.entry_offset,
+            holding_days: self.holding_days,
+            exit_days_after: self.exit_days_after,
+            symbols: self.symbols.clone(),
+            min_market_cap: self.min_market_cap,
+            max_entry_iv: self.max_entry_iv,
+            min_notional: self.min_notional,
+            min_entry_price: self.min_entry_price,
+            max_entry_price: self.max_entry_price,
+            parallel: self.parallel,
+            pricing_model: self.pricing_model,
+            vol_model: self.vol_model,
+            target_delta: self.target_delta,
+            delta_range: self.delta_range,
+            delta_scan_steps: self.delta_scan_steps,
+            strike_match_mode: self.strike_match_mode,
+            wing_width: self.wing_width,
+            straddle_entry_days: self.straddle_entry_days,
+            straddle_exit_days: self.straddle_exit_days,
+            min_straddle_dte: self.min_straddle_dte,
+            post_earnings_holding_days: self.post_earnings_holding_days,
+            return_basis: self.return_basis,
+            margin: self.margin.clone(),
+            rules: self.rules.clone(),
+            hedge_config: self.hedge_config.clone(),
+            attribution_config: self.attribution_config.clone(),
+            trading_costs: self.trading_costs.clone(),
+        }
+    }
+
     /// Extract TradingRange (when to initiate trades)
     pub fn trading_range(&self) -> TradingRange {
         TradingRange::new(self.start_date, self.end_date)
