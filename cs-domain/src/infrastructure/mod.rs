@@ -1,3 +1,7 @@
+// Translation layer — all external → domain mappings live here (ADR-0001)
+pub mod mappers;
+pub use mappers::IntoNormalized;
+
 // Finq-based repositories (requires finq-flatfiles)
 #[cfg(feature = "finq-flatfiles")]
 pub mod finq_options_repo;
