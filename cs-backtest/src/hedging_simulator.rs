@@ -37,7 +37,6 @@
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 
 use cs_domain::{
     CompositeTrade, EquityDataRepository, OptionsDataRepository,

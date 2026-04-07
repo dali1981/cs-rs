@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use chrono::NaiveDate;
 
 use cs_backtest::CampaignConfig;
-use cs_domain::{PeriodPolicy, TradingPeriodSpec, ExpirationPolicy, RollPolicy};
+use cs_domain::{PeriodPolicy, TradingPeriodSpec, ExpirationPolicy};
 use crate::args::{CampaignArgs, GlobalArgs};
 
 /// Builder for CampaignConfig from CLI args

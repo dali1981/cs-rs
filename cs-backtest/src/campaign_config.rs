@@ -43,6 +43,7 @@ pub struct CampaignConfig {
 }
 
 
+#[allow(dead_code)]
 fn default_true() -> bool {
     true
 }
@@ -50,7 +51,7 @@ fn default_true() -> bool {
 impl Default for CampaignConfig {
     fn default() -> Self {
         use chrono::NaiveDate;
-        use cs_domain::{RollPolicy, TradingPeriodSpec};
+        use cs_domain::TradingPeriodSpec;
 
         Self {
             data_dir: PathBuf::from("data"),

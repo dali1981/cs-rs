@@ -38,7 +38,7 @@ use cs_domain::strike_selection::{StrikeSelector, ExpirationCriteria};
 use crate::config::BacktestConfig;
 use crate::bpr::{build_bpr_timeline, BprPricingContext, HasBprTimeline};
 use crate::execution::{ExecutionConfig, ExecutableTrade, TradePricer};
-use crate::execution::cost_helpers::{apply_costs_to_result, ToTradingContext};
+use crate::execution::cost_helpers::apply_costs_to_result;
 use crate::timing_strategy::TimingStrategy;
 use crate::backtest_use_case::{TradeResultMethods, TradeGenerationError};
 use crate::backtest_use_case_helpers::{PreparedData, TradeSimulator};

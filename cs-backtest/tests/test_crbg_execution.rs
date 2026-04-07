@@ -13,8 +13,9 @@ use chrono::{DateTime, NaiveDate, Utc};
 use cs_backtest::TradeExecutor;
 use cs_domain::{
     infrastructure::{FinqEquityRepository, FinqOptionsRepository},
-    CalendarSpread, EarningsEvent, Strike, OptionLeg,
+    CalendarSpread, Strike, OptionLeg,
     EquityDataRepository, OptionsDataRepository,
+    testing::EarningsEventBuilder,
 };
 use finq_core::OptionType;
 use polars::prelude::IntoLazy;
@@ -240,14 +241,10 @@ async fn test_crbg_calendar_spread_execution() {
 
     let spread = CalendarSpread::new(short_leg, long_leg).unwrap();
 
-    let earnings_event = EarningsEvent {
-        symbol: symbol.to_string(),
-        earnings_date: NaiveDate::from_ymd_opt(2025, 11, 3).unwrap(),
-        earnings_time: cs_domain::value_objects::EarningsTime::AfterMarketClose,
-        company_name: Some("CRBG".to_string()),
-        eps_forecast: None,
-        market_cap: None,
-    };
+    let earnings_event = EarningsEventBuilder::new(symbol)
+        .earnings_date(NaiveDate::from_ymd_opt(2025, 11, 3).unwrap())
+        .company_name("CRBG")
+        .build();
 
     let result = executor.execute_trade(
         &spread,

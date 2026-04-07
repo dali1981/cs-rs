@@ -47,6 +47,7 @@ impl ATMStrategy {
     }
 
     /// Select first expiration with sufficient DTE
+    #[allow(dead_code)]
     fn select_single_expiration(
         expirations: &[NaiveDate],
         reference_date: NaiveDate,

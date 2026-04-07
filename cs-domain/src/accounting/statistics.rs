@@ -358,10 +358,12 @@ impl TradeStatistics {
 }
 
 /// Builder for calculating statistics from various sources
+#[allow(dead_code)]
 pub struct TradeStatisticsBuilder {
     trades: Vec<TradeAccounting>,
 }
 
+#[allow(dead_code)]
 impl TradeStatisticsBuilder {
     pub fn new() -> Self {
         Self { trades: Vec::new() }

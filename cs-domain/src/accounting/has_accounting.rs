@@ -101,6 +101,7 @@ pub trait HasAccounting {
 }
 
 /// Helper to compute capital requirement from entry debit
+#[allow(dead_code)]
 pub fn capital_from_debit(entry_debit: Decimal, multiplier: u32) -> CapitalRequirement {
     let capital = entry_debit * Decimal::from(multiplier);
     CapitalRequirement::for_debit(capital)

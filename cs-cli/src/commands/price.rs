@@ -9,6 +9,7 @@ use super::CommandHandler;
 /// Price command handler
 pub struct PriceCommand {
     args: PriceArgs,
+    #[allow(dead_code)]
     global: GlobalArgs,
 }
 

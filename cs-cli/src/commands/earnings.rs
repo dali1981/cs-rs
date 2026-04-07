@@ -9,6 +9,7 @@ use super::CommandHandler;
 /// Earnings analysis command handler
 pub struct EarningsAnalysisCommand {
     args: EarningsAnalysisArgs,
+    #[allow(dead_code)]
     global: GlobalArgs,
 }
 

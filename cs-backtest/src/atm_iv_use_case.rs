@@ -166,7 +166,7 @@ where
             cs_domain::value_objects::AtmMethod::AboveSpot => AtmMethod::AboveSpot,
         };
 
-        let results = self.atm_computer.compute_atm_ivs(
+        let _results = self.atm_computer.compute_atm_ivs(
             &options,
             spot_price.to_f64(),
             pricing_time,

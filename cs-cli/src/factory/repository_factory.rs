@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use cs_backtest::EarningsSourceConfig;
 use cs_domain::{
     EarningsRepository, OptionsDataRepository, EquityDataRepository,
-    infrastructure::ParquetEarningsRepository,
+
 };
 
 // Full mode imports

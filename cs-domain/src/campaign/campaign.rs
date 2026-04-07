@@ -295,7 +295,7 @@ impl TradingCampaign {
 mod tests {
     use super::*;
     use crate::{EarningsEvent, EarningsTime, SessionSchedule};
-    use crate::builders::TradingCampaignBuilder;
+    use crate::testing::TradingCampaignBuilder;
     use chrono::{Weekday, Datelike};
 
     fn sample_earnings() -> Vec<EarningsEvent> {

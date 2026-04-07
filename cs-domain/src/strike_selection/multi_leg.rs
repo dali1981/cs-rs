@@ -189,7 +189,7 @@ impl super::StrikeSelector for SymmetricMultiLegSelector {
 
     fn select_multi_leg(
         &self,
-        spot: &SpotPrice,
+        _spot: &SpotPrice,
         surface: &IVSurface,
         config: &MultiLegStrategyConfig,
         min_dte: i32,

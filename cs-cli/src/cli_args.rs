@@ -45,6 +45,7 @@ pub struct CliOverrides {
 
 /// CLI rules configuration (applied post-figment)
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct CliRules {
     /// Enable IV slope rule
     pub iv_slope_enabled: bool,

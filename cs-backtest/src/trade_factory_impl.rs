@@ -439,7 +439,7 @@ impl TradeFactory for DefaultTradeFactory {
             .map_err(|e| TradeFactoryError::SelectionError(format!("Condor selection failed: {}", e)))?;
 
         // 6. Extract center strike (should be 1 for condor)
-        let center_strike = selection.center_strikes.first().cloned()
+        let _center_strike = selection.center_strikes.first().cloned()
             .ok_or_else(|| TradeFactoryError::SelectionError("No center strike available".to_string()))?;
 
         // 7. Extract near and far wing strikes

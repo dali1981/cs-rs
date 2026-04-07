@@ -8,7 +8,6 @@
 
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc, Weekday};
 use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 use std::sync::Arc;
 
 use cs_domain::{
@@ -16,17 +15,17 @@ use cs_domain::{
     RollPolicy, RollPeriod, RollReason, RollingResult,
     TradeFactory, TradingCalendar,
     RollableTrade, TradeResult,
-    EarningsEvent, EarningsTime,
-    HedgeConfig, HedgeState, RealizedVolatilityMetrics,
-    CompositeTrade, LegPosition,
+    EarningsEvent,
+    HedgeConfig, RealizedVolatilityMetrics,
+    CompositeTrade,
 };
-use finq_core::OptionType;
 
-use crate::execution::{ExecutableTrade, ExecutionConfig, ExecutionError};
+use crate::execution::{ExecutableTrade, ExecutionConfig};
 use crate::timing_strategy::TimingStrategy;
 use crate::backtest_use_case_helpers::TradeSimulator;
 
 /// Tracks spot prices during hedging for realized volatility computation
+#[allow(dead_code)]
 struct RealizedVolatilityTracker {
     spot_history: Vec<(DateTime<Utc>, f64)>,
     entry_hv: Option<f64>,
@@ -34,6 +33,7 @@ struct RealizedVolatilityTracker {
 }
 
 impl RealizedVolatilityTracker {
+    #[allow(dead_code)]
     fn new(entry_hv: Option<f64>, entry_iv: Option<f64>) -> Self {
         Self {
             spot_history: Vec::new(),
@@ -43,11 +43,13 @@ impl RealizedVolatilityTracker {
     }
 
     /// Record a spot observation
+    #[allow(dead_code)]
     fn record(&mut self, timestamp: DateTime<Utc>, spot: f64) {
         self.spot_history.push((timestamp, spot));
     }
 
     /// Compute final metrics
+    #[allow(dead_code)]
     fn finalize(self, exit_iv: Option<f64>) -> RealizedVolatilityMetrics {
         RealizedVolatilityMetrics::from_spot_history(
             &self.spot_history,
@@ -58,6 +60,7 @@ impl RealizedVolatilityTracker {
     }
 
     /// Get the spot history for attaching to HedgePosition
+    #[allow(dead_code)]
     fn into_spot_history(self) -> Vec<(DateTime<Utc>, f64)> {
         self.spot_history
     }
@@ -174,7 +177,7 @@ where
                 let mut result = trade.to_result(raw.entry_pricing.clone(), raw.exit_pricing.clone(), &raw.output, event);
                 // Apply trading costs (post-processing pattern)
                 if self.config.has_trading_costs() {
-                    use crate::execution::cost_helpers::{apply_costs_to_result, ToTradingContext};
+                    use crate::execution::cost_helpers::apply_costs_to_result;
                     apply_costs_to_result(
                         &mut result,
                         &raw.entry_pricing,

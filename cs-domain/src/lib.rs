@@ -26,7 +26,7 @@ pub mod campaign;
 pub mod config;
 pub mod pnl;
 pub mod rules;
-pub mod builders;
+pub mod testing;
 
 // Re-exports for convenience
 pub use datetime::{TradingDate, TradingTimestamp, MarketTime, eastern_to_utc};

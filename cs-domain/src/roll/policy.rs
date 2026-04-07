@@ -198,7 +198,7 @@ impl RollPolicy {
                 }
             }
 
-            Self::Monthly { roll_week_offset } => {
+            Self::Monthly { roll_week_offset: _ } => {
                 // Check if current_date is a monthly roll date
                 if let Some(next_roll) = self.next_roll_date(current_date - chrono::Duration::days(1)) {
                     if next_roll == current_date {

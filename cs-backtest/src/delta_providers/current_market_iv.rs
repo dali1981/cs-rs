@@ -22,6 +22,7 @@ use crate::iv_surface_builder::build_iv_surface;
 pub struct CurrentMarketIVProvider<T: CompositeTrade> {
     trade: T,
     options_repo: Arc<dyn OptionsDataRepository>,
+    #[allow(dead_code)]
     equity_repo: Arc<dyn EquityDataRepository>,
     symbol: String,
     risk_free_rate: f64,

@@ -72,6 +72,7 @@ pub trait TradingCostCalculator: Send + Sync {
 ///
 /// This allows creating boxed cost calculators that can be cloned
 /// for use across multiple threads or contexts.
+#[allow(dead_code)]
 pub trait ClonableCostCalculator: TradingCostCalculator {
     /// Clone into a boxed trait object
     fn clone_box(&self) -> Box<dyn TradingCostCalculator>;

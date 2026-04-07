@@ -15,9 +15,8 @@ use cs_domain::{
     Straddle, CalendarSpread, IronButterfly,
 };
 
-use crate::execution::{ExecutableTrade, ExecutionConfig};
+use crate::execution::ExecutionConfig;
 use crate::trade_executor::TradeExecutor;
-use crate::timing_strategy::TimingStrategy;
 
 /// Result of executing a single session
 #[derive(Debug)]

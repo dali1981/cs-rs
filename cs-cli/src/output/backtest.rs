@@ -123,7 +123,6 @@ impl BacktestOutputHandler {
     where
         R: TradeResultTrait + TradeResultMethods + HasAccounting + HasBprTimeline,
     {
-        use rust_decimal::prelude::ToPrimitive;
 
         println!("{}", style("Basis Metrics:").bold().cyan());
 

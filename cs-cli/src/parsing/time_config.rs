@@ -56,6 +56,7 @@ pub fn parse_time(time_str: Option<String>) -> Result<(Option<u32>, Option<u32>)
 /// # Validation
 /// * Range must contain exactly 2 comma-separated values
 /// * Both values must be valid floats
+#[allow(dead_code)]
 pub fn parse_delta_range(range_str: Option<String>) -> Result<Option<(f64, f64)>> {
     match range_str {
         None => Ok(None),

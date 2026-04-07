@@ -233,8 +233,6 @@ where
         &self,
         df: &polars::frame::DataFrame,
     ) -> Result<Vec<(f64, NaiveDate, f64, bool)>, EarningsAnalysisError> {
-        use polars::prelude::*;
-
         let strikes = df
             .column("strike")
             .map_err(|e| RepositoryError::Polars(e.to_string()))?

@@ -79,8 +79,8 @@ mod tests {
     fn create_test_result() -> CalendarSpreadResult {
         CalendarSpreadResult {
             symbol: "TEST".to_string(),
-            earnings_date: NaiveDate::from_ymd_opt(2025, 6, 20).unwrap(),
-            earnings_time: EarningsTime::AfterMarketClose,
+            earnings_date: Some(NaiveDate::from_ymd_opt(2025, 6, 20).unwrap()),
+            earnings_time: Some(EarningsTime::AfterMarketClose),
             strike: Strike::new(Decimal::new(100, 0)).unwrap(),
             long_strike: None,
             option_type: OptionType::Call,

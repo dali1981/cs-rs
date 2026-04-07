@@ -175,7 +175,7 @@ mod tests {
             symbol: "TEST".to_string(),
             earnings_date: None,
             earnings_time: None,
-            strike: Strike::new(dec!(100)),
+            strike: Strike::new(dec!(100)).unwrap(),
             expiration: chrono::NaiveDate::from_ymd_opt(2025, 1, 17).unwrap(),
             entry_time: Utc.with_ymd_and_hms(2025, 1, 10, 14, 30, 0).unwrap(),
             call_entry_price: entry_debit / dec!(2),
