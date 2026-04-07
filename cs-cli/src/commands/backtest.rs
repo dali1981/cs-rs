@@ -5,15 +5,17 @@ use async_trait::async_trait;
 use console::style;
 
 use crate::args::{BacktestArgs, GlobalArgs};
-use crate::config::{BacktestConfigBuilder, BacktestCommandBundle};
+use cs_backtest::{DataSourceConfig, EarningsSourceConfig, RunBacktestCommand};
+use crate::config::BacktestConfigBuilder;
 use crate::factory::UseCaseFactory;
 use crate::output::BacktestOutputHandler;
 use super::CommandHandler;
 
 /// Backtest command handler.
 ///
-/// Responsible for parsing CLI args and TOML config into a `BacktestCommandBundle`,
-/// then delegating to `UseCaseFactory`. No business logic lives here.
+/// Responsible for parsing CLI args and TOML config into an explicit
+/// `RunBacktestCommand` + infrastructure providers, then delegating to
+/// `UseCaseFactory`. No business logic lives here.
 pub struct BacktestCommand {
     args: BacktestArgs,
     global: GlobalArgs,
@@ -25,11 +27,11 @@ impl BacktestCommand {
         Self { args, global }
     }
 
-    /// Parse CLI args + TOML into a `BacktestCommandBundle`.
+    /// Parse CLI args + TOML into explicit application command and infra config.
     ///
-    /// The bundle separates the business-intent command from infrastructure
-    /// config (data source, earnings source). See ADR-0003.
-    fn build_bundle(&self) -> Result<BacktestCommandBundle> {
+    /// Returns `(command, data_source, earnings_source)` separately so each can
+    /// be wired to the factory independently. See ADR-0003.
+    fn build_command(&self) -> Result<(RunBacktestCommand, DataSourceConfig, EarningsSourceConfig)> {
         BacktestConfigBuilder::from_args(&self.args)
             .with_global(&self.global)
             .with_config_files(&self.args.conf)?
@@ -43,10 +45,10 @@ impl CommandHandler for BacktestCommand {
     async fn execute(&self) -> Result<()> {
         println!("{}", style("Running backtest...").bold());
 
-        // 1. Parse CLI args + TOML → explicit application command bundle
-        let bundle = self.build_bundle()?;
+        // 1. Parse CLI args + TOML → explicit command + infra config
+        let (command, data_source, earnings_source) = self.build_command()?;
 
-        // Log configuration (read from bundle before it is consumed by the factory)
+        // Log configuration
         let data_dir_source = if self.global.data_dir.is_some() {
             "CLI argument"
         } else if std::env::var("FINQ_DATA_DIR").is_ok() {
@@ -55,18 +57,18 @@ impl CommandHandler for BacktestCommand {
             "default (~/polygon/data)"
         };
 
-        println!("  Data source: {:?}", bundle.data_source);
+        println!("  Data source: {:?}", data_source);
         println!("  Data directory: {} (from {})",
-            style(bundle.data_source.data_dir().display()).cyan(),
+            style(data_source.data_dir().display()).cyan(),
             style(data_dir_source).dim());
-        println!("  Earnings source: {}", style(&bundle.earnings_source).cyan());
-        println!("  Strategy: {:?}", bundle.command.spread);
-        println!("  Selection: {:?}", bundle.command.selection_strategy);
-        println!("  Period: {} to {}", bundle.command.start_date, bundle.command.end_date);
+        println!("  Earnings source: {}", style(&earnings_source).cyan());
+        println!("  Strategy: {:?}", command.spread);
+        println!("  Selection: {:?}", command.selection_strategy);
+        println!("  Period: {} to {}", command.start_date, command.end_date);
         println!();
 
         // 2. Wire repositories and create use case via factory
-        let use_case = UseCaseFactory::create_backtest(bundle)?;
+        let use_case = UseCaseFactory::create_backtest(command, data_source, earnings_source)?;
 
         // 3. Execute
         let result = use_case

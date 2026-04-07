@@ -5,13 +5,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use cs_backtest::{
-    BacktestUseCase, BacktestConfig, DataSourceConfig,
+    BacktestUseCase, BacktestConfig, DataSourceConfig, EarningsSourceConfig,
     CampaignUseCase, CampaignConfig,
     GenerateIvTimeSeriesUseCase,
     MinuteAlignedIvUseCase,
     EarningsAnalysisUseCase,
+    RunBacktestCommand,
 };
-use crate::config::BacktestCommandBundle;
 use cs_domain::{OptionsDataRepository, EquityDataRepository};
 
 // Full mode types
@@ -51,20 +51,19 @@ impl BacktestUseCaseEnum {
 pub struct UseCaseFactory;
 
 impl UseCaseFactory {
-    /// Create a backtest use case from an explicit `BacktestCommandBundle`.
+    /// Create a backtest use case with explicit command and infrastructure config.
     ///
-    /// The bundle separates business intent (`command`) from infrastructure
-    /// (`data_source`, `earnings_source`). This factory is responsible for
-    /// wiring repositories and handing the assembled `BacktestConfig` to the
-    /// use case. When the use case is migrated to accept `RunBacktestCommand`
-    /// directly, the internal config reconstruction here can be removed.
-    ///
-    /// See ADR-0003.
+    /// Wires the appropriate repository implementations for the given data source,
+    /// then assembles and returns the use case. When `BacktestUseCase` is migrated
+    /// to accept `RunBacktestCommand` directly, the internal config reconstruction
+    /// can be removed. See ADR-0003.
     #[cfg(feature = "full")]
     pub fn create_backtest(
-        bundle: BacktestCommandBundle,
+        command: RunBacktestCommand,
+        data_source: DataSourceConfig,
+        earnings_source: EarningsSourceConfig,
     ) -> Result<BacktestUseCaseEnum> {
-        let config = Self::bundle_to_config(bundle);
+        let config = Self::command_to_config(command, data_source, earnings_source);
         match &config.data_source {
             DataSourceConfig::Finq { data_dir: _ } => {
                 let factory = RepositoryFactory;
@@ -79,26 +78,31 @@ impl UseCaseFactory {
         }
     }
 
-    /// Create a backtest use case with all dependencies (demo mode)
+    /// Create a backtest use case with explicit command and infrastructure config (demo mode)
     #[cfg(feature = "demo")]
     pub fn create_backtest(
-        bundle: BacktestCommandBundle,
+        command: RunBacktestCommand,
+        data_source: DataSourceConfig,
+        earnings_source: EarningsSourceConfig,
     ) -> Result<BacktestUseCase<DemoOptionsRepository, DemoEquityRepository>> {
-        let config = Self::bundle_to_config(bundle);
+        let config = Self::command_to_config(command, data_source, earnings_source);
         let factory = RepositoryFactory;
         Self::create_backtest_with_factory(&factory, config)
     }
 
-    /// Reconstruct a `BacktestConfig` from a `BacktestCommandBundle`.
+    /// Reconstruct a `BacktestConfig` from explicit command and infrastructure config.
     ///
-    /// This is a temporary shim. When `BacktestUseCase` is migrated to accept
-    /// `RunBacktestCommand` directly, this method and its callers can be removed.
-    fn bundle_to_config(bundle: BacktestCommandBundle) -> BacktestConfig {
-        let cmd = bundle.command;
+    /// Temporary shim until `BacktestUseCase` is migrated to accept
+    /// `RunBacktestCommand` directly.
+    fn command_to_config(
+        cmd: RunBacktestCommand,
+        data_source: DataSourceConfig,
+        earnings_source: EarningsSourceConfig,
+    ) -> BacktestConfig {
         BacktestConfig {
-            data_source: bundle.data_source,
+            data_source,
             data_dir: None, // never populated from RunBacktestCommand
-            earnings_source: bundle.earnings_source,
+            earnings_source,
             start_date: cmd.start_date,
             end_date: cmd.end_date,
             timing: cmd.timing,
