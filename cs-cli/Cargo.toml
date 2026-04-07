@@ -40,6 +40,14 @@ name = "plot_atm_iv"
 path = "src/bin/plot_atm_iv.rs"
 required-features = ["full"]
 
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+
+[[test]]
+name = "demo_smoke"
+required-features = ["demo"]
+
 [dependencies]
 cs-analytics = { workspace = true }
 cs-domain = { workspace = true, default-features = false }
