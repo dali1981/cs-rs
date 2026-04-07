@@ -9,21 +9,6 @@ use crate::args::{BacktestArgs, GlobalArgs};
 use crate::config::load_config;
 use crate::cli_args::CliOverrides;
 
-/// The result of building from CLI args and TOML config.
-///
-/// Separates the application command (business intent) from the infrastructure
-/// configuration (where data lives). The factory consumes both independently.
-///
-/// See ADR-0003: CLI/config types are DTOs, not domain entities.
-pub struct BacktestCommandBundle {
-    /// Business-intent command: what to backtest and how.
-    pub command: RunBacktestCommand,
-    /// Where market data (options, equity) comes from.
-    pub data_source: DataSourceConfig,
-    /// Where earnings calendar data comes from.
-    pub earnings_source: EarningsSourceConfig,
-}
-
 /// Builder for BacktestConfig from CLI args
 pub struct BacktestConfigBuilder {
     config_files: Vec<PathBuf>,
@@ -62,21 +47,16 @@ impl BacktestConfigBuilder {
         Ok(self)
     }
 
-    /// Build a `BacktestCommandBundle` separating business intent from infrastructure.
+    /// Build and split business intent from infrastructure configuration.
     ///
-    /// Internally still uses figment to merge TOML + CLI overrides into a
-    /// `BacktestConfig`, then splits it into:
-    /// - `command`: business-intent fields only (`RunBacktestCommand`)
-    /// - `data_source`: where market data lives
-    /// - `earnings_source`: where earnings calendar data lives
-    ///
-    /// The factory receives these separately (see ADR-0003).
-    pub fn build(self) -> Result<BacktestCommandBundle> {
+    /// Returns `(command, data_source, earnings_source)` separately so the
+    /// factory can wire each independently (ADR-0003).
+    pub fn build(self) -> Result<(RunBacktestCommand, DataSourceConfig, EarningsSourceConfig)> {
         let config = self.build_raw_config()?;
         let data_source = config.data_source.clone();
         let earnings_source = config.earnings_source.clone();
         let command = config.to_run_command();
-        Ok(BacktestCommandBundle { command, data_source, earnings_source })
+        Ok((command, data_source, earnings_source))
     }
 
     /// Build the intermediate `BacktestConfig` (TOML DTO). Used internally and

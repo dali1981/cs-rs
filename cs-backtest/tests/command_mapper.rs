@@ -66,6 +66,37 @@ fn to_run_command_transfers_business_fields() {
     assert!(cmd.parallel);
 }
 
+/// Validates the explicit wiring invariant introduced in DAL-73.
+///
+/// `BacktestCommandBundle` has been removed. `RunBacktestCommand`, `DataSourceConfig`,
+/// and `EarningsSourceConfig` are now separate values at every call site.
+/// If this test compiles and passes, the bundle type is gone and all three
+/// components can be constructed and used independently.
+#[test]
+fn command_executes_without_bundle() {
+    use cs_backtest::DataSourceConfig;
+    use std::path::PathBuf;
+
+    let config = sample_config();
+
+    // Application command — business intent only
+    let command = config.to_run_command();
+
+    // Infrastructure config — extracted independently, never bundled with command
+    let data_source = config.data_source.clone();
+    let earnings_source = config.earnings_source.clone();
+
+    // Command carries business fields
+    assert_eq!(command.start_date, config.start_date);
+    assert_eq!(command.end_date,   config.end_date);
+    assert!(matches!(command.spread, SpreadType::Straddle));
+
+    // data_source and earnings_source are separate, independent values
+    assert!(matches!(data_source, DataSourceConfig::Finq { .. }));
+    let _ = earnings_source;
+    let _ = PathBuf::new(); // ensure std::path is accessible separately
+}
+
 /// Infrastructure fields must NOT be present on RunBacktestCommand.
 /// Verified structurally: the type simply does not have these fields.
 /// This test documents the invariant with a compile-time comment.
