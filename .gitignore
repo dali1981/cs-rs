@@ -65,14 +65,16 @@ mlruns/
 *.jpeg
 *.svg
 
-# Documentation (keep only README.md and ADRs)
+# Documentation (keep only README.md and versioned docs)
 *.md
 !README.md
 !docs/adr/*.md
+!docs/architecture/*.md
 
 # Analysis and research
 docs/*
 !docs/adr/
+!docs/architecture/
 specs/
 scripts/
 simulation/
