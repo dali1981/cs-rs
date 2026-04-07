@@ -8,6 +8,19 @@
 //! Builders live here (not in production module paths) to avoid polluting the
 //! production API. They are `pub` so integration tests in other crates can
 //! import them as `cs_domain::testing::EarningsEventBuilder`.
+//!
+//! # Builder coverage audit (DAL-65)
+//!
+//! The following types from the DAL-65 deliverable list were evaluated:
+//!
+//! | Type | Decision | Rationale |
+//! |------|----------|-----------|
+//! | `EarningsEvent` | **Builder added** | High churn; many test init sites; struct grows fields frequently |
+//! | `TradingCampaign` | **Builder added** | 9 fields; all test sites previously used direct init; field names drift |
+//! | `execution::types::ExecutionConfig` | **No builder** | Already has 4 factory methods (`for_straddle`, `for_calendar_spread`, `for_iron_butterfly`, `for_calendar_straddle`) plus `with_*` setters. Test code already uses factory methods exclusively. One production direct-init site (`campaign_use_case.rs`) was fixed to use the factory method. |
+//! | `config::execution::ExecutionConfig` | **No builder** | Single-field struct (`parallel: bool`); `Default` impl is sufficient |
+//! | `TradeIntent` | **No builder** | Type does not exist in the codebase (appears only in docs) |
+//! | `Greeks` | **No builder** | Pure value object, 5 fields all named and typed `f64`; `Greeks::ZERO` serves as zero-default; direct struct init is idiomatic and clear |
 
 use chrono::NaiveDate;
 

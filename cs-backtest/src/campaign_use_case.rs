@@ -114,7 +114,6 @@ impl CampaignUseCase {
         use cs_domain::TradeFactory;
         use crate::execution::ExecutionConfig;
         use crate::trade_factory_impl::DefaultTradeFactory;
-        use rust_decimal::Decimal;
 
         // Create trade factory
         let trade_factory: Arc<dyn TradeFactory> = Arc::new(DefaultTradeFactory::new(
@@ -123,15 +122,7 @@ impl CampaignUseCase {
         ));
 
         // Create execution config (no IV filtering by default)
-        let execution_config = ExecutionConfig {
-            max_entry_iv: None,
-            min_entry_cost: Decimal::new(50, 2), // $0.50 minimum
-            min_credit: None,
-            trading_costs: cs_domain::TradingCostConfig::default(),
-            hedge_config: None,
-            margin_config: cs_domain::MarginConfig::default(),
-            attribution_config: None,
-        };
+        let execution_config = ExecutionConfig::for_straddle(None);
 
         Ok(SessionExecutor::new(
             Arc::clone(&self.options_repo),
