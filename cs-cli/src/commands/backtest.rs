@@ -62,9 +62,9 @@ impl CommandHandler for BacktestCommand {
             style(data_source.data_dir().display()).cyan(),
             style(data_dir_source).dim());
         println!("  Earnings source: {}", style(&earnings_source).cyan());
-        println!("  Strategy: {:?}", command.spread);
-        println!("  Selection: {:?}", command.selection_strategy);
-        println!("  Period: {} to {}", command.start_date, command.end_date);
+        println!("  Strategy: {:?}", command.strategy.spread);
+        println!("  Selection: {:?}", command.strategy.selection_strategy);
+        println!("  Period: {} to {}", command.period.start_date, command.period.end_date);
         println!();
 
         // 2. Wire repositories and create use case via factory

@@ -100,45 +100,56 @@ impl UseCaseFactory {
         earnings_source: EarningsSourceConfig,
     ) -> BacktestConfig {
         BacktestConfig {
+            // Infrastructure (not in command)
             data_source,
-            data_dir: None, // never populated from RunBacktestCommand
+            data_dir: None,
             earnings_source,
-            start_date: cmd.start_date,
-            end_date: cmd.end_date,
-            timing: cmd.timing,
-            timing_strategy: cmd.timing_strategy,
-            entry_days_before: cmd.entry_days_before,
-            exit_days_before: cmd.exit_days_before,
-            entry_offset: cmd.entry_offset,
-            holding_days: cmd.holding_days,
-            exit_days_after: cmd.exit_days_after,
-            selection: cmd.selection,
-            spread: cmd.spread,
-            selection_strategy: cmd.selection_strategy,
-            symbols: cmd.symbols,
-            min_market_cap: cmd.min_market_cap,
-            parallel: cmd.parallel,
-            pricing_model: cmd.pricing_model,
-            vol_model: cmd.vol_model,
-            target_delta: cmd.target_delta,
-            delta_range: cmd.delta_range,
-            delta_scan_steps: cmd.delta_scan_steps,
-            strike_match_mode: cmd.strike_match_mode,
-            max_entry_iv: cmd.max_entry_iv,
-            wing_width: cmd.wing_width,
-            straddle_entry_days: cmd.straddle_entry_days,
-            straddle_exit_days: cmd.straddle_exit_days,
-            min_notional: cmd.min_notional,
-            min_straddle_dte: cmd.min_straddle_dte,
-            min_entry_price: cmd.min_entry_price,
-            max_entry_price: cmd.max_entry_price,
-            post_earnings_holding_days: cmd.post_earnings_holding_days,
-            hedge_config: cmd.hedge_config,
-            attribution_config: cmd.attribution_config,
-            trading_costs: cmd.trading_costs,
-            rules: cmd.rules,
-            return_basis: cmd.return_basis,
-            margin: cmd.margin,
+
+            // Period
+            start_date: cmd.period.start_date,
+            end_date: cmd.period.end_date,
+
+            // Strategy
+            spread: cmd.strategy.spread,
+            selection_strategy: cmd.strategy.selection_strategy,
+            selection: cmd.strategy.selection,
+            timing: cmd.strategy.timing,
+            timing_strategy: cmd.strategy.timing_strategy,
+            entry_days_before: cmd.strategy.entry_days_before,
+            exit_days_before: cmd.strategy.exit_days_before,
+            entry_offset: cmd.strategy.entry_offset,
+            holding_days: cmd.strategy.holding_days,
+            exit_days_after: cmd.strategy.exit_days_after,
+            wing_width: cmd.strategy.wing_width,
+            straddle_entry_days: cmd.strategy.straddle_entry_days,
+            straddle_exit_days: cmd.strategy.straddle_exit_days,
+            min_straddle_dte: cmd.strategy.min_straddle_dte,
+            post_earnings_holding_days: cmd.strategy.post_earnings_holding_days,
+
+            // Execution
+            parallel: cmd.execution.parallel,
+            pricing_model: cmd.execution.pricing_model,
+            vol_model: cmd.execution.vol_model,
+            target_delta: cmd.execution.target_delta,
+            delta_range: cmd.execution.delta_range,
+            delta_scan_steps: cmd.execution.delta_scan_steps,
+            strike_match_mode: cmd.execution.strike_match_mode,
+
+            // Filters
+            symbols: cmd.filters.symbols,
+            min_market_cap: cmd.filters.min_market_cap,
+            max_entry_iv: cmd.filters.max_entry_iv,
+            min_notional: cmd.filters.min_notional,
+            min_entry_price: cmd.filters.min_entry_price,
+            max_entry_price: cmd.filters.max_entry_price,
+            rules: cmd.filters.rules,
+
+            // Risk
+            return_basis: cmd.risk.return_basis,
+            margin: cmd.risk.margin,
+            hedge_config: cmd.risk.hedge_config,
+            attribution_config: cmd.risk.attribution_config,
+            trading_costs: cmd.risk.trading_costs,
         }
     }
 
