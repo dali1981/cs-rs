@@ -116,7 +116,7 @@ where
 
     let mut snapshots = Vec::new();
     let symbol = ExecutableTrade::symbol(trade).to_string();
-    let mut build_snapshot = |ts: DateTime<Utc>, spot: Decimal, pricing: &CompositePricing| {
+    let build_snapshot = |ts: DateTime<Utc>, spot: Decimal, pricing: &CompositePricing| {
         let trade_legs = trade.legs();
         if trade_legs.len() != pricing.legs.len() {
             tracing::debug!(

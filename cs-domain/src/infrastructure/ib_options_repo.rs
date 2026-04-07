@@ -227,7 +227,7 @@ impl OptionsDataRepository for IbOptionsRepository {
         let contracts = self.db.get_symbol_contracts(underlying)
             .map_err(|e| RepositoryError::NotFound(format!("Failed to get contracts for {}: {}", underlying, e)))?;
 
-        let mut expirations: HashSet<NaiveDate> = contracts
+        let expirations: HashSet<NaiveDate> = contracts
             .iter()
             .map(|c| c.contract.expiration)
             .filter(|&exp| exp > as_of_date)
@@ -247,7 +247,7 @@ impl OptionsDataRepository for IbOptionsRepository {
         let contracts = self.db.get_symbol_contracts(underlying)
             .map_err(|e| RepositoryError::NotFound(format!("Failed to get contracts for {}: {}", underlying, e)))?;
 
-        let mut strikes: HashSet<Decimal> = contracts
+        let strikes: HashSet<Decimal> = contracts
             .iter()
             .filter(|c| c.contract.expiration == expiration)
             .map(|c| c.contract.strike)

@@ -9,7 +9,7 @@ use cs_backtest::{
     CampaignUseCase, CampaignConfig,
     GenerateIvTimeSeriesUseCase,
     MinuteAlignedIvUseCase,
-    EarningsAnalysisUseCase,
+
     RunBacktestCommand,
 };
 use cs_domain::{OptionsDataRepository, EquityDataRepository};

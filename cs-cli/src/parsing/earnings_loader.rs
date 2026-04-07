@@ -1,5 +1,7 @@
 //! Earnings data loading utilities
 
+#![allow(dead_code)]
+
 use anyhow::Result;
 use std::path::PathBuf;
 use cs_domain::{EarningsEvent, value_objects::EarningsTime};

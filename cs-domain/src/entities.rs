@@ -971,7 +971,7 @@ impl Condor {
         }
 
         // Validate strike ordering: far wings further from center than near
-        let center_val: f64 = near_call.strike.value().try_into().unwrap_or(0.0);
+        let _center_val: f64 = near_call.strike.value().try_into().unwrap_or(0.0);
         let near_call_val: f64 = near_call.strike.value().try_into().unwrap_or(0.0);
         let far_call_val: f64 = far_upper_call.strike.value().try_into().unwrap_or(0.0);
         let far_put_val: f64 = far_lower_put.strike.value().try_into().unwrap_or(0.0);
@@ -1640,7 +1640,7 @@ impl crate::trade::TradeResult for StrangleResult {
     fn total_pnl_with_hedge(&self) -> Option<Decimal> { self.total_pnl_with_hedge }
     fn apply_hedge_results(
         &mut self,
-        position: crate::hedging::HedgePosition,
+        _position: crate::hedging::HedgePosition,
         hedge_pnl: Decimal,
         total_pnl: Decimal,
         attribution: Option<crate::position::PositionAttribution>,
@@ -1721,7 +1721,7 @@ impl crate::trade::TradeResult for ButterflyResult {
     fn total_pnl_with_hedge(&self) -> Option<Decimal> { self.total_pnl_with_hedge }
     fn apply_hedge_results(
         &mut self,
-        position: crate::hedging::HedgePosition,
+        _position: crate::hedging::HedgePosition,
         hedge_pnl: Decimal,
         total_pnl: Decimal,
         attribution: Option<crate::position::PositionAttribution>,
@@ -1803,7 +1803,7 @@ impl crate::trade::TradeResult for CondorResult {
     fn total_pnl_with_hedge(&self) -> Option<Decimal> { self.total_pnl_with_hedge }
     fn apply_hedge_results(
         &mut self,
-        position: crate::hedging::HedgePosition,
+        _position: crate::hedging::HedgePosition,
         hedge_pnl: Decimal,
         total_pnl: Decimal,
         attribution: Option<crate::position::PositionAttribution>,
@@ -1885,7 +1885,7 @@ impl crate::trade::TradeResult for IronCondorResult {
     fn total_pnl_with_hedge(&self) -> Option<Decimal> { self.total_pnl_with_hedge }
     fn apply_hedge_results(
         &mut self,
-        position: crate::hedging::HedgePosition,
+        _position: crate::hedging::HedgePosition,
         hedge_pnl: Decimal,
         total_pnl: Decimal,
         attribution: Option<crate::position::PositionAttribution>,
@@ -2145,8 +2145,8 @@ mod tests {
     fn test_calendar_spread_result_iv_ratio() {
         let result = CalendarSpreadResult {
             symbol: "AAPL".to_string(),
-            earnings_date: NaiveDate::from_ymd_opt(2025, 6, 20).unwrap(),
-            earnings_time: EarningsTime::AfterMarketClose,
+            earnings_date: Some(NaiveDate::from_ymd_opt(2025, 6, 20).unwrap()),
+            earnings_time: Some(EarningsTime::AfterMarketClose),
             strike: Strike::new(Decimal::new(180, 0)).unwrap(),
             long_strike: None,
             option_type: OptionType::Call,
@@ -2202,8 +2202,8 @@ mod tests {
     fn test_calendar_spread_result_is_winner() {
         let mut result = CalendarSpreadResult {
             symbol: "AAPL".to_string(),
-            earnings_date: NaiveDate::from_ymd_opt(2025, 6, 20).unwrap(),
-            earnings_time: EarningsTime::AfterMarketClose,
+            earnings_date: Some(NaiveDate::from_ymd_opt(2025, 6, 20).unwrap()),
+            earnings_time: Some(EarningsTime::AfterMarketClose),
             strike: Strike::new(Decimal::new(180, 0)).unwrap(),
             long_strike: None,
             option_type: OptionType::Call,
@@ -2403,8 +2403,8 @@ mod tests {
     fn test_calendar_straddle_result_is_winner() {
         let result = CalendarStraddleResult {
             symbol: "AAPL".to_string(),
-            earnings_date: NaiveDate::from_ymd_opt(2025, 11, 6).unwrap(),
-            earnings_time: EarningsTime::AfterMarketClose,
+            earnings_date: Some(NaiveDate::from_ymd_opt(2025, 11, 6).unwrap()),
+            earnings_time: Some(EarningsTime::AfterMarketClose),
             short_strike: Strike::new(Decimal::new(180, 0)).unwrap(),
             long_strike: Strike::new(Decimal::new(180, 0)).unwrap(),
             short_expiry: NaiveDate::from_ymd_opt(2025, 11, 7).unwrap(),

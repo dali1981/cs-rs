@@ -384,7 +384,6 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
 
     /// Sharpe ratio using capital-weighted returns (more accurate)
     pub fn capital_weighted_sharpe(&self) -> f64 {
-        use rust_decimal::prelude::ToPrimitive;
 
         let returns: Vec<f64> = self.results.iter()
             .filter_map(|r| r.return_on_basis(self.return_basis))
@@ -409,7 +408,6 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
 
     /// Get comprehensive statistics using the accounting module
     pub fn accounting_statistics(&self) -> cs_domain::TradeStatistics {
-        use cs_domain::HasAccounting;
 
         let accountings: Vec<_> = self.results.iter()
             .map(|r| r.to_accounting())
@@ -619,7 +617,7 @@ where
     pub async fn execute_with_strategy<S, R>(
         &self,
         strategy: &S,
-        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
+        _on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
     ) -> Result<BacktestResult<R>, BacktestError>
     where
         S: TradeStrategy<R> + Sync,
@@ -627,8 +625,6 @@ where
     {
         let mut all_results: Vec<R> = Vec::new();
         let mut dropped_events: Vec<TradeGenerationError> = Vec::new();
-        let mut sessions_processed = 0;
-        let mut total_opportunities = 0;
 
         let selector = self.create_selector();
         let criteria = self.build_expiration_criteria();
@@ -777,7 +773,7 @@ where
             }
         }
 
-        total_opportunities = filtered_events.len();
+        let total_opportunities = filtered_events.len();
 
         // 6. Execute trades (trade-by-trade)
         let tradable_refs: Vec<&TradableEvent> = filtered_events.iter().collect();
@@ -807,7 +803,7 @@ where
             }
         }
 
-        sessions_processed = 1; // Single pass in new model
+        let sessions_processed = 1usize; // Single pass in new model
 
         let total_entries = all_results.len();
 
@@ -1020,6 +1016,7 @@ where
         }
     }
 
+    #[allow(dead_code)]
     fn passes_market_cap_filter(&self, event: &EarningsEvent) -> bool {
         match (self.config.min_market_cap, event.market_cap) {
             (Some(min), Some(cap)) => cap >= min,

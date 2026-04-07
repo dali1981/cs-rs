@@ -9,6 +9,7 @@ use super::CommandHandler;
 /// Analyze command handler
 pub struct AnalyzeCommand {
     args: AnalyzeArgs,
+    #[allow(dead_code)]
     global: GlobalArgs,
 }
 

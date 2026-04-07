@@ -47,7 +47,7 @@ impl EventRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builders::EarningsEventBuilder;
+    use crate::testing::EarningsEventBuilder;
 
     fn mock_event(symbol: &str, market_cap: Option<u64>) -> EarningsEvent {
         EarningsEventBuilder::new(symbol)

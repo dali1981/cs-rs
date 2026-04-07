@@ -4,7 +4,7 @@
 //! across individual strategy implementations.
 
 use chrono::{DateTime, Utc};
-use cs_domain::{ApplyCosts, TradeType, TradingContext, TradingCostCalculator};
+use cs_domain::{ApplyCosts, TradeType, TradingContext};
 use super::types::ExecutionConfig;
 
 /// Trait for pricing types that can generate a TradingContext

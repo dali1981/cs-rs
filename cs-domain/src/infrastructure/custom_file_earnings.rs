@@ -239,15 +239,8 @@ mod tests {
         let times = Series::new("earnings_time".into(), &["BMO", "AMC"]);
 
         let mut df = DataFrame::new(vec![symbols, dates, times]).unwrap();
-        df = df
-            .with_column(
-                df.column("earnings_date")
-                    .unwrap()
-                    .clone()
-                    .cast(&DataType::Date)
-                    .unwrap(),
-            )
-            .unwrap();
+        let cast_col = df.column("earnings_date").unwrap().clone().cast(&DataType::Date).unwrap();
+        df.with_column(cast_col).unwrap();
 
         // Write to temp parquet
         let temp_file = NamedTempFile::new().unwrap();

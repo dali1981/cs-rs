@@ -335,7 +335,7 @@ mod tests {
     use super::*;
 
     fn mock_event(symbol: &str, market_cap: Option<u64>) -> EarningsEvent {
-        cs_domain::builders::EarningsEventBuilder::new(symbol)
+        cs_domain::testing::EarningsEventBuilder::new(symbol)
             .market_cap_opt(market_cap)
             .build()
     }

@@ -10,6 +10,7 @@ use cs_domain::RollPolicy;
 /// - "weekly": requires roll_day_modifier (monday-friday)
 /// - "monthly": requires roll_day_modifier (week offset), only if allow_monthly=true
 /// - "days:N": interval-based rolling
+#[allow(dead_code)]
 pub fn parse_roll_policy_impl(
     policy_str: &str,
     roll_day_modifier: Option<&str>,
@@ -47,11 +48,13 @@ pub fn parse_roll_policy_impl(
 }
 
 /// Parse roll strategy from CLI arguments (backtest command - no monthly)
+#[allow(dead_code)]
 pub fn parse_roll_policy(strategy_str: &str, roll_day_str: Option<&str>) -> Result<RollPolicy> {
     parse_roll_policy_impl(strategy_str, roll_day_str, false)
 }
 
 /// Parse roll policy from campaign command arguments (allows monthly)
+#[allow(dead_code)]
 pub fn parse_campaign_roll_policy(roll_policy: &str, roll_day: &str) -> Result<RollPolicy> {
     parse_roll_policy_impl(roll_policy, Some(roll_day), true)
 }

@@ -295,6 +295,7 @@ impl TradingCampaign {
 mod tests {
     use super::*;
     use crate::{EarningsEvent, EarningsTime, SessionSchedule};
+    use crate::testing::TradingCampaignBuilder;
     use chrono::{Weekday, Datelike};
 
     fn sample_earnings() -> Vec<EarningsEvent> {
@@ -324,18 +325,15 @@ mod tests {
 
     #[test]
     fn test_calendar_spread_session_generation() {
-        let campaign = TradingCampaign {
-            symbol: "PENG".to_string(),
-            strategy: OptionStrategy::CalendarSpread,
-            start_date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-            end_date: NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
-            period_policy: PeriodPolicy::cross_earnings(),
-            expiration_policy: ExpirationPolicy::FirstAfter {
+        let campaign = TradingCampaignBuilder::new("PENG")
+            .strategy(OptionStrategy::CalendarSpread)
+            .start_date(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap())
+            .end_date(NaiveDate::from_ymd_opt(2025, 12, 31).unwrap())
+            .period_policy(PeriodPolicy::cross_earnings())
+            .expiration_policy(ExpirationPolicy::FirstAfter {
                 min_date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-            },
-            iron_butterfly_config: None,
-            trade_direction: TradeDirection::Short,
-        };
+            })
+            .build();
 
         let earnings = sample_earnings();
         let sessions = campaign.generate_sessions(&earnings);
@@ -352,16 +350,15 @@ mod tests {
 
     #[test]
     fn test_pre_earnings_straddle_14_days() {
-        let campaign = TradingCampaign {
-            symbol: "PENG".to_string(),
-            strategy: OptionStrategy::Straddle,
-            start_date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-            end_date: NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
-            period_policy: PeriodPolicy::pre_earnings(14),
-            expiration_policy: ExpirationPolicy::FirstAfter {
+        let campaign = TradingCampaignBuilder::new("PENG")
+            .strategy(OptionStrategy::Straddle)
+            .start_date(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap())
+            .end_date(NaiveDate::from_ymd_opt(2025, 12, 31).unwrap())
+            .period_policy(PeriodPolicy::pre_earnings(14))
+            .expiration_policy(ExpirationPolicy::FirstAfter {
                 min_date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-            },
-        };
+            })
+            .build();
 
         let earnings = sample_earnings();
         let sessions = campaign.generate_sessions(&earnings);
@@ -385,16 +382,15 @@ mod tests {
 
     #[test]
     fn test_weekly_inter_earnings_sessions() {
-        let campaign = TradingCampaign {
-            symbol: "PENG".to_string(),
-            strategy: OptionStrategy::Straddle,
-            start_date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-            end_date: NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
-            period_policy: PeriodPolicy::weekly_between_earnings(),
-            expiration_policy: ExpirationPolicy::FirstAfter {
+        let campaign = TradingCampaignBuilder::new("PENG")
+            .strategy(OptionStrategy::Straddle)
+            .start_date(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap())
+            .end_date(NaiveDate::from_ymd_opt(2025, 12, 31).unwrap())
+            .period_policy(PeriodPolicy::weekly_between_earnings())
+            .expiration_policy(ExpirationPolicy::FirstAfter {
                 min_date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-            },
-        };
+            })
+            .build();
 
         let earnings = sample_earnings();
         let sessions = campaign.generate_sessions(&earnings);
@@ -424,27 +420,25 @@ mod tests {
 
     #[test]
     fn test_session_schedule_from_campaigns() {
-        let campaign1 = TradingCampaign {
-            symbol: "PENG".to_string(),
-            strategy: OptionStrategy::CalendarSpread,
-            start_date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-            end_date: NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
-            period_policy: PeriodPolicy::cross_earnings(),
-            expiration_policy: ExpirationPolicy::FirstAfter {
+        let campaign1 = TradingCampaignBuilder::new("PENG")
+            .strategy(OptionStrategy::CalendarSpread)
+            .start_date(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap())
+            .end_date(NaiveDate::from_ymd_opt(2025, 12, 31).unwrap())
+            .period_policy(PeriodPolicy::cross_earnings())
+            .expiration_policy(ExpirationPolicy::FirstAfter {
                 min_date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-            },
-        };
+            })
+            .build();
 
-        let campaign2 = TradingCampaign {
-            symbol: "AAPL".to_string(),
-            strategy: OptionStrategy::CalendarSpread,
-            start_date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-            end_date: NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
-            period_policy: PeriodPolicy::cross_earnings(),
-            expiration_policy: ExpirationPolicy::FirstAfter {
+        let campaign2 = TradingCampaignBuilder::new("AAPL")
+            .strategy(OptionStrategy::CalendarSpread)
+            .start_date(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap())
+            .end_date(NaiveDate::from_ymd_opt(2025, 12, 31).unwrap())
+            .period_policy(PeriodPolicy::cross_earnings())
+            .expiration_policy(ExpirationPolicy::FirstAfter {
                 min_date: NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
-            },
-        };
+            })
+            .build();
 
         // Create AAPL earnings (different dates from PENG)
         let mut earnings = sample_earnings();

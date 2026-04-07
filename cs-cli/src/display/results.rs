@@ -13,6 +13,7 @@ pub struct ResultRow {
 
 impl ResultRow {
     /// Create a new result row
+    #[allow(dead_code)]
     pub fn new(metric: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             metric: metric.into(),

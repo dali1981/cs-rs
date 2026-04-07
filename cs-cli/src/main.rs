@@ -1,9 +1,8 @@
 // cs-cli: Command-line interface for calendar spread backtesting
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use console::style;
-use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
 

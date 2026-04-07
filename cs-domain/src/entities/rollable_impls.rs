@@ -134,7 +134,7 @@ impl RollableTrade for CalendarSpread {
         factory: &dyn TradeFactory,
         symbol: &str,
         dt: DateTime<Utc>,
-        min_expiration: NaiveDate,
+        _min_expiration: NaiveDate,
     ) -> Result<Self, TradeConstructionError> {
         // Use default DTE ranges for calendar spread
         // Short: 0-45 DTE, Long: 45+ DTE (typical pre-earnings calendar)

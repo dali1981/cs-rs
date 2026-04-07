@@ -1,4 +1,4 @@
-use cs_domain::{HedgePosition, StraddleResult};
+use cs_domain::StraddleResult;
 use rust_decimal::Decimal;
 
 /// Compare hedged vs unhedged performance for a single trade
@@ -16,7 +16,7 @@ impl HedgingComparison {
     /// Create comparison from a StraddleResult with hedging data
     pub fn from_result(result: &StraddleResult) -> Option<Self> {
         let hedge_pos = result.hedge_position.as_ref()?;
-        let hedge_pnl = result.hedge_pnl?;
+        let _hedge_pnl = result.hedge_pnl?;
         let total_pnl = result.total_pnl_with_hedge?;
 
         let unhedged_pnl = result.pnl;

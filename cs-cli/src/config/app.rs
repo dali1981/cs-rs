@@ -492,6 +492,7 @@ impl AppConfig {
 /// Build HedgeConfig from CLI arguments (shared by backtest and campaign commands)
 ///
 /// Returns None if hedging is not enabled.
+#[allow(dead_code)]
 pub fn build_hedge_config_from_args(
     enabled: bool,
     strategy: &str,
