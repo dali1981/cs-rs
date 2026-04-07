@@ -47,16 +47,12 @@ impl EventRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDate;
-    use crate::EarningsTime;
+    use crate::builders::EarningsEventBuilder;
 
     fn mock_event(symbol: &str, market_cap: Option<u64>) -> EarningsEvent {
-        EarningsEvent {
-            symbol: symbol.to_string(),
-            date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
-            time: EarningsTime::AfterClose,
-            market_cap,
-        }
+        EarningsEventBuilder::new(symbol)
+            .market_cap_opt(market_cap)
+            .build()
     }
 
     #[test]
