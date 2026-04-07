@@ -11,6 +11,7 @@ use cs_backtest::{
     MinuteAlignedIvUseCase,
     EarningsAnalysisUseCase,
 };
+use crate::config::BacktestCommandBundle;
 use cs_domain::{OptionsDataRepository, EquityDataRepository};
 
 // Full mode types
@@ -50,13 +51,20 @@ impl BacktestUseCaseEnum {
 pub struct UseCaseFactory;
 
 impl UseCaseFactory {
-    /// Create a backtest use case with all dependencies
-    /// Dispatches to appropriate repository factory based on config.data_source
-    /// Earnings repos are constructed from config.earnings_file and config.earnings_dir
+    /// Create a backtest use case from an explicit `BacktestCommandBundle`.
+    ///
+    /// The bundle separates business intent (`command`) from infrastructure
+    /// (`data_source`, `earnings_source`). This factory is responsible for
+    /// wiring repositories and handing the assembled `BacktestConfig` to the
+    /// use case. When the use case is migrated to accept `RunBacktestCommand`
+    /// directly, the internal config reconstruction here can be removed.
+    ///
+    /// See ADR-0003.
     #[cfg(feature = "full")]
     pub fn create_backtest(
-        config: BacktestConfig,
+        bundle: BacktestCommandBundle,
     ) -> Result<BacktestUseCaseEnum> {
+        let config = Self::bundle_to_config(bundle);
         match &config.data_source {
             DataSourceConfig::Finq { data_dir: _ } => {
                 let factory = RepositoryFactory;
@@ -74,10 +82,60 @@ impl UseCaseFactory {
     /// Create a backtest use case with all dependencies (demo mode)
     #[cfg(feature = "demo")]
     pub fn create_backtest(
-        config: BacktestConfig,
+        bundle: BacktestCommandBundle,
     ) -> Result<BacktestUseCase<DemoOptionsRepository, DemoEquityRepository>> {
+        let config = Self::bundle_to_config(bundle);
         let factory = RepositoryFactory;
         Self::create_backtest_with_factory(&factory, config)
+    }
+
+    /// Reconstruct a `BacktestConfig` from a `BacktestCommandBundle`.
+    ///
+    /// This is a temporary shim. When `BacktestUseCase` is migrated to accept
+    /// `RunBacktestCommand` directly, this method and its callers can be removed.
+    fn bundle_to_config(bundle: BacktestCommandBundle) -> BacktestConfig {
+        let cmd = bundle.command;
+        BacktestConfig {
+            data_source: bundle.data_source,
+            data_dir: None, // never populated from RunBacktestCommand
+            earnings_source: bundle.earnings_source,
+            start_date: cmd.start_date,
+            end_date: cmd.end_date,
+            timing: cmd.timing,
+            timing_strategy: cmd.timing_strategy,
+            entry_days_before: cmd.entry_days_before,
+            exit_days_before: cmd.exit_days_before,
+            entry_offset: cmd.entry_offset,
+            holding_days: cmd.holding_days,
+            exit_days_after: cmd.exit_days_after,
+            selection: cmd.selection,
+            spread: cmd.spread,
+            selection_strategy: cmd.selection_strategy,
+            symbols: cmd.symbols,
+            min_market_cap: cmd.min_market_cap,
+            parallel: cmd.parallel,
+            pricing_model: cmd.pricing_model,
+            vol_model: cmd.vol_model,
+            target_delta: cmd.target_delta,
+            delta_range: cmd.delta_range,
+            delta_scan_steps: cmd.delta_scan_steps,
+            strike_match_mode: cmd.strike_match_mode,
+            max_entry_iv: cmd.max_entry_iv,
+            wing_width: cmd.wing_width,
+            straddle_entry_days: cmd.straddle_entry_days,
+            straddle_exit_days: cmd.straddle_exit_days,
+            min_notional: cmd.min_notional,
+            min_straddle_dte: cmd.min_straddle_dte,
+            min_entry_price: cmd.min_entry_price,
+            max_entry_price: cmd.max_entry_price,
+            post_earnings_holding_days: cmd.post_earnings_holding_days,
+            hedge_config: cmd.hedge_config,
+            attribution_config: cmd.attribution_config,
+            trading_costs: cmd.trading_costs,
+            rules: cmd.rules,
+            return_basis: cmd.return_basis,
+            margin: cmd.margin,
+        }
     }
 
     /// Create a backtest use case with a custom repository factory
