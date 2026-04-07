@@ -8,6 +8,7 @@ use cs_backtest::{BacktestConfig, DataSourceConfig, EarningsSourceConfig, RunBac
 use crate::args::{BacktestArgs, GlobalArgs};
 use crate::config::load_config;
 use crate::cli_args::CliOverrides;
+use crate::mapping::map_config_to_command;
 
 /// Builder for BacktestConfig from CLI args
 pub struct BacktestConfigBuilder {
@@ -55,7 +56,7 @@ impl BacktestConfigBuilder {
         let config = self.build_raw_config()?;
         let data_source = config.data_source.clone();
         let earnings_source = config.earnings_source.clone();
-        let command = config.to_run_command();
+        let command = map_config_to_command(&config);
         Ok((command, data_source, earnings_source))
     }
 
