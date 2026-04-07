@@ -36,7 +36,10 @@ pub mod attribution;
 pub mod rules;  // Rule evaluation for entry filtering
 
 // Application commands (clean boundary between CLI/config and use cases)
-pub use commands::RunBacktestCommand;
+pub use commands::{
+    RunBacktestCommand,
+    BacktestPeriod, StrategySpec, ExecutionSpec, FilterSet, RiskConfig,
+};
 
 // Config
 pub use config::{BacktestConfig, SpreadType, SelectionType, DataSourceConfig, EarningsSourceConfig, EarningsProvider};
