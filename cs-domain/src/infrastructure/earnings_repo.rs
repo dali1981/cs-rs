@@ -6,7 +6,7 @@ use polars::prelude::*;
 use crate::datetime::TradingDate;
 use crate::entities::EarningsEvent;
 use crate::repositories::{EarningsRepository, RepositoryError};
-use crate::value_objects::EarningsTime;
+use crate::infrastructure::mappers::earnings::parse_earnings_time;
 
 /// Stub implementation of EarningsRepository
 ///
@@ -142,7 +142,7 @@ impl EarningsRepository for ParquetEarningsRepository {
 
                 let earnings_time_str = times_col.get(i)
                     .ok_or_else(|| RepositoryError::Parse("Missing earnings_time value".into()))?;
-                let earnings_time = EarningsTime::from_str(earnings_time_str);
+                let earnings_time = parse_earnings_time(earnings_time_str);
 
                 let company_name = company_col.and_then(|c| c.get(i).map(|s| s.to_string()));
                 let market_cap = market_cap_col.and_then(|c| c.get(i));

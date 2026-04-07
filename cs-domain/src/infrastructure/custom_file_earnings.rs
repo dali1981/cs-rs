@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::datetime::TradingDate;
 use crate::entities::EarningsEvent;
 use crate::repositories::{EarningsRepository, RepositoryError};
-use crate::value_objects::EarningsTime;
+use crate::infrastructure::mappers::earnings::parse_earnings_time;
 
 /// Custom file-based EarningsRepository for user-provided earnings files.
 ///
@@ -30,14 +30,6 @@ impl CustomFileEarningsReader {
         }
 
         Ok(Self { file_path })
-    }
-
-    fn parse_earnings_time(s: &str) -> EarningsTime {
-        match s.to_uppercase().as_str() {
-            "BMO" | "BEFORE_MARKET" | "BEFOREMARKET" => EarningsTime::BeforeMarketOpen,
-            "AMC" | "AFTER_MARKET" | "AFTERMARKET" => EarningsTime::AfterMarketClose,
-            _ => EarningsTime::Unknown,
-        }
     }
 
     fn load_from_parquet(
@@ -114,7 +106,7 @@ impl CustomFileEarningsReader {
             let earnings_time_str = times_col
                 .get(i)
                 .ok_or_else(|| RepositoryError::Parse("Missing earnings_time value".into()))?;
-            let earnings_time = Self::parse_earnings_time(earnings_time_str);
+            let earnings_time = parse_earnings_time(earnings_time_str);
 
             let company_name = company_col.and_then(|c| c.get(i).map(|s| s.to_string()));
             let market_cap = market_cap_col.and_then(|c| c.get(i));
@@ -177,7 +169,7 @@ impl CustomFileEarningsReader {
                 }
             }
 
-            let earnings_time = Self::parse_earnings_time(&json_event.time);
+            let earnings_time = parse_earnings_time(&json_event.time);
 
             let mut event = EarningsEvent::new(json_event.symbol, earnings_date, earnings_time);
             if let Some(name) = json_event.company_name {
@@ -228,6 +220,7 @@ impl EarningsRepository for CustomFileEarningsReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value_objects::EarningsTime;
     use tempfile::NamedTempFile;
 
     #[tokio::test]
