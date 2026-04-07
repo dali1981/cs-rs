@@ -2,15 +2,13 @@ use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use ib_data_collector::database::{ParquetDatabase, DatabaseRepository};
 use ib_data_collector::domain::{Contract, OptionType as IbOptionType, BarType};
-use polars::prelude::*;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::datetime::TradingDate;
 use crate::repositories::{OptionsDataRepository, RepositoryError};
-use crate::value_objects::{Strike, CallPut};
+use crate::value_objects::{OptionBar, Strike};
 
 pub struct IbOptionsRepository {
     db: ParquetDatabase,
@@ -48,62 +46,31 @@ impl IbOptionsRepository {
             .filter(|b| b.timestamp <= target_time)
             .max_by_key(|b| b.timestamp)
     }
-
-    /// Build DataFrame from option snapshots
-    fn build_dataframe(
-        snapshots: Vec<OptionSnapshot>,
-    ) -> Result<DataFrame, RepositoryError> {
-        let strikes: Vec<f64> = snapshots.iter().map(|s| s.strike.to_f64().unwrap_or(0.0)).collect();
-        let expirations: Vec<i32> = snapshots.iter()
-            .map(|s| TradingDate::from_naive_date(s.expiration).to_polars_date())
-            .collect();
-        let option_types: Vec<&str> = snapshots.iter()
-            .map(|s| match s.option_type {
-                IbOptionType::Call => CallPut::Call.as_str(),
-                IbOptionType::Put => CallPut::Put.as_str(),
-            })
-            .collect();
-        // IV surface builder expects milliseconds (multiplies by 1M to get nanos)
-        let timestamps: Vec<i64> = snapshots.iter()
-            .map(|s| s.timestamp.timestamp_millis())
-            .collect();
-        let closes: Vec<f64> = snapshots.iter().map(|s| s.close).collect();
-        let opens: Vec<f64> = snapshots.iter().map(|s| s.open).collect();
-        let highs: Vec<f64> = snapshots.iter().map(|s| s.high).collect();
-        let lows: Vec<f64> = snapshots.iter().map(|s| s.low).collect();
-        let volumes: Vec<i64> = snapshots.iter().map(|s| s.volume).collect();
-
-        // Cast expiration to Date type (IV surface builder expects Date, not Int32)
-        let expiration_series = Series::new("expiration", expirations)
-            .cast(&DataType::Date)
-            .map_err(|e| RepositoryError::Polars(format!("Failed to cast expiration to Date: {}", e)))?;
-
-        DataFrame::new(vec![
-            Series::new("strike", strikes),
-            expiration_series,
-            Series::new("option_type", option_types),
-            Series::new("timestamp", timestamps),
-            Series::new("close", closes),
-            Series::new("open", opens),
-            Series::new("high", highs),
-            Series::new("low", lows),
-            Series::new("volume", volumes),
-        ])
-        .map_err(|e| RepositoryError::Polars(e.to_string()))
-    }
 }
 
-/// Intermediate snapshot structure for building DataFrame
+/// Intermediate snapshot structure for assembling option chain data
 struct OptionSnapshot {
     expiration: NaiveDate,
     strike: Decimal,
     option_type: IbOptionType,
     timestamp: DateTime<Utc>,
     close: f64,
-    open: f64,
-    high: f64,
-    low: f64,
-    volume: i64,
+}
+
+fn snapshots_to_option_bars(snapshots: Vec<OptionSnapshot>) -> Vec<OptionBar> {
+    snapshots.into_iter()
+        .filter(|s| s.close > 0.0)
+        .map(|s| OptionBar {
+            strike: s.strike.to_f64().unwrap_or(0.0),
+            expiration: s.expiration,
+            option_type: match s.option_type {
+                IbOptionType::Call => finq_core::OptionType::Call,
+                IbOptionType::Put => finq_core::OptionType::Put,
+            },
+            close: Some(s.close),
+            timestamp: Some(s.timestamp),
+        })
+        .collect()
 }
 
 #[async_trait]
@@ -112,7 +79,7 @@ impl OptionsDataRepository for IbOptionsRepository {
         &self,
         _underlying: &str,
         _date: NaiveDate,
-    ) -> Result<DataFrame, RepositoryError> {
+    ) -> Result<Vec<OptionBar>, RepositoryError> {
         // Not implemented for IB - daily bars not typically used in backtests
         Err(RepositoryError::NotFound(
             "Daily option bars not implemented for IB data source".to_string()
@@ -123,7 +90,7 @@ impl OptionsDataRepository for IbOptionsRepository {
         &self,
         _underlying: &str,
         _date: NaiveDate,
-    ) -> Result<DataFrame, RepositoryError> {
+    ) -> Result<Vec<OptionBar>, RepositoryError> {
         // Not implemented for IB - use get_option_bars_at_time instead
         Err(RepositoryError::NotFound(
             "Minute option bars not implemented for IB data source".to_string()
@@ -134,7 +101,7 @@ impl OptionsDataRepository for IbOptionsRepository {
         &self,
         underlying: &str,
         target_time: DateTime<Utc>,
-    ) -> Result<DataFrame, RepositoryError> {
+    ) -> Result<Vec<OptionBar>, RepositoryError> {
         let grouped = self.group_contracts(underlying)?;
         let mut snapshots = Vec::new();
 
@@ -157,9 +124,6 @@ impl OptionsDataRepository for IbOptionsRepository {
                 ) {
                     // Compute mid-price
                     let mid = (bid_bar.close + ask_bar.close) / 2.0;
-                    let mid_open = (bid_bar.open + ask_bar.open) / 2.0;
-                    let mid_high = (bid_bar.high + ask_bar.high) / 2.0;
-                    let mid_low = (bid_bar.low + ask_bar.low) / 2.0;
                     let timestamp = bid_bar.timestamp.max(ask_bar.timestamp);
 
                     snapshots.push(OptionSnapshot {
@@ -168,10 +132,6 @@ impl OptionsDataRepository for IbOptionsRepository {
                         option_type,
                         timestamp,
                         close: mid,
-                        open: mid_open,
-                        high: mid_high,
-                        low: mid_low,
-                        volume: bid_bar.volume + ask_bar.volume,
                     });
                 }
             }
@@ -184,7 +144,7 @@ impl OptionsDataRepository for IbOptionsRepository {
             )));
         }
 
-        Self::build_dataframe(snapshots)
+        Ok(snapshots_to_option_bars(snapshots))
     }
 
     async fn get_option_bars_at_or_after_time(
@@ -192,7 +152,7 @@ impl OptionsDataRepository for IbOptionsRepository {
         underlying: &str,
         target_time: DateTime<Utc>,
         max_forward_minutes: u32,
-    ) -> Result<(DataFrame, DateTime<Utc>), RepositoryError> {
+    ) -> Result<(Vec<OptionBar>, DateTime<Utc>), RepositoryError> {
         // Try backward lookup first
         let backward_result = self.get_option_bars_at_time(underlying, target_time).await;
 
@@ -208,8 +168,8 @@ impl OptionsDataRepository for IbOptionsRepository {
         while current_time <= max_time {
             current_time = current_time + chrono::Duration::minutes(1);
 
-            if let Ok(df) = self.get_option_bars_at_time(underlying, current_time).await {
-                return Ok((df, current_time));
+            if let Ok(bars) = self.get_option_bars_at_time(underlying, current_time).await {
+                return Ok((bars, current_time));
             }
         }
 

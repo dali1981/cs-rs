@@ -15,11 +15,11 @@ use cs_analytics::{
     StraddlePriceComputer,
 };
 use cs_domain::{
-    datetime::TradingTimestamp,
     repositories::{EquityDataRepository, OptionsDataRepository},
-    value_objects::{AtmIvConfig, AtmIvObservation, HvConfig, IvInterpolationMethod},
+    value_objects::{AtmIvConfig, AtmIvObservation, HvConfig, IvInterpolationMethod, OptionBar},
     MarketTime, TradingDate,
 };
+use finq_core::OptionType;
 
 /// Result of IV time series generation
 #[derive(Debug)]
@@ -152,17 +152,17 @@ where
         config: &AtmIvConfig,
     ) -> Result<Option<AtmIvObservation>, MinuteAlignedIvError> {
         // Get minute-level option bars for the day
-        let chain_df = match self.options_repo.get_option_minute_bars(symbol, date).await {
-            Ok(df) => df,
+        let chain = match self.options_repo.get_option_minute_bars(symbol, date).await {
+            Ok(bars) => bars,
             Err(_) => return Ok(None), // No options data
         };
 
-        if chain_df.height() == 0 {
+        if chain.is_empty() {
             return Ok(None);
         }
 
         // Extract timestamped options (last trade per contract)
-        let options_with_timestamps = self.extract_timestamped_options(&chain_df)?;
+        let options_with_timestamps = self.extract_timestamped_options(&chain)?;
 
         if options_with_timestamps.is_empty() {
             return Ok(None);
@@ -296,97 +296,44 @@ where
         Ok(Some(obs))
     }
 
-    /// Extract timestamped options from minute bars DataFrame
-    /// Groups by contract and takes last trade
+    /// Extract timestamped options from minute bars slice.
+    /// Groups by contract (strike, expiration, option_type) and takes the latest bar per group.
     fn extract_timestamped_options(
         &self,
-        df: &DataFrame,
+        chain: &[OptionBar],
     ) -> Result<Vec<TimestampedOption>, MinuteAlignedIvError> {
-        // Sort by contract identifiers and timestamp (descending)
-        let sorted = df
-            .clone()
-            .lazy()
-            .sort(
-                ["strike", "expiration", "option_type", "timestamp"],
-                SortMultipleOptions::default()
-                    .with_order_descending_multi(vec![false, false, false, true]),
-            )
-            .collect()
-            .map_err(|e| MinuteAlignedIvError::DataFrameError(e.to_string()))?;
+        // For each contract key, keep the bar with the latest timestamp
+        let mut latest: std::collections::HashMap<(u64, NaiveDate, bool), (DateTime<Utc>, &OptionBar)>
+            = std::collections::HashMap::new();
 
-        // Group by contract and take first (latest due to sort)
-        let grouped = sorted
-            .lazy()
-            .group_by([col("strike"), col("expiration"), col("option_type")])
-            .agg([
-                col("close").first().alias("close"),
-                col("timestamp").first().alias("timestamp"),
-            ])
-            .collect()
-            .map_err(|e| MinuteAlignedIvError::DataFrameError(e.to_string()))?;
-
-        // Extract data
-        let strikes = grouped.column("strike")?.f64()?;
-        let expirations = grouped.column("expiration")?.date()?;
-        let closes = grouped.column("close")?.f64()?;
-        let option_types = grouped.column("option_type")?.str()?;
-
-        // Handle timestamp column (could be i64 or datetime)
-        // Extract as i64 regardless of the source type
-        let timestamp_col = grouped.column("timestamp")?;
-        let timestamps: Vec<Option<i64>> = if let Ok(i64_series) = timestamp_col.i64() {
-            i64_series.into_iter().collect()
-        } else if let Ok(dt_series) = timestamp_col.datetime() {
-            // Datetime is in milliseconds, convert to nanoseconds
-            // Cast to i64 preserves the value in milliseconds, then multiply by 1_000_000
-            dt_series.clone().into_series()
-                .cast(&DataType::Int64)
-                .map_err(|e| MinuteAlignedIvError::DataFrameError(
-                    format!("Failed to cast datetime to i64: {}", e)
-                ))?
-                .i64()
-                .map_err(|e| MinuteAlignedIvError::DataFrameError(
-                    format!("Failed to get i64 series: {}", e)
-                ))?
-                .into_iter()
-                .map(|opt_ms| opt_ms.map(|ms| ms * 1_000_000)) // Convert ms to ns
-                .collect()
-        } else {
-            return Err(MinuteAlignedIvError::DataFrameError(
-                "Timestamp column is neither i64 nor datetime".to_string()
-            ));
-        };
-
-        let mut options = Vec::new();
-
-        for i in 0..grouped.height() {
-            let (strike, exp_days, close, opt_type, ts_nanos) = match (
-                strikes.get(i),
-                expirations.get(i),
-                closes.get(i),
-                option_types.get(i),
-                timestamps.get(i).and_then(|o| *o),
-            ) {
-                (Some(s), Some(e), Some(c), Some(t), Some(ts)) => (s, e, c, t, ts),
-                _ => continue,
+        for bar in chain {
+            let ts = match bar.timestamp {
+                Some(ts) => ts,
+                None => continue,
             };
-
-            if close <= 0.0 || strike <= 0.0 {
+            if bar.close.map_or(true, |c| c <= 0.0) || bar.strike <= 0.0 {
                 continue;
             }
-
-            let expiration = TradingDate::from_polars_date(exp_days).to_naive_date();
-            let is_call = opt_type == "call";
-            let timestamp = TradingTimestamp::from_nanos(ts_nanos).to_datetime_utc();
-
-            options.push(TimestampedOption {
-                strike,
-                expiration,
-                price: close,
-                is_call,
-                timestamp,
-            });
+            let key = (bar.strike.to_bits(), bar.expiration, matches!(bar.option_type, OptionType::Call));
+            let should_update = latest.get(&key).map_or(true, |(prev_ts, _)| ts > *prev_ts);
+            if should_update {
+                latest.insert(key, (ts, bar));
+            }
         }
+
+        let options: Vec<TimestampedOption> = latest
+            .into_values()
+            .filter_map(|(ts, bar)| {
+                let close = bar.close.filter(|&c| c > 0.0)?;
+                Some(TimestampedOption {
+                    strike: bar.strike,
+                    expiration: bar.expiration,
+                    price: close,
+                    is_call: matches!(bar.option_type, OptionType::Call),
+                    timestamp: ts,
+                })
+            })
+            .collect();
 
         Ok(options)
     }
@@ -792,16 +739,9 @@ where
 
         while current_date <= last_date {
             // Get bars for this date
-            if let Ok(df) = self.equity_repo.get_bars(symbol, current_date).await {
-                if !df.is_empty() {
-                    // Get the last close price of the day
-                    if let Ok(close_col) = df.column("close") {
-                        if let Ok(close_series) = close_col.f64() {
-                            if let Some(last_close) = close_series.last() {
-                                closes.insert(current_date, last_close);
-                            }
-                        }
-                    }
+            if let Ok(bars) = self.equity_repo.get_bars(symbol, current_date).await {
+                if let Some(last_close) = bars.last().map(|b| b.close) {
+                    closes.insert(current_date, last_close);
                 }
             }
 

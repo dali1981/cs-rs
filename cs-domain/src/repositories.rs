@@ -29,6 +29,10 @@ pub trait EarningsRepository: Send + Sync {
 }
 
 /// Options data repository
+///
+/// All methods return domain types (`Vec<OptionBar>`). Repository implementations
+/// are responsible for converting provider-specific storage formats (DataFrames,
+/// provider DTOs, parquet files) to these canonical types internally.
 #[async_trait]
 pub trait OptionsDataRepository: Send + Sync {
     /// Get option bars for a specific date (daily aggregated snapshot)
@@ -36,35 +40,35 @@ pub trait OptionsDataRepository: Send + Sync {
         &self,
         underlying: &str,
         date: NaiveDate,
-    ) -> Result<polars::frame::DataFrame, RepositoryError>;
+    ) -> Result<Vec<OptionBar>, RepositoryError>;
 
     /// Get minute-level option bars for a specific date
     async fn get_option_minute_bars(
         &self,
         underlying: &str,
         date: NaiveDate,
-    ) -> Result<polars::frame::DataFrame, RepositoryError>;
+    ) -> Result<Vec<OptionBar>, RepositoryError>;
 
-    /// Get option chain snapshot at a specific point in time (minute-aligned)
-    /// Returns the most recent trade for each contract at or before target_time
+    /// Get option chain snapshot at a specific point in time (minute-aligned).
+    /// Returns the most recent trade for each contract at or before target_time.
     async fn get_option_bars_at_time(
         &self,
         underlying: &str,
         target_time: DateTime<Utc>,
-    ) -> Result<polars::frame::DataFrame, RepositoryError>;
+    ) -> Result<Vec<OptionBar>, RepositoryError>;
 
-    /// Get option chain snapshot at or after a specific time (forward-looking)
+    /// Get option chain snapshot at or after a specific time (forward-looking).
     ///
     /// For exit pricing when no data exists at the exact time (illiquid stocks).
     /// First tries backward lookup, then looks forward up to max_forward_minutes.
-    /// Returns (DataFrame, actual_snapshot_time) where snapshot_time is the
+    /// Returns `(bars, actual_snapshot_time)` where `actual_snapshot_time` is the
     /// timestamp of the data actually used.
     async fn get_option_bars_at_or_after_time(
         &self,
         underlying: &str,
         target_time: DateTime<Utc>,
         max_forward_minutes: u32,
-    ) -> Result<(polars::frame::DataFrame, DateTime<Utc>), RepositoryError>;
+    ) -> Result<(Vec<OptionBar>, DateTime<Utc>), RepositoryError>;
 
     async fn get_available_expirations(
         &self,
@@ -89,11 +93,15 @@ pub trait EquityDataRepository: Send + Sync {
         target_time: DateTime<Utc>,
     ) -> Result<SpotPrice, RepositoryError>;
 
+    /// Get minute-level equity bars for a specific date.
+    ///
+    /// Returns domain `EquityBar` types. Repository implementations convert
+    /// their internal storage format before returning.
     async fn get_bars(
         &self,
         symbol: &str,
         date: NaiveDate,
-    ) -> Result<polars::frame::DataFrame, RepositoryError>;
+    ) -> Result<Vec<EquityBar>, RepositoryError>;
 }
 
 /// Results persistence repository

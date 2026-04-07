@@ -8,7 +8,8 @@ use std::path::PathBuf;
 
 use crate::datetime::{TradingDate, TradingTimestamp};
 use crate::repositories::{OptionsDataRepository, RepositoryError};
-use crate::value_objects::Strike;
+use crate::value_objects::{OptionBar, Strike};
+use super::option_bar_conversions::dataframe_to_option_bars;
 
 pub struct FinqOptionsRepository {
     repository: OptionBarRepository,
@@ -29,38 +30,39 @@ impl OptionsDataRepository for FinqOptionsRepository {
         &self,
         underlying: &str,
         date: NaiveDate,
-    ) -> Result<DataFrame, RepositoryError> {
-        self.repository
+    ) -> Result<Vec<OptionBar>, RepositoryError> {
+        let df = self.repository
             .get_chain_bars(underlying, date)
             .await
             .map_err(|e| RepositoryError::NotFound(format!(
                 "Failed to load option bars for {} on {}: {}",
                 underlying, date, e
-            )))
+            )))?;
+        dataframe_to_option_bars(&df)
     }
 
     async fn get_option_minute_bars(
         &self,
         underlying: &str,
         date: NaiveDate,
-    ) -> Result<DataFrame, RepositoryError> {
-        self.repository
+    ) -> Result<Vec<OptionBar>, RepositoryError> {
+        let df = self.repository
             .get_bars(underlying, Timeframe::MINUTE, date, date)
             .await
             .map_err(|e| RepositoryError::NotFound(format!(
                 "Failed to load minute option bars for {} on {}: {}",
                 underlying, date, e
-            )))
+            )))?;
+        dataframe_to_option_bars(&df)
     }
 
     async fn get_option_bars_at_time(
         &self,
         underlying: &str,
         target_time: DateTime<Utc>,
-    ) -> Result<DataFrame, RepositoryError> {
+    ) -> Result<Vec<OptionBar>, RepositoryError> {
         let date = target_time.date_naive();
 
-        // Load minute bars for the target date
         let df = self.repository
             .get_bars(underlying, Timeframe::MINUTE, date, date)
             .await
@@ -76,10 +78,8 @@ impl OptionsDataRepository for FinqOptionsRepository {
             )));
         }
 
-        // Convert target time to nanoseconds
         let target_nanos = TradingTimestamp::from_datetime_utc(target_time).to_nanos();
 
-        // Filter to trades at or before target time, then take latest per contract
         let filtered = df
             .lazy()
             .filter(col("timestamp").lt_eq(lit(target_nanos)))
@@ -88,15 +88,10 @@ impl OptionsDataRepository for FinqOptionsRepository {
                 SortMultipleOptions::default()
                     .with_order_descending_multi(vec![false, false, false, true])
             )
-            // Group by contract (strike, expiration, option_type) and take first (latest due to sort)
             .group_by([col("strike"), col("expiration"), col("option_type")])
             .agg([
                 col("close").first().alias("close"),
                 col("timestamp").first().alias("timestamp"),
-                col("open").first().alias("open"),
-                col("high").first().alias("high"),
-                col("low").first().alias("low"),
-                col("volume").first().alias("volume"),
             ])
             .collect()
             .map_err(|e| RepositoryError::Polars(e.to_string()))?;
@@ -108,7 +103,7 @@ impl OptionsDataRepository for FinqOptionsRepository {
             )));
         }
 
-        Ok(filtered)
+        dataframe_to_option_bars(&filtered)
     }
 
     async fn get_option_bars_at_or_after_time(
@@ -116,10 +111,9 @@ impl OptionsDataRepository for FinqOptionsRepository {
         underlying: &str,
         target_time: DateTime<Utc>,
         max_forward_minutes: u32,
-    ) -> Result<(DataFrame, DateTime<Utc>), RepositoryError> {
+    ) -> Result<(Vec<OptionBar>, DateTime<Utc>), RepositoryError> {
         let date = target_time.date_naive();
 
-        // Load minute bars for the target date
         let df = self.repository
             .get_bars(underlying, Timeframe::MINUTE, date, date)
             .await
@@ -137,7 +131,6 @@ impl OptionsDataRepository for FinqOptionsRepository {
 
         let target_nanos = TradingTimestamp::from_datetime_utc(target_time).to_nanos();
 
-        // First try backward lookup (at or before target time)
         let backward = df
             .clone()
             .lazy()
@@ -151,20 +144,15 @@ impl OptionsDataRepository for FinqOptionsRepository {
             .agg([
                 col("close").first().alias("close"),
                 col("timestamp").first().alias("timestamp"),
-                col("open").first().alias("open"),
-                col("high").first().alias("high"),
-                col("low").first().alias("low"),
-                col("volume").first().alias("volume"),
             ])
             .collect()
             .map_err(|e| RepositoryError::Polars(e.to_string()))?;
 
         if !backward.is_empty() {
-            // Found data at or before target time - return with target_time as snapshot
-            return Ok((backward, target_time));
+            let bars = dataframe_to_option_bars(&backward)?;
+            return Ok((bars, target_time));
         }
 
-        // No backward data - look forward up to max_forward_minutes
         let max_forward_nanos = target_nanos + (max_forward_minutes as i64 * 60 * 1_000_000_000);
 
         let forward = df
@@ -176,16 +164,12 @@ impl OptionsDataRepository for FinqOptionsRepository {
             .sort(
                 ["strike", "expiration", "option_type", "timestamp"],
                 SortMultipleOptions::default()
-                    .with_order_descending_multi(vec![false, false, false, false]) // ascending timestamp
+                    .with_order_descending_multi(vec![false, false, false, false])
             )
             .group_by([col("strike"), col("expiration"), col("option_type")])
             .agg([
                 col("close").first().alias("close"),
                 col("timestamp").first().alias("timestamp"),
-                col("open").first().alias("open"),
-                col("high").first().alias("high"),
-                col("low").first().alias("low"),
-                col("volume").first().alias("volume"),
             ])
             .collect()
             .map_err(|e| RepositoryError::Polars(e.to_string()))?;
@@ -197,7 +181,6 @@ impl OptionsDataRepository for FinqOptionsRepository {
             )));
         }
 
-        // Get the actual snapshot time (max timestamp in the forward-looked data)
         let timestamps = forward
             .column("timestamp")
             .map_err(|e| RepositoryError::Polars(e.to_string()))?
@@ -209,8 +192,8 @@ impl OptionsDataRepository for FinqOptionsRepository {
             .ok_or_else(|| RepositoryError::NotFound("No timestamp in forward data".to_string()))?;
 
         let actual_snapshot_time = TradingTimestamp::from_nanos(max_ts).to_datetime_utc();
-
-        Ok((forward, actual_snapshot_time))
+        let bars = dataframe_to_option_bars(&forward)?;
+        Ok((bars, actual_snapshot_time))
     }
 
     async fn get_available_expirations(
@@ -219,25 +202,12 @@ impl OptionsDataRepository for FinqOptionsRepository {
         as_of_date: NaiveDate,
     ) -> Result<Vec<NaiveDate>, RepositoryError> {
         let bars = self.get_option_bars(underlying, as_of_date).await?;
-
-        // Extract unique expirations from DataFrame
-        let expirations = bars
-            .column("expiration")
-            .map_err(|e| RepositoryError::Parse(format!("Missing expiration column: {}", e)))?
-            .date()
-            .map_err(|e| RepositoryError::Parse(format!("Invalid date type: {}", e)))?
-            .unique()
-            .map_err(|e| RepositoryError::Parse(format!("Failed to get unique dates: {}", e)))?;
-
-        // Convert from Polars Date (days since Unix epoch) to NaiveDate using TradingDate
-        let mut result: Vec<NaiveDate> = expirations
-            .into_iter()
-            .filter_map(|opt| {
-                opt.map(|days| TradingDate::from_polars_date(days).to_naive_date())
-            })
+        let mut result: Vec<NaiveDate> = bars.iter()
+            .map(|b| b.expiration)
             .filter(|&exp| exp > as_of_date)
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
             .collect();
-
         result.sort();
         Ok(result)
     }
@@ -249,38 +219,14 @@ impl OptionsDataRepository for FinqOptionsRepository {
         as_of_date: NaiveDate,
     ) -> Result<Vec<Strike>, RepositoryError> {
         let bars = self.get_option_bars(underlying, as_of_date).await?;
-
-        // Filter to specific expiration using TradingDate
-        let expiration_polars = TradingDate::from_naive_date(expiration).to_polars_date();
-        let filtered = bars
-            .lazy()
-            .filter(col("expiration").eq(lit(expiration_polars)))
-            .collect()
-            .map_err(|e| RepositoryError::Polars(e.to_string()))?;
-
-        if filtered.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let strikes = filtered
-            .column("strike")
-            .map_err(|e| RepositoryError::Parse(format!("Missing strike column: {}", e)))?
-            .f64()
-            .map_err(|e| RepositoryError::Parse(format!("Invalid strike type: {}", e)))?
-            .unique()
-            .map_err(|e| RepositoryError::Parse(format!("Failed to get unique strikes: {}", e)))?;
-
-        let mut result: Vec<Strike> = strikes
-            .into_iter()
-            .filter_map(|opt| {
-                opt.and_then(|v| {
-                    Decimal::try_from(v)
-                        .ok()
-                        .and_then(|d| Strike::new(d).ok())
-                })
+        let mut result: Vec<Strike> = bars.iter()
+            .filter(|b| b.expiration == expiration)
+            .filter_map(|b| {
+                Decimal::try_from(b.strike).ok().and_then(|d| Strike::new(d).ok())
             })
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
             .collect();
-
         result.sort();
         Ok(result)
     }
@@ -300,10 +246,9 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2024, 1, 2).unwrap();
         let result = repo.get_option_bars("AAPL", date).await;
 
-        // This will fail if no data exists, which is expected in CI
         if result.is_ok() {
-            let df = result.unwrap();
-            assert!(df.height() > 0);
+            let bars = result.unwrap();
+            assert!(!bars.is_empty());
         }
     }
 
@@ -320,7 +265,6 @@ mod tests {
         if result.is_ok() {
             let expirations = result.unwrap();
             assert!(!expirations.is_empty());
-            // Expirations should be sorted
             for i in 1..expirations.len() {
                 assert!(expirations[i] > expirations[i - 1]);
             }

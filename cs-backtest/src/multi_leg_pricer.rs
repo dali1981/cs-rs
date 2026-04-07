@@ -520,12 +520,13 @@ impl TradePricer for StranglePricer {
     fn price_with_surface(
         &self,
         trade: &Strangle,
-        chain_df: &DataFrame,
+        chain: &[cs_domain::OptionBar],
         spot: f64,
         timestamp: DateTime<Utc>,
         iv_surface: Option<&IVSurface>,
     ) -> Result<StranglePricing, PricingError> {
-        Self::price_with_surface(self, trade, chain_df, spot, timestamp, iv_surface)
+        let chain_df = crate::option_bar_adapter::to_dataframe(chain);
+        Self::price_with_surface(self, trade, &chain_df, spot, timestamp, iv_surface)
     }
 }
 
@@ -536,12 +537,13 @@ impl TradePricer for ButterflyPricer {
     fn price_with_surface(
         &self,
         trade: &Butterfly,
-        chain_df: &DataFrame,
+        chain: &[cs_domain::OptionBar],
         spot: f64,
         timestamp: DateTime<Utc>,
         iv_surface: Option<&IVSurface>,
     ) -> Result<ButterflyPricing, PricingError> {
-        Self::price_with_surface(self, trade, chain_df, spot, timestamp, iv_surface)
+        let chain_df = crate::option_bar_adapter::to_dataframe(chain);
+        Self::price_with_surface(self, trade, &chain_df, spot, timestamp, iv_surface)
     }
 }
 
@@ -552,12 +554,13 @@ impl TradePricer for CondorPricer {
     fn price_with_surface(
         &self,
         trade: &Condor,
-        chain_df: &DataFrame,
+        chain: &[cs_domain::OptionBar],
         spot: f64,
         timestamp: DateTime<Utc>,
         iv_surface: Option<&IVSurface>,
     ) -> Result<CondorPricing, PricingError> {
-        Self::price_with_surface(self, trade, chain_df, spot, timestamp, iv_surface)
+        let chain_df = crate::option_bar_adapter::to_dataframe(chain);
+        Self::price_with_surface(self, trade, &chain_df, spot, timestamp, iv_surface)
     }
 }
 
@@ -568,11 +571,12 @@ impl TradePricer for IronCondorPricer {
     fn price_with_surface(
         &self,
         trade: &IronCondor,
-        chain_df: &DataFrame,
+        chain: &[cs_domain::OptionBar],
         spot: f64,
         timestamp: DateTime<Utc>,
         iv_surface: Option<&IVSurface>,
     ) -> Result<IronCondorPricing, PricingError> {
-        Self::price_with_surface(self, trade, chain_df, spot, timestamp, iv_surface)
+        let chain_df = crate::option_bar_adapter::to_dataframe(chain);
+        Self::price_with_surface(self, trade, &chain_df, spot, timestamp, iv_surface)
     }
 }

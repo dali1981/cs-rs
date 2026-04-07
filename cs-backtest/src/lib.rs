@@ -11,6 +11,7 @@ pub mod execution;  // Generic execution framework
 pub mod greeks_helpers;  // Greeks computation helpers
 pub mod iv_validation;  // IV validation and bounds checking
 pub mod iv_surface_builder;
+pub mod option_bar_adapter;  // OptionBar → DataFrame adapter for pricer internals
 pub mod spread_pricer;
 pub mod composite_pricer;  // Generic pricer for CompositeTrade types
 pub mod straddle_pricer;

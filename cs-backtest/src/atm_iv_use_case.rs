@@ -12,9 +12,10 @@ use cs_analytics::{
 };
 use cs_domain::{
     repositories::{EquityDataRepository, OptionsDataRepository},
-    value_objects::{AtmIvConfig, AtmIvObservation, IvInterpolationMethod},
+    value_objects::{AtmIvConfig, AtmIvObservation, IvInterpolationMethod, OptionBar},
     MarketTime, TradingDate,
 };
+use finq_core::OptionType;
 
 /// Result of IV time series generation
 #[derive(Debug)]
@@ -33,8 +34,6 @@ pub enum IvTimeSeriesError {
     NoSpotPrice { symbol: String, date: NaiveDate },
     #[error("No options data for {symbol} on {date}")]
     NoOptionsData { symbol: String, date: NaiveDate },
-    #[error("DataFrame column error: {0}")]
-    DataFrameError(String),
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Polars error: {0}")]
@@ -143,17 +142,17 @@ where
         };
 
         // Get option chain for this date
-        let chain_df = match self.options_repo.get_option_bars(symbol, date).await {
-            Ok(df) => df,
+        let chain = match self.options_repo.get_option_bars(symbol, date).await {
+            Ok(bars) => bars,
             Err(_) => return Ok(None), // No options data
         };
 
-        if chain_df.height() == 0 {
+        if chain.is_empty() {
             return Ok(None);
         }
 
-        // Convert DataFrame to OptionPoints
-        let options = self.dataframe_to_options(&chain_df)?;
+        // Convert OptionBar slice to OptionPoints
+        let options = self.option_bars_to_points(&chain)?;
 
         if options.is_empty() {
             return Ok(None);
@@ -340,55 +339,24 @@ where
         Ok(())
     }
 
-    /// Convert Polars DataFrame to vector of OptionPoints
-    fn dataframe_to_options(&self, df: &DataFrame) -> Result<Vec<OptionPoint>, IvTimeSeriesError> {
-        let strikes = df
-            .column("strike")
-            .map_err(|e| IvTimeSeriesError::DataFrameError(e.to_string()))?
-            .f64()
-            .map_err(|e| IvTimeSeriesError::DataFrameError(e.to_string()))?;
-
-        let expirations = df
-            .column("expiration")
-            .map_err(|e| IvTimeSeriesError::DataFrameError(e.to_string()))?
-            .date()
-            .map_err(|e| IvTimeSeriesError::DataFrameError(e.to_string()))?;
-
-        let closes = df
-            .column("close")
-            .map_err(|e| IvTimeSeriesError::DataFrameError(e.to_string()))?
-            .f64()
-            .map_err(|e| IvTimeSeriesError::DataFrameError(e.to_string()))?;
-
-        let option_types = df
-            .column("option_type")
-            .map_err(|e| IvTimeSeriesError::DataFrameError(e.to_string()))?
-            .str()
-            .map_err(|e| IvTimeSeriesError::DataFrameError(e.to_string()))?;
-
-        let mut options = Vec::new();
-
-        for i in 0..df.height() {
-            let (strike, exp_days, close, opt_type) =
-                match (strikes.get(i), expirations.get(i), closes.get(i), option_types.get(i)) {
-                    (Some(s), Some(e), Some(c), Some(t)) => (s, e, c, t),
-                    _ => continue,
-                };
-
-            if close <= 0.0 || strike <= 0.0 {
-                continue;
-            }
-
-            let expiration = TradingDate::from_polars_date(exp_days).to_naive_date();
-            let is_call = opt_type == "call";
-
-            options.push(OptionPoint {
-                strike,
-                expiration,
-                price: close,
-                is_call,
-            });
-        }
+    /// Convert option chain slice to vector of OptionPoints
+    fn option_bars_to_points(&self, chain: &[OptionBar]) -> Result<Vec<OptionPoint>, IvTimeSeriesError> {
+        let options: Vec<OptionPoint> = chain
+            .iter()
+            .filter_map(|bar| {
+                let close = bar.close.filter(|&c| c > 0.0)?;
+                if bar.strike <= 0.0 {
+                    return None;
+                }
+                let is_call = matches!(bar.option_type, OptionType::Call);
+                Some(OptionPoint {
+                    strike: bar.strike,
+                    expiration: bar.expiration,
+                    price: close,
+                    is_call,
+                })
+            })
+            .collect();
 
         Ok(options)
     }
@@ -493,8 +461,8 @@ mod tests {
             &self,
             _symbol: &str,
             _date: NaiveDate,
-        ) -> Result<DataFrame, RepositoryError> {
-            Ok(DataFrame::new(vec![]).unwrap())
+        ) -> Result<Vec<cs_domain::EquityBar>, RepositoryError> {
+            Ok(vec![])
         }
     }
 
@@ -505,15 +473,33 @@ mod tests {
             &self,
             _symbol: &str,
             _date: NaiveDate,
-        ) -> Result<DataFrame, RepositoryError> {
-            // Return empty DataFrame with correct schema
-            Ok(DataFrame::new(vec![
-                Series::new("strike", Vec::<f64>::new()),
-                Series::new("expiration", Vec::<i32>::new()),
-                Series::new("close", Vec::<f64>::new()),
-                Series::new("option_type", Vec::<String>::new()),
-            ])
-            .unwrap())
+        ) -> Result<Vec<cs_domain::OptionBar>, RepositoryError> {
+            Ok(vec![])
+        }
+
+        async fn get_option_minute_bars(
+            &self,
+            _symbol: &str,
+            _date: NaiveDate,
+        ) -> Result<Vec<cs_domain::OptionBar>, RepositoryError> {
+            Ok(vec![])
+        }
+
+        async fn get_option_bars_at_time(
+            &self,
+            _symbol: &str,
+            _time: chrono::DateTime<chrono::Utc>,
+        ) -> Result<Vec<cs_domain::OptionBar>, RepositoryError> {
+            Ok(vec![])
+        }
+
+        async fn get_option_bars_at_or_after_time(
+            &self,
+            _symbol: &str,
+            _time: chrono::DateTime<chrono::Utc>,
+            _max_forward_minutes: u32,
+        ) -> Result<(Vec<cs_domain::OptionBar>, chrono::DateTime<chrono::Utc>), RepositoryError> {
+            Err(RepositoryError::NotFound("mock".to_string()))
         }
 
         async fn get_available_expirations(

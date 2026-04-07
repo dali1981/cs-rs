@@ -2,13 +2,12 @@ use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use finq_flatfiles::{StockBarReader, StockBarRepository, FlatfileConfig};
 use finq_core::Timeframe;
-use polars::prelude::*;
 use rust_decimal::Decimal;
 use std::path::PathBuf;
 
-use crate::datetime::TradingTimestamp;
 use crate::repositories::{EquityDataRepository, RepositoryError};
-use crate::value_objects::SpotPrice;
+use crate::value_objects::{EquityBar, SpotPrice};
+use super::option_bar_conversions::dataframe_to_equity_bars;
 
 pub struct FinqEquityRepository {
     repository: StockBarRepository,
@@ -31,75 +30,27 @@ impl EquityDataRepository for FinqEquityRepository {
         target_time: DateTime<Utc>,
     ) -> Result<SpotPrice, RepositoryError> {
         let date = target_time.date_naive();
-        let df = self.get_bars(symbol, date).await?;
+        let bars = self.get_bars(symbol, date).await?;
 
-        if df.is_empty() {
+        if bars.is_empty() {
             return Err(RepositoryError::NotFound(format!(
                 "No bars found for {} on {}",
                 symbol, date
             )));
         }
 
-        // Convert target time to nanoseconds using TradingTimestamp
-        let target_ts = TradingTimestamp::from_datetime_utc(target_time);
-        let target_nanos = target_ts.to_nanos();
-
-        // Note: DataFrame timestamps are in milliseconds (Datetime[ms])
-        // Convert target to milliseconds for comparison
-        let target_millis = target_nanos / 1_000_000;
-
-        // Filter to bars at or before target time
-        let filtered = df
-            .lazy()
-            .filter(col("timestamp").lt_eq(lit(target_millis)))
-            .sort(
-                ["timestamp"],
-                SortMultipleOptions::default().with_order_descending(true),
-            )
-            .limit(1)
-            .collect()
-            .map_err(|e| RepositoryError::Polars(e.to_string()))?;
-
-        if filtered.is_empty() {
-            return Err(RepositoryError::NotFound(format!(
+        let bar = bars.iter()
+            .filter(|b| b.timestamp <= target_time)
+            .max_by_key(|b| b.timestamp)
+            .ok_or_else(|| RepositoryError::NotFound(format!(
                 "No spot price for {} at {} (no bars before this time)",
                 symbol, target_time
-            )));
-        }
-
-        let close = filtered
-            .column("close")
-            .map_err(|e| RepositoryError::Parse(format!("Missing close column: {}", e)))?
-            .f64()
-            .map_err(|e| RepositoryError::Parse(format!("Invalid close type: {}", e)))?
-            .get(0)
-            .ok_or_else(|| RepositoryError::NotFound("Empty close column".into()))?;
-
-        let timestamp_col = filtered
-            .column("timestamp")
-            .map_err(|e| RepositoryError::Parse(format!("Missing timestamp column: {}", e)))?;
-
-        // Extract timestamp based on the column type
-        let timestamp_nanos = if let Ok(i64_series) = timestamp_col.i64() {
-            i64_series.get(0)
-                .ok_or_else(|| RepositoryError::NotFound("Empty timestamp column".into()))?
-        } else if let Ok(datetime_series) = timestamp_col.datetime() {
-            // Datetime column stores values in its time_unit (milliseconds in this case)
-            // Convert to nanoseconds: ms * 1_000_000 = ns
-            let timestamp_ms = datetime_series.get(0)
-                .ok_or_else(|| RepositoryError::NotFound("Empty timestamp column".into()))?;
-            timestamp_ms * 1_000_000
-        } else {
-            return Err(RepositoryError::Parse("Unsupported timestamp column type".into()));
-        };
-
-        // Convert using TradingTimestamp
-        let timestamp = TradingTimestamp::from_nanos(timestamp_nanos).to_datetime_utc();
+            )))?;
 
         Ok(SpotPrice {
-            value: Decimal::try_from(close)
+            value: Decimal::try_from(bar.close)
                 .map_err(|e| RepositoryError::Parse(format!("Invalid decimal: {}", e)))?,
-            timestamp,
+            timestamp: bar.timestamp,
         })
     }
 
@@ -107,14 +58,15 @@ impl EquityDataRepository for FinqEquityRepository {
         &self,
         symbol: &str,
         date: NaiveDate,
-    ) -> Result<DataFrame, RepositoryError> {
-        self.repository
+    ) -> Result<Vec<EquityBar>, RepositoryError> {
+        let df = self.repository
             .get_bars_dataframe(symbol, Timeframe::MINUTE, date, date)
             .await
             .map_err(|e| RepositoryError::NotFound(format!(
                 "Failed to load equity bars for {} on {}: {}",
                 symbol, date, e
-            )))
+            )))?;
+        dataframe_to_equity_bars(&df)
     }
 }
 
@@ -133,8 +85,8 @@ mod tests {
         let result = repo.get_bars("AAPL", date).await;
 
         if result.is_ok() {
-            let df = result.unwrap();
-            assert!(df.height() > 0);
+            let bars = result.unwrap();
+            assert!(!bars.is_empty());
         }
     }
 
