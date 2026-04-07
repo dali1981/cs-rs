@@ -19,6 +19,7 @@ pub mod args;
 pub mod cli;
 pub mod commands;
 pub mod factory;
+pub mod mapping;
 pub mod output;
 
 use cli::{Cli, Commands};

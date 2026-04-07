@@ -7,4 +7,5 @@ pub mod parsing;
 pub mod display;
 pub mod handlers;
 pub mod factory;
+pub mod mapping;
 pub mod output;
