@@ -7,15 +7,12 @@ no workspace crate depends (directly or transitively) on a crate that is
 "above" it in the architecture.
 
 Architecture layer order (lower → higher, dependencies flow downward only):
-  cs-domain  →  cs-analytics, cs-backtest  →  cs-cli, cs-python
+  cs-domain  →  cs-analytics  →  cs-backtest  →  cs-cli, cs-python
 
-Forbidden dependency paths:
-  cs-domain   must NOT reach: cs-analytics(*), cs-backtest, cs-cli, cs-python
+Forbidden dependency paths (all hard failures):
+  cs-domain    must NOT reach: cs-analytics, cs-backtest, cs-cli, cs-python
   cs-analytics must NOT reach: cs-backtest, cs-cli, cs-python
   cs-backtest  must NOT reach: cs-cli, cs-python
-
-(*) cs-domain currently depends on cs-analytics; this is flagged as a known
-    architectural concern rather than a hard failure until resolved.
 
 Exit code: 0 = all assertions passed, 1 = at least one violation found.
 """
