@@ -15,7 +15,7 @@ use cs_domain::{
 #[cfg(feature = "full")]
 use cs_domain::infrastructure::{
     FinqOptionsRepository, FinqEquityRepository,
-    EarningsReaderAdapter,
+    EarningsReaderAdapter, ParquetEarningsRepository,
 };
 
 // Demo mode imports
