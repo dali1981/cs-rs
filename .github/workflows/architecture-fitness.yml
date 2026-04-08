@@ -1,0 +1,89 @@
+name: architecture-fitness
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 1. Core domain/backtest crates compile cleanly (no adapter dependencies).
+  # ─────────────────────────────────────────────────────────────────────────────
+  core-check:
+    name: core crates compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p cs-domain
+      - run: cargo check -p cs-backtest
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 2. Demo path runs end-to-end (zero external data dependencies).
+  # ─────────────────────────────────────────────────────────────────────────────
+  demo-smoke:
+    name: demo path smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: run demo smoke test
+        run: cargo test --no-default-features --features demo -p cs-cli --test demo_smoke
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 3. Architecture grep guards.
+  #    Each guard catches a specific class of architectural decay.
+  # ─────────────────────────────────────────────────────────────────────────────
+  arch-guards:
+    name: architecture grep guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "guard: no polars in cs-domain outside infrastructure/"
+        run: |
+          # Polars is an infrastructure concern. Domain + entities must stay pure.
+          hits=$(grep -rn "use polars" cs-domain/src/ \
+                   --include="*.rs" \
+                   --exclude-dir=infrastructure | wc -l)
+          if [ "$hits" -gt 0 ]; then
+            echo "FAIL: polars leaked into cs-domain outside infrastructure/:"
+            grep -rn "use polars" cs-domain/src/ --include="*.rs" --exclude-dir=infrastructure
+            exit 1
+          fi
+          echo "OK: polars confined to cs-domain/src/infrastructure/"
+
+      - name: "guard: no clap in non-CLI crates"
+        run: |
+          # clap is a presentation concern. Domain and backtest crates must not depend on it.
+          hits=$(grep -rn "clap::\|use clap" cs-domain/src/ cs-backtest/src/ \
+                   --include="*.rs" | wc -l)
+          if [ "$hits" -gt 0 ]; then
+            echo "FAIL: clap leaked into non-CLI crates:"
+            grep -rn "clap::\|use clap" cs-domain/src/ cs-backtest/src/ --include="*.rs"
+            exit 1
+          fi
+          echo "OK: no clap in cs-domain or cs-backtest"
+
+      - name: "guard: deprecated vocabulary has not reappeared"
+        run: |
+          # These aliases were removed in DAL-69. They must not come back.
+          fail=0
+          check() {
+            local label=$1; local pattern=$2; local path=$3
+            hits=$(grep -rn "$pattern" "$path" --include="*.rs" | wc -l)
+            if [ "$hits" -gt 0 ]; then
+              echo "FAIL [$label]: found $hits occurrence(s):"
+              grep -rn "$pattern" "$path" --include="*.rs"
+              fail=1
+            else
+              echo "OK [$label]: not found"
+            fi
+          }
+          check "Straddle alias"           "pub type Straddle"           cs-domain/src/
+          check "ShortIronButterfly alias" "pub type ShortIronButterfly" cs-domain/src/
+          check "TradingStrategy trait"    "pub trait TradingStrategy"   cs-domain/src/
+          check "StraddleStrategy alias"   "pub type StraddleStrategy"   cs-backtest/src/
+          [ "$fail" -eq 0 ] || exit 1
