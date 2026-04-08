@@ -220,17 +220,6 @@ pub trait StrikeSelector: Send + Sync {
         ))
     }
 
-    /// Select a straddle (always ATM) - DEPRECATED
-    #[deprecated(since = "0.3.0", note = "Use select_long_straddle or select_short_straddle")]
-    fn select_straddle(
-        &self,
-        spot: &SpotPrice,
-        surface: &IVSurface,
-        min_expiration: NaiveDate,
-    ) -> Result<LongStraddle, SelectionError> {
-        self.select_long_straddle(spot, surface, min_expiration)
-    }
-
     /// Select a calendar straddle (always ATM)
     fn select_calendar_straddle(
         &self,
@@ -388,17 +377,6 @@ pub trait SelectionStrategy: Send + Sync {
         ))
     }
 
-    /// Select a straddle opportunity - DEPRECATED
-    #[deprecated(since = "0.3.0", note = "Use select_long_straddle or select_short_straddle")]
-    fn select_straddle(
-        &self,
-        event: &EarningsEvent,
-        spot: &SpotPrice,
-        chain_data: &OptionChainData,
-    ) -> Result<LongStraddle, StrategyError> {
-        self.select_long_straddle(event, spot, chain_data)
-    }
-
     /// Select a calendar straddle opportunity
     ///
     /// Combines two calendar spreads (call and put) at the same ATM strike.
@@ -415,10 +393,6 @@ pub trait SelectionStrategy: Send + Sync {
         ))
     }
 }
-
-// Backwards compatibility: TradingStrategy is an alias for SelectionStrategy
-#[deprecated(since = "0.2.0", note = "Use SelectionStrategy instead")]
-pub trait TradingStrategy: SelectionStrategy {}
 
 // ============================================================================
 // Shared utility functions

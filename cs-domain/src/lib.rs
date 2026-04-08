@@ -37,9 +37,6 @@ pub use strike_selection::{
     ATMStrategy, DeltaStrategy, DeltaScanMode, StrikeMatchMode,
 };
 
-// Re-export deprecated trait for backwards compatibility
-#[allow(deprecated)]
-pub use strike_selection::TradingStrategy;
 pub use repositories::*;
 pub use ports::{TradeFactory, TradeFactoryError};
 pub use timing::*;

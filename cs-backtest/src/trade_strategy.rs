@@ -874,9 +874,7 @@ impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
     // Uses default execute_trade implementation
 }
 
-/// Backward compatibility alias
-#[deprecated(since = "0.3.0", note = "Use LongStraddleStrategy or ShortStraddleStrategy")]
-pub type StraddleStrategy = LongStraddleStrategy;
+
 
 /// Post-Earnings Straddle Strategy
 pub struct PostEarningsStraddleStrategy {

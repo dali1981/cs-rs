@@ -256,9 +256,7 @@ pub struct ShortStraddle {
     pub put_leg: OptionLeg,
 }
 
-/// Backward compatibility alias
-#[deprecated(since = "0.3.0", note = "Use LongStraddle or ShortStraddle instead")]
-pub type Straddle = LongStraddle;
+
 
 /// Iron butterfly trade direction (for result serialization)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -331,9 +329,7 @@ pub struct LongIronButterfly {
     pub lower_put: OptionLeg,
 }
 
-/// Backward compatibility alias - IronButterfly is a short iron butterfly
-#[deprecated(since = "0.3.0", note = "Use IronButterfly directly (it's a short iron butterfly) or LongIronButterfly for the reverse")]
-pub type ShortIronButterfly = IronButterfly;
+
 
 impl IronButterfly {
     pub fn new(

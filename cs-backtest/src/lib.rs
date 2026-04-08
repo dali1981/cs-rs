@@ -57,7 +57,7 @@ pub use execution::{ExecutableTrade, TradePricer, ExecutionConfig, SimulationOut
 pub use timing_strategy::TimingStrategy;
 pub use trade_strategy::{
     TradeExecutionOutcome, TradeStrategy, StrategyDispatch,
-    CalendarSpreadStrategy, IronButterflyStrategy, StraddleStrategy,
+    CalendarSpreadStrategy, IronButterflyStrategy, LongStraddleStrategy,
     PostEarningsStraddleStrategy, CalendarStraddleStrategy,
 };
 pub use trade_executor::TradeExecutor;

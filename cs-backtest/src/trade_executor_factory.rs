@@ -2,7 +2,7 @@ use std::sync::Arc;
 use cs_domain::{
     EquityDataRepository, OptionsDataRepository, TradeFactory,
     HedgeConfig, RollPolicy, RollableTrade,
-    CalendarSpread, Straddle, IronButterfly,
+    CalendarSpread, LongStraddle, IronButterfly,
 };
 use cs_analytics::PricingModel;
 
@@ -63,7 +63,7 @@ impl TradeExecutorFactory {
         self
     }
 
-    pub fn create_straddle_executor(&self) -> TradeExecutor<Straddle> {
+    pub fn create_straddle_executor(&self) -> TradeExecutor<LongStraddle> {
         let pricer = CompositePricer::new(
             SpreadPricer::new().with_pricing_model(self.pricing_model.clone())
         );
