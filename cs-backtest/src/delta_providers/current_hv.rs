@@ -61,12 +61,7 @@ impl<T: CompositeTrade> CurrentHVProvider<T> {
             .await
             .map_err(|e| format!("Failed to get bars: {}", e))?;
 
-        let closes: Vec<f64> = bars.column("close")
-            .map_err(|_| "No close column".to_string())?
-            .f64()
-            .map_err(|_| "Invalid close type".to_string())?
-            .into_no_null_iter()
-            .collect();
+        let closes: Vec<f64> = bars.iter().map(|b| b.close).collect();
 
         realized_volatility(&closes, self.window as usize, 252.0)
             .ok_or_else(|| "Insufficient data for HV computation".to_string())

@@ -1,9 +1,8 @@
 //! Traits for generic trade execution
 
 use chrono::{DateTime, Utc};
-use polars::prelude::DataFrame;
 use cs_analytics::IVSurface;
-use cs_domain::{EarningsEvent, TradeResult, TradeType, ApplyCosts};
+use cs_domain::{EarningsEvent, OptionBar, TradeResult, TradeType, ApplyCosts};
 use crate::spread_pricer::PricingError;
 use super::types::ExecutionError;
 use super::types::{ExecutionConfig, SimulationOutput};
@@ -24,14 +23,14 @@ pub trait TradePricer: Send + Sync {
     ///
     /// # Arguments
     /// * `trade` - The trade to price
-    /// * `chain_df` - Option chain data at pricing time
+    /// * `chain` - Option chain data at pricing time
     /// * `spot` - Underlying spot price
     /// * `timestamp` - Pricing timestamp
     /// * `iv_surface` - Pre-built IV surface for interpolation
     fn price_with_surface(
         &self,
         trade: &Self::Trade,
-        chain_df: &DataFrame,
+        chain: &[OptionBar],
         spot: f64,
         timestamp: DateTime<Utc>,
         iv_surface: Option<&IVSurface>,

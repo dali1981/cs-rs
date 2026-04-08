@@ -1,5 +1,5 @@
 #!/usr/bin/env rust
-//! Standalone test to inspect IB option chain DataFrame schema
+//! Standalone test to inspect IB option chain data
 //!
 //! Run with:
 //! ```bash
@@ -44,8 +44,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get option bars at specific time (this is what the backtest uses)
     println!("Fetching option bars at time...");
-    let chain_df = match options_repo.get_option_bars_at_time(symbol, timestamp).await {
-        Ok(df) => df,
+    let chain = match options_repo.get_option_bars_at_time(symbol, timestamp).await {
+        Ok(bars) => bars,
         Err(e) => {
             eprintln!("Failed to get option bars at time: {}", e);
             return Err(e.into());
@@ -55,101 +55,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✓ Option bars at time fetched successfully");
     println!();
 
-    // Inspect DataFrame
-    println!("DataFrame Info:");
-    println!("  Rows: {}", chain_df.height());
-    println!("  Columns: {}", chain_df.width());
+    // Inspect results
+    println!("Option Chain Info:");
+    println!("  Bars: {}", chain.len());
     println!();
 
-    // List all columns with types
-    println!("Schema (column name → type):");
-    for field in chain_df.schema().iter_fields() {
-        println!("  {} → {:?}", field.name(), field.data_type());
-    }
+    // Check field presence
+    println!("Checking required fields:");
+    let has_strike = chain.iter().all(|b| b.strike > 0.0);
+    let has_expiration = !chain.is_empty();
+    let has_close = chain.iter().any(|b| b.close.is_some());
+    let has_timestamp = chain.iter().any(|b| b.timestamp.is_some());
+
+    println!("  ✓ strike: all valid = {}", has_strike);
+    println!("  ✓ expiration: present = {}", has_expiration);
+    println!("  ✓ close: any non-null = {}", has_close);
+    println!("  ✓ timestamp: any non-null = {}", has_timestamp);
     println!();
 
-    // Check specific columns we need
-    println!("Checking required columns:");
-
-    let required = vec!["strike", "expiration", "close", "option_type", "timestamp"];
-    for col_name in &required {
-        match chain_df.column(col_name) {
-            Ok(col) => {
-                println!("  ✓ '{}' exists - dtype: {:?}", col_name, col.dtype());
-
-                // Try to extract as expected type
-                match *col_name {
-                    "strike" | "close" => {
-                        match col.f64() {
-                            Ok(_) => println!("    → Can cast to f64"),
-                            Err(e) => println!("    ✗ Cannot cast to f64: {}", e),
-                        }
-                    }
-                    "expiration" => {
-                        match col.date() {
-                            Ok(_) => println!("    → Can cast to Date"),
-                            Err(e) => {
-                                println!("    ✗ Cannot cast to Date: {}", e);
-
-                                // Try alternative extractions
-                                if let Ok(s) = col.str() {
-                                    println!("    → Can extract as String");
-                                    if chain_df.height() > 0 {
-                                        println!("    → First value: {:?}", s.get(0));
-                                    }
-                                } else if let Ok(i) = col.i64() {
-                                    println!("    → Can extract as i64");
-                                    if chain_df.height() > 0 {
-                                        println!("    → First value: {:?}", i.get(0));
-                                    }
-                                } else if let Ok(i) = col.i32() {
-                                    println!("    → Can extract as i32");
-                                    if chain_df.height() > 0 {
-                                        println!("    → First value: {:?}", i.get(0));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    "option_type" => {
-                        match col.str() {
-                            Ok(_) => println!("    → Can cast to Str"),
-                            Err(e) => println!("    ✗ Cannot cast to Str: {}", e),
-                        }
-                    }
-                    "timestamp" => {
-                        // Try datetime extraction
-                        match col.datetime() {
-                            Ok(_) => println!("    → Can extract as Datetime"),
-                            Err(_) => {
-                                // Try casting to i64
-                                match col.cast(&polars::prelude::DataType::Int64) {
-                                    Ok(casted) => {
-                                        if let Ok(_i64_col) = casted.i64() {
-                                            println!("    → Can cast to Int64 (milliseconds)");
-                                        }
-                                    }
-                                    Err(e) => println!("    ✗ Cannot cast to Int64: {}", e),
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            Err(_) => {
-                println!("  ✗ '{}' does NOT exist", col_name);
-            }
-        }
-    }
-    println!();
-
-    // Show first few rows
-    println!("First 3 rows:");
-    if chain_df.height() > 0 {
-        println!("{}", chain_df.head(Some(3)));
-    } else {
-        println!("  (DataFrame is empty)");
+    // Show first 3 bars
+    println!("First 3 bars:");
+    for (i, bar) in chain.iter().take(3).enumerate() {
+        println!(
+            "  [{}] strike={:.2} exp={} type={:?} close={:?} ts={:?}",
+            i, bar.strike, bar.expiration, bar.option_type, bar.close, bar.timestamp
+        );
     }
 
     Ok(())
