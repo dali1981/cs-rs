@@ -5,12 +5,11 @@
 // for per-minute spot price lookups. cs-analytics remains pure computational.
 
 use chrono::{DateTime, NaiveDate, Utc};
-use finq_core::OptionType;
 use rust_decimal::Decimal;
 use tracing::{debug, trace, warn};
 
 use cs_analytics::{bs_implied_volatility, BSConfig, IVPoint, IVSurface};
-use cs_domain::{MarketTime, OptionBar, TradingDate, TradingTimestamp};
+use cs_domain::{CallPut, MarketTime, OptionBar, TradingDate, TradingTimestamp};
 use cs_domain::repositories::EquityDataRepository;
 use crate::iv_validation::validate_iv_for_surface;
 
@@ -43,7 +42,7 @@ pub fn build_iv_surface(
             continue;
         }
 
-        let is_call = matches!(bar.option_type, OptionType::Call);
+        let is_call = matches!(bar.option_type, CallPut::Call);
 
         let iv = match bs_implied_volatility(
             close,
@@ -175,7 +174,7 @@ pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository + ?Sized>(
             latest_spot = Some(spot_decimal);
         }
 
-        let is_call = matches!(bar.option_type, OptionType::Call);
+        let is_call = matches!(bar.option_type, CallPut::Call);
 
         let ttm = calculate_ttm(opt_timestamp, bar.expiration, &market_close);
         if ttm <= 0.0 {
@@ -294,13 +293,11 @@ fn calculate_ttm(from: DateTime<Utc>, to_date: NaiveDate, market_close: &MarketT
 mod tests {
     use super::*;
     use chrono::Utc;
-    use finq_core::OptionType;
-
     fn make_bar(strike: f64, expiration: NaiveDate, is_call: bool, close: f64) -> OptionBar {
         OptionBar {
             strike,
             expiration,
-            option_type: if is_call { OptionType::Call } else { OptionType::Put },
+            option_type: if is_call { CallPut::Call } else { CallPut::Put },
             close: Some(close),
             timestamp: None,
         }

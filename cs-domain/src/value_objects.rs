@@ -1065,7 +1065,7 @@ pub struct OptionBar {
     /// Expiration date
     pub expiration: NaiveDate,
     /// Call or Put
-    pub option_type: finq_core::OptionType,
+    pub option_type: CallPut,
     /// Last/close price (None if the contract had no trade data)
     pub close: Option<f64>,
     /// Timestamp of this bar snapshot (for minute-aligned chains)

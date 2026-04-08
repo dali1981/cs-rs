@@ -6,14 +6,12 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use std::sync::Arc;
 use thiserror::Error;
-use finq_core::OptionType;
-
 use cs_analytics::{AtmMethod, StraddlePriceComputer};
 use cs_domain::{
     entities::EarningsEvent,
     repositories::{EarningsRepository, EquityDataRepository, OptionsDataRepository, RepositoryError},
     timing::EarningsTradeTiming,
-    value_objects::{AtmIvConfig, EarningsOutcome, EarningsSummaryStats, OptionBar, TimingConfig},
+    value_objects::{AtmIvConfig, CallPut, EarningsOutcome, EarningsSummaryStats, OptionBar, TimingConfig},
 };
 
 /// Result of earnings analysis
@@ -241,7 +239,7 @@ where
                 if bar.strike <= 0.0 {
                     return None;
                 }
-                let is_call = matches!(bar.option_type, OptionType::Call);
+                let is_call = matches!(bar.option_type, CallPut::Call);
                 Some((bar.strike, bar.expiration, close, is_call))
             })
             .collect();

@@ -8,7 +8,7 @@ use polars::prelude::*;
 
 use crate::datetime::{TradingDate, TradingTimestamp};
 use crate::repositories::RepositoryError;
-use crate::value_objects::{EquityBar, OptionBar};
+use crate::value_objects::{CallPut, EquityBar, OptionBar};
 
 /// Convert a polars DataFrame with option chain columns to `Vec<OptionBar>`.
 ///
@@ -80,8 +80,8 @@ pub(crate) fn dataframe_to_option_bars(df: &DataFrame) -> Result<Vec<OptionBar>,
         };
 
         let option_type = match option_types.get(i) {
-            Some("call") => finq_core::OptionType::Call,
-            Some("put") => finq_core::OptionType::Put,
+            Some("call") => CallPut::Call,
+            Some("put") => CallPut::Put,
             _ => continue,
         };
 

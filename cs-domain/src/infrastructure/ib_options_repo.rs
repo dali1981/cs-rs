@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::repositories::{OptionsDataRepository, RepositoryError};
-use crate::value_objects::{OptionBar, Strike};
+use crate::value_objects::{CallPut, OptionBar, Strike};
 
 pub struct IbOptionsRepository {
     db: ParquetDatabase,
@@ -64,8 +64,8 @@ fn snapshots_to_option_bars(snapshots: Vec<OptionSnapshot>) -> Vec<OptionBar> {
             strike: s.strike.to_f64().unwrap_or(0.0),
             expiration: s.expiration,
             option_type: match s.option_type {
-                IbOptionType::Call => finq_core::OptionType::Call,
-                IbOptionType::Put => finq_core::OptionType::Put,
+                IbOptionType::Call => CallPut::Call,
+                IbOptionType::Put => CallPut::Put,
             },
             close: Some(s.close),
             timestamp: Some(s.timestamp),

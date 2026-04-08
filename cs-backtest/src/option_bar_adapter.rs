@@ -5,8 +5,7 @@
 //! Only call this at the top of `price_with_surface` implementations; do not spread
 //! DataFrame construction throughout the pricer logic.
 
-use cs_domain::{OptionBar, TradingDate};
-use finq_core::OptionType;
+use cs_domain::{CallPut, OptionBar, TradingDate};
 use polars::prelude::*;
 
 /// Convert a slice of `OptionBar` to a polars `DataFrame`.
@@ -22,8 +21,8 @@ pub fn to_dataframe(chain: &[OptionBar]) -> DataFrame {
     let option_types: Vec<&str> = chain
         .iter()
         .map(|b| match b.option_type {
-            OptionType::Call => "call",
-            OptionType::Put => "put",
+            CallPut::Call => "call",
+            CallPut::Put => "put",
         })
         .collect();
     let closes: Vec<Option<f64>> = chain.iter().map(|b| b.close).collect();

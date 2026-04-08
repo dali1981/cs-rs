@@ -109,7 +109,7 @@ impl OptionsDataRepository for DemoOptionsRepository {
                 Some(ts) if ts <= target_time => ts,
                 _ => continue,
             };
-            let key = (bar.strike.to_bits(), bar.expiration, matches!(bar.option_type, finq_core::OptionType::Call));
+            let key = (bar.strike.to_bits(), bar.expiration, matches!(bar.option_type, crate::value_objects::CallPut::Call));
             let should_update = latest.get(&key).map_or(true, |(prev_ts, _)| ts > *prev_ts);
             if should_update {
                 latest.insert(key, (ts, bar));
@@ -149,7 +149,7 @@ impl OptionsDataRepository for DemoOptionsRepository {
                 Some(ts) if ts > target_time && ts <= max_forward_time => ts,
                 _ => continue,
             };
-            let key = (bar.strike.to_bits(), bar.expiration, matches!(bar.option_type, finq_core::OptionType::Call));
+            let key = (bar.strike.to_bits(), bar.expiration, matches!(bar.option_type, crate::value_objects::CallPut::Call));
             let should_update = earliest.get(&key).map_or(true, |(prev_ts, _)| ts < *prev_ts);
             if should_update {
                 earliest.insert(key, (ts, bar));

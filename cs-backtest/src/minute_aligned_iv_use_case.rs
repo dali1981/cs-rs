@@ -16,10 +16,9 @@ use cs_analytics::{
 };
 use cs_domain::{
     repositories::{EquityDataRepository, OptionsDataRepository},
-    value_objects::{AtmIvConfig, AtmIvObservation, HvConfig, IvInterpolationMethod, OptionBar},
+    value_objects::{AtmIvConfig, AtmIvObservation, CallPut, HvConfig, IvInterpolationMethod, OptionBar},
     MarketTime, TradingDate,
 };
-use finq_core::OptionType;
 
 /// Result of IV time series generation
 #[derive(Debug)]
@@ -314,7 +313,7 @@ where
             if bar.close.map_or(true, |c| c <= 0.0) || bar.strike <= 0.0 {
                 continue;
             }
-            let key = (bar.strike.to_bits(), bar.expiration, matches!(bar.option_type, OptionType::Call));
+            let key = (bar.strike.to_bits(), bar.expiration, matches!(bar.option_type, CallPut::Call));
             let should_update = latest.get(&key).map_or(true, |(prev_ts, _)| ts > *prev_ts);
             if should_update {
                 latest.insert(key, (ts, bar));
@@ -329,7 +328,7 @@ where
                     strike: bar.strike,
                     expiration: bar.expiration,
                     price: close,
-                    is_call: matches!(bar.option_type, OptionType::Call),
+                    is_call: matches!(bar.option_type, CallPut::Call),
                     timestamp: ts,
                 })
             })

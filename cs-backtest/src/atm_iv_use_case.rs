@@ -12,10 +12,9 @@ use cs_analytics::{
 };
 use cs_domain::{
     repositories::{EquityDataRepository, OptionsDataRepository},
-    value_objects::{AtmIvConfig, AtmIvObservation, IvInterpolationMethod, OptionBar},
+    value_objects::{AtmIvConfig, AtmIvObservation, CallPut, IvInterpolationMethod, OptionBar},
     MarketTime, TradingDate,
 };
-use finq_core::OptionType;
 
 /// Result of IV time series generation
 #[derive(Debug)]
@@ -348,7 +347,7 @@ where
                 if bar.strike <= 0.0 {
                     return None;
                 }
-                let is_call = matches!(bar.option_type, OptionType::Call);
+                let is_call = matches!(bar.option_type, CallPut::Call);
                 Some(OptionPoint {
                     strike: bar.strike,
                     expiration: bar.expiration,
