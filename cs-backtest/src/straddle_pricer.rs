@@ -2,7 +2,7 @@ use polars::prelude::*;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use cs_analytics::{IVSurface, PricingModel};
-use cs_domain::{Straddle, PricingSource};
+use cs_domain::{LongStraddle, PricingSource};
 use crate::spread_pricer::{SpreadPricer, LegPricing, PricingError};
 use crate::execution::TradePricer;
 
@@ -33,7 +33,7 @@ impl StraddlePricer {
     /// Price straddle - uses market data with model fallback
     pub fn price(
         &self,
-        straddle: &Straddle,
+        straddle: &LongStraddle,
         chain_df: &DataFrame,
         spot: f64,
         timestamp: DateTime<Utc>,
@@ -54,7 +54,7 @@ impl StraddlePricer {
     /// Use this when you have a minute-aligned IV surface built with per-option spot prices.
     pub fn price_with_surface(
         &self,
-        straddle: &Straddle,
+        straddle: &LongStraddle,
         chain_df: &DataFrame,
         spot: f64,
         timestamp: DateTime<Utc>,
@@ -103,12 +103,12 @@ impl StraddlePricer {
 }
 
 impl TradePricer for StraddlePricer {
-    type Trade = Straddle;
+    type Trade = LongStraddle;
     type Pricing = StraddlePricing;
 
     fn price_with_surface(
         &self,
-        trade: &Straddle,
+        trade: &LongStraddle,
         chain: &[cs_domain::OptionBar],
         spot: f64,
         timestamp: DateTime<Utc>,

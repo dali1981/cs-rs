@@ -9,11 +9,11 @@ use crate::trade::{RollableTrade, TradeResult, TradeConstructionError, Composite
 use crate::ports::TradeFactory;
 
 // ============================================================================
-// Straddle
+// LongStraddle
 // ============================================================================
 
 #[async_trait]
-impl RollableTrade for Straddle {
+impl RollableTrade for LongStraddle {
     type Result = StraddleResult;
 
     async fn create(

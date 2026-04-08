@@ -12,7 +12,7 @@ use cs_domain::{
     EquityDataRepository, OptionsDataRepository,
     TradeFactory, TradingSession, SessionContext,
     OptionStrategy, RollableTrade, TradeResult, EarningsEvent, EarningsTime,
-    Straddle, CalendarSpread, IronButterfly,
+    LongStraddle, CalendarSpread, IronButterfly,
 };
 
 use crate::execution::ExecutionConfig;
@@ -545,7 +545,7 @@ impl SessionExecutor {
         use crate::composite_pricer::CompositePricer;
 
         // Create trade
-        let trade = match Straddle::create(
+        let trade = match LongStraddle::create(
             self.trade_factory.as_ref(),
             &session.symbol,
             session.entry_datetime,

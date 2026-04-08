@@ -4,6 +4,8 @@
 //! provider-specific event translation.
 
 use crate::value_objects::EarningsTime;
+#[cfg(feature = "earnings-rs")]
+use crate::{infrastructure::IntoNormalized, EarningsEvent, RepositoryError};
 
 /// Parse any known earnings time string into a canonical [`EarningsTime`].
 ///

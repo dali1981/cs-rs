@@ -1,4 +1,4 @@
-use crate::entities::{Straddle, CalendarSpread, IronButterfly, Strangle, Butterfly, Condor, IronCondor};
+use crate::entities::{LongStraddle, CalendarSpread, IronButterfly, Strangle, Butterfly, Condor, IronCondor};
 use crate::value_objects::{IronButterflyConfig, TradeDirection, MultiLegStrategyConfig};
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
@@ -20,7 +20,7 @@ pub trait TradeFactory: Send + Sync {
     /// * `min_expiration` - Minimum required expiration date (options must expire AFTER this)
     ///
     /// # Returns
-    /// A Straddle with:
+    /// A LongStraddle with:
     /// - ATM strike (closest to spot price)
     /// - First available expiration after min_expiration
     /// - Both call and put legs at same strike/expiration
@@ -36,7 +36,7 @@ pub trait TradeFactory: Send + Sync {
         symbol: &str,
         as_of: DateTime<Utc>,
         min_expiration: NaiveDate,
-    ) -> Result<Straddle, TradeFactoryError>;
+    ) -> Result<LongStraddle, TradeFactoryError>;
 
     /// Create a calendar spread (short near-term + long far-term at same strike)
     ///

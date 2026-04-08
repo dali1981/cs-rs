@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use cs_domain::{
     EquityDataRepository, OptionsDataRepository,
-    SpotPrice, Straddle, CalendarSpread, IronButterfly, TradeFactory, TradeFactoryError,
+    SpotPrice, LongStraddle, CalendarSpread, IronButterfly, TradeFactory, TradeFactoryError,
 };
 use cs_domain::strike_selection::{ATMStrategy, StrikeSelector, ExpirationCriteria};
 use finq_core::OptionType;
@@ -49,7 +49,7 @@ impl TradeFactory for DefaultTradeFactory {
         symbol: &str,
         as_of: DateTime<Utc>,
         min_expiration: NaiveDate,
-    ) -> Result<Straddle, TradeFactoryError> {
+    ) -> Result<LongStraddle, TradeFactoryError> {
         // 1. Query option chain from repository
         let chain = self.options_repo
             .get_option_bars_at_time(symbol, as_of)
@@ -79,7 +79,7 @@ impl TradeFactory for DefaultTradeFactory {
         );
 
         self.selector
-            .select_straddle(&spot_price, &surface, min_expiration)
+            .select_long_straddle(&spot_price, &surface, min_expiration)
             .map_err(|e| TradeFactoryError::SelectionError(format!("Strike selection failed: {}", e)))
     }
 

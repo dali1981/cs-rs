@@ -12,7 +12,7 @@ use crate::rules::RuleEvaluator;
 use crate::bpr::HasBprTimeline;
 use crate::trade_strategy::{
     TradeExecutionOutcome, TradeStrategy, StrategyDispatch,
-    CalendarSpreadStrategy, IronButterflyStrategy, StraddleStrategy,
+    CalendarSpreadStrategy, IronButterflyStrategy, LongStraddleStrategy,
     PostEarningsStraddleStrategy, CalendarStraddleStrategy,
 };
 
@@ -1090,7 +1090,7 @@ where
         config.start_date = start_date;
         config.end_date = end_date;
 
-        let strategy = StraddleStrategy::new(&config);
+        let strategy = LongStraddleStrategy::new(&config);
 
         let temp_use_case = BacktestUseCase {
             earnings_repo: Arc::clone(&self.earnings_repo),
