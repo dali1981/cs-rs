@@ -7,7 +7,8 @@ use cs_domain::{
     EquityDataRepository, OptionsDataRepository,
     SpotPrice, LongStraddle, CalendarSpread, IronButterfly, TradeFactory, TradeFactoryError,
 };
-use cs_domain::strike_selection::{ATMStrategy, StrikeSelector, ExpirationCriteria};
+use cs_domain::strike_selection::ExpirationCriteria;
+use crate::strike_selection::{ATMStrategy, StrikeSelector};
 use finq_core::OptionType;
 
 /// Default implementation of TradeFactory using ATM selection strategy

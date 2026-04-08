@@ -33,8 +33,7 @@ pub use datetime::{TradingDate, TradingTimestamp, MarketTime, eastern_to_utc};
 pub use value_objects::*;
 pub use entities::*;
 pub use strike_selection::{
-    SelectionStrategy, OptionStrategy, StrategyError, TradeSelectionCriteria, OptionChainData,
-    ATMStrategy, DeltaStrategy, DeltaScanMode, StrikeMatchMode,
+    OptionStrategy, StrategyError, TradeSelectionCriteria, StrikeMatchMode,
 };
 
 pub use repositories::*;
