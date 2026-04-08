@@ -7,20 +7,36 @@ on:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
-  # 1. Core domain/backtest crates compile cleanly (no adapter dependencies).
+  # 1. Dependency direction — cargo metadata structural check.
+  #    Fails if any workspace crate depends on a crate above it in the stack.
   # ─────────────────────────────────────────────────────────────────────────────
-  core-check:
-    name: core crates compile
+  dep-direction:
+    name: dependency direction (cargo metadata)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check -p cs-domain
-      - run: cargo check -p cs-backtest
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: check dependency direction
+        run: python3 scripts/check_dependencies.py
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 2. Demo path runs end-to-end (zero external data dependencies).
+  # 2. Public API purity — no infrastructure types in domain public signatures.
+  # ─────────────────────────────────────────────────────────────────────────────
+  api-purity:
+    name: public API purity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check public API purity
+        run: bash scripts/check_public_api.sh
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 3. Demo path — canonical command from scripts/demo_command.sh.
+  #    Runs the smoke test, which also verifies parameter sync with the script.
   # ─────────────────────────────────────────────────────────────────────────────
   demo-smoke:
     name: demo path smoke test
@@ -29,57 +45,81 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: run demo smoke test
+      - name: run demo smoke test (includes param-sync check)
         run: cargo test --no-default-features --features demo -p cs-cli --test demo_smoke
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # 3. Architecture grep guards.
-  #    Each guard catches a specific class of architectural decay.
+  # 4. Warning budget — fails if any crate exceeds its baseline in
+  #    scripts/warning_baseline.json.
+  # ─────────────────────────────────────────────────────────────────────────────
+  warning-budget:
+    name: warning budget gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: check warning counts vs baseline
+        run: |
+          python3 - scripts/warning_baseline.json <<'EOF'
+          import json, subprocess, sys
+
+          baseline_file = sys.argv[1]
+          with open(baseline_file) as f:
+              baseline = json.load(f)
+
+          crates = {k: v for k, v in baseline.items() if not k.startswith("_")}
+          fail = 0
+
+          for crate, limit in crates.items():
+              result = subprocess.run(
+                  ["cargo", "check", f"-p{crate}"],
+                  capture_output=True, text=True
+              )
+              output = result.stdout + result.stderr
+              count = sum(1 for line in output.splitlines() if line.strip().startswith("warning:"))
+              status = "OK  " if count <= limit else "FAIL"
+              print(f"  {status} {crate}: {count} warning(s) (baseline {limit})")
+              if count > limit:
+                  fail = 1
+
+          sys.exit(fail)
+          EOF
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 5. Vocabulary protection + clap leakage (grep guards).
   # ─────────────────────────────────────────────────────────────────────────────
   arch-guards:
-    name: architecture grep guards
+    name: vocabulary and boundary guards
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: "guard: no polars in cs-domain outside infrastructure/"
-        run: |
-          # Polars is an infrastructure concern. Domain + entities must stay pure.
-          hits=$(grep -rn "use polars" cs-domain/src/ \
-                   --include="*.rs" \
-                   --exclude-dir=infrastructure | wc -l)
-          if [ "$hits" -gt 0 ]; then
-            echo "FAIL: polars leaked into cs-domain outside infrastructure/:"
-            grep -rn "use polars" cs-domain/src/ --include="*.rs" --exclude-dir=infrastructure
-            exit 1
-          fi
-          echo "OK: polars confined to cs-domain/src/infrastructure/"
-
       - name: "guard: no clap in non-CLI crates"
         run: |
-          # clap is a presentation concern. Domain and backtest crates must not depend on it.
           hits=$(grep -rn "clap::\|use clap" cs-domain/src/ cs-backtest/src/ \
                    --include="*.rs" | wc -l)
-          if [ "$hits" -gt 0 ]; then
-            echo "FAIL: clap leaked into non-CLI crates:"
+          [ "$hits" -eq 0 ] || {
             grep -rn "clap::\|use clap" cs-domain/src/ cs-backtest/src/ --include="*.rs"
             exit 1
-          fi
+          }
           echo "OK: no clap in cs-domain or cs-backtest"
 
       - name: "guard: deprecated vocabulary has not reappeared"
         run: |
-          # These aliases were removed in DAL-69. They must not come back.
           fail=0
           check() {
-            local label=$1; local pattern=$2; local path=$3
+            local label=$1 pattern=$2 path=$3
             hits=$(grep -rn "$pattern" "$path" --include="*.rs" | wc -l)
             if [ "$hits" -gt 0 ]; then
-              echo "FAIL [$label]: found $hits occurrence(s):"
+              echo "FAIL [$label]:"
               grep -rn "$pattern" "$path" --include="*.rs"
               fail=1
             else
-              echo "OK [$label]: not found"
+              echo "OK   [$label]"
             fi
           }
           check "Straddle alias"           "pub type Straddle"           cs-domain/src/

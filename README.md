@@ -9,18 +9,11 @@ Run a backtest with embedded sample data (no external dependencies required):
 
 ```bash
 cargo run --release --no-default-features --features demo -p cs-cli --bin cs -- \
-  backtest --conf configs/demo.toml --start 2024-11-06 --end 2024-11-20
+  backtest --conf configs/demo.toml --start 2024-08-14 --end 2024-08-28
 ```
 
-Expected output:
-```
-Sample Trades:
-  1. NVDA | P&L: $-60.00 (-3.82%)
-```
-
-The demo uses real NVDA options data around the November 2024 earnings event
-(entry Nov 12, exit Nov 20). The small loss demonstrates realistic IV crush
-after earnings when the stock move doesn't exceed implied volatility expectations.
+The demo uses real NVDA options data around the August 2024 earnings event
+(2024-08-28 AMC). Canonical parameters are defined in `scripts/demo_command.sh`.
 
 ## Features
 

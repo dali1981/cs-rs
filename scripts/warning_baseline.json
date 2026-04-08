@@ -1,0 +1,6 @@
+{
+  "cs-domain": 8,
+  "cs-backtest": 10,
+  "cs-cli": 19,
+  "_note": "Baseline captured on 2026-04-08. Update by running: bash scripts/update_warning_baseline.sh"
+}
