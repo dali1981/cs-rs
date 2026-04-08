@@ -1,5 +1,7 @@
 // Translation layer — all external → domain mappings live here (ADR-0001)
 pub mod mappers;
+// Private DataFrame → domain type converters (not part of public API)
+mod option_bar_conversions;
 pub use mappers::IntoNormalized;
 
 // Finq-based repositories (requires finq-flatfiles)

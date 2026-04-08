@@ -10,7 +10,6 @@
 
 use chrono::{DateTime, Utc};
 use cs_domain::*;
-use polars::prelude::DataFrame;
 use cs_analytics::IVSurface;
 use tracing::warn;
 use crate::execution::{ExecutionConfig, ExecutableTrade, TradePricer, SimulationOutput, ExecutionError};
@@ -20,7 +19,7 @@ use crate::iv_surface_builder::build_iv_surface_minute_aligned;
 pub struct PreparedData {
     pub spot: SpotPrice,
     pub surface: IVSurface,
-    pub entry_chain: DataFrame,
+    pub entry_chain: Vec<OptionBar>,
 }
 
 /// Raw simulation output before enrichment

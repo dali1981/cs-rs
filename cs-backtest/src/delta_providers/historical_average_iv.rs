@@ -95,38 +95,28 @@ impl<T: CompositeTrade> HistoricalAverageIVProvider<T> {
             }
 
             // Get option chain for this historical day
-            let chain_df = match self.options_repo.get_option_bars(&self.symbol, *date).await {
-                Ok(df) => df,
+            let chain = match self.options_repo.get_option_bars(&self.symbol, *date).await {
+                Ok(bars) => bars,
                 Err(_) => continue, // Skip days with missing data
             };
 
-            // Get spot price for this day (use close price from bars)
-            let bars_df = match self.equity_repo.get_bars(&self.symbol, *date).await {
-                Ok(df) => df,
+            // Get spot price for this day (use last close from equity bars)
+            let bars = match self.equity_repo.get_bars(&self.symbol, *date).await {
+                Ok(b) => b,
                 Err(_) => continue,
             };
 
-            // Extract close price as spot (last bar's close)
-            let spot = if let Ok(close_series) = bars_df.column("close") {
-                if let Ok(close_f64) = close_series.f64() {
-                    // Get last non-null close
-                    close_f64.into_iter()
-                        .filter_map(|x| x)
-                        .last()
-                        .unwrap_or(100.0)
-                } else {
-                    continue;
-                }
-            } else {
-                continue;
-            };
+            let spot = bars.iter()
+                .map(|b| b.close)
+                .last()
+                .unwrap_or(100.0);
 
             // Build IV surface
             let pricing_time = cs_domain::eastern_to_utc(
                 *date,
                 cs_domain::MarketTime::DEFAULT_ENTRY.to_naive_time(),
             );
-            let iv_surface = match build_iv_surface(&chain_df, spot, pricing_time, &self.symbol) {
+            let iv_surface = match build_iv_surface(&chain, spot, pricing_time, &self.symbol) {
                 Some(surface) => surface,
                 None => continue,
             };

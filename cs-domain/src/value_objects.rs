@@ -1053,6 +1053,37 @@ impl MultiLegStrategyConfig {
     }
 }
 
+/// A single option contract's market data snapshot.
+///
+/// Canonical domain type returned by `OptionsDataRepository` methods.
+/// Repository implementations convert their internal storage format (DataFrames,
+/// provider DTOs) to this type before returning. No polars types leak through this boundary.
+#[derive(Debug, Clone)]
+pub struct OptionBar {
+    /// Underlying strike price
+    pub strike: f64,
+    /// Expiration date
+    pub expiration: NaiveDate,
+    /// Call or Put
+    pub option_type: CallPut,
+    /// Last/close price (None if the contract had no trade data)
+    pub close: Option<f64>,
+    /// Timestamp of this bar snapshot (for minute-aligned chains)
+    pub timestamp: Option<DateTime<Utc>>,
+}
+
+/// A single equity price bar.
+///
+/// Canonical domain type returned by `EquityDataRepository::get_bars`.
+/// Contains only the fields needed by backtest consumers; close price and timestamp.
+#[derive(Debug, Clone)]
+pub struct EquityBar {
+    /// Close price for this bar
+    pub close: f64,
+    /// Timestamp of this bar
+    pub timestamp: DateTime<Utc>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -109,12 +109,13 @@ impl TradePricer for StraddlePricer {
     fn price_with_surface(
         &self,
         trade: &LongStraddle,
-        chain_df: &DataFrame,
+        chain: &[cs_domain::OptionBar],
         spot: f64,
         timestamp: DateTime<Utc>,
         iv_surface: Option<&IVSurface>,
     ) -> Result<StraddlePricing, PricingError> {
-        self.price_with_surface(trade, chain_df, spot, timestamp, iv_surface)
+        let chain_df = crate::option_bar_adapter::to_dataframe(chain);
+        self.price_with_surface(trade, &chain_df, spot, timestamp, iv_surface)
     }
 }
 

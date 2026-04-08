@@ -6,13 +6,12 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use std::sync::Arc;
 use thiserror::Error;
-
 use cs_analytics::{AtmMethod, StraddlePriceComputer};
 use cs_domain::{
     entities::EarningsEvent,
     repositories::{EarningsRepository, EquityDataRepository, OptionsDataRepository, RepositoryError},
     timing::EarningsTradeTiming,
-    value_objects::{AtmIvConfig, EarningsOutcome, EarningsSummaryStats, TimingConfig},
+    value_objects::{AtmIvConfig, CallPut, EarningsOutcome, EarningsSummaryStats, OptionBar, TimingConfig},
 };
 
 /// Result of earnings analysis
@@ -160,7 +159,7 @@ where
 
         // Get options at entry time and compute straddle
         let entry_date = self.timing_service.entry_date(event);
-        let options_df = self
+        let chain = self
             .options_repo
             .get_option_bars(&event.symbol, entry_date)
             .await
@@ -170,7 +169,7 @@ where
             })?;
 
         // Extract option data
-        let option_data = self.extract_option_data(&options_df)?;
+        let option_data = self.extract_option_data(&chain)?;
         let pre_spot_f64 = pre_spot.to_f64();
 
         // Compute straddle
@@ -228,60 +227,22 @@ where
         Ok(outcome)
     }
 
-    /// Extract option data from DataFrame
+    /// Extract option data from an option chain slice
     fn extract_option_data(
         &self,
-        df: &polars::frame::DataFrame,
+        chain: &[OptionBar],
     ) -> Result<Vec<(f64, NaiveDate, f64, bool)>, EarningsAnalysisError> {
-        let strikes = df
-            .column("strike")
-            .map_err(|e| RepositoryError::Polars(e.to_string()))?
-            .f64()
-            .map_err(|e| RepositoryError::Polars(e.to_string()))?;
-
-        let expirations = df
-            .column("expiration")
-            .map_err(|e| RepositoryError::Polars(e.to_string()))?
-            .date()
-            .map_err(|e| RepositoryError::Polars(e.to_string()))?;
-
-        let closes = df
-            .column("close")
-            .map_err(|e| RepositoryError::Polars(e.to_string()))?
-            .f64()
-            .map_err(|e| RepositoryError::Polars(e.to_string()))?;
-
-        let option_types = df
-            .column("option_type")
-            .map_err(|e| RepositoryError::Polars(e.to_string()))?
-            .str()
-            .map_err(|e| RepositoryError::Polars(e.to_string()))?;
-
-        let mut options = Vec::new();
-
-        for i in 0..df.height() {
-            let (strike, exp_days, close, opt_type) = match (
-                strikes.get(i),
-                expirations.get(i),
-                closes.get(i),
-                option_types.get(i),
-            ) {
-                (Some(s), Some(e), Some(c), Some(t)) => (s, e, c, t),
-                _ => continue,
-            };
-
-            if close <= 0.0 || strike <= 0.0 {
-                continue;
-            }
-
-            // Convert polars date (days since epoch) to NaiveDate
-            let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
-            let expiration = epoch + chrono::Duration::days(exp_days as i64);
-
-            let is_call = opt_type == "call";
-
-            options.push((strike, expiration, close, is_call));
-        }
+        let options: Vec<(f64, NaiveDate, f64, bool)> = chain
+            .iter()
+            .filter_map(|bar| {
+                let close = bar.close.filter(|&c| c > 0.0)?;
+                if bar.strike <= 0.0 {
+                    return None;
+                }
+                let is_call = matches!(bar.option_type, CallPut::Call);
+                Some((bar.strike, bar.expiration, close, is_call))
+            })
+            .collect();
 
         Ok(options)
     }

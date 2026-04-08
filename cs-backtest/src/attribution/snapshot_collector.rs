@@ -270,13 +270,7 @@ impl<T: CompositeTrade + Clone> SnapshotCollector<T> {
             .await
             .map_err(|e| e.to_string())?;
 
-        let closes: Vec<f64> = bars
-            .column("close")
-            .map_err(|_| "No close column")?
-            .f64()
-            .map_err(|_| "Invalid type")?
-            .into_no_null_iter()
-            .collect();
+        let closes: Vec<f64> = bars.iter().map(|b| b.close).collect();
 
         let hv = realized_volatility(&closes, window as usize, 252.0)
             .ok_or("Insufficient data for HV")?;
