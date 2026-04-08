@@ -1,0 +1,129 @@
+name: architecture-fitness
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 1. Dependency direction — cargo metadata structural check.
+  #    Fails if any workspace crate depends on a crate above it in the stack.
+  # ─────────────────────────────────────────────────────────────────────────────
+  dep-direction:
+    name: dependency direction (cargo metadata)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: check dependency direction
+        run: python3 scripts/check_dependencies.py
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 2. Public API purity — no infrastructure types in domain public signatures.
+  # ─────────────────────────────────────────────────────────────────────────────
+  api-purity:
+    name: public API purity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check public API purity
+        run: bash scripts/check_public_api.sh
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 3. Demo path — canonical command from scripts/demo_command.sh.
+  #    Runs the smoke test, which also verifies parameter sync with the script.
+  # ─────────────────────────────────────────────────────────────────────────────
+  demo-smoke:
+    name: demo path smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: run demo smoke test (includes param-sync check)
+        run: cargo test --no-default-features --features demo -p cs-cli --test demo_smoke
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 4. Warning budget — fails if any crate exceeds its baseline in
+  #    scripts/warning_baseline.json.
+  # ─────────────────────────────────────────────────────────────────────────────
+  warning-budget:
+    name: warning budget gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: check warning counts vs baseline
+        run: |
+          python3 - scripts/warning_baseline.json <<'EOF'
+          import json, subprocess, sys
+
+          baseline_file = sys.argv[1]
+          with open(baseline_file) as f:
+              baseline = json.load(f)
+
+          crates = {k: v for k, v in baseline.items() if not k.startswith("_")}
+          fail = 0
+
+          for crate, limit in crates.items():
+              result = subprocess.run(
+                  ["cargo", "check", f"-p{crate}"],
+                  capture_output=True, text=True
+              )
+              output = result.stdout + result.stderr
+              count = sum(1 for line in output.splitlines() if line.strip().startswith("warning:"))
+              status = "OK  " if count <= limit else "FAIL"
+              print(f"  {status} {crate}: {count} warning(s) (baseline {limit})")
+              if count > limit:
+                  fail = 1
+
+          sys.exit(fail)
+          EOF
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 5. Vocabulary protection + clap leakage (grep guards).
+  # ─────────────────────────────────────────────────────────────────────────────
+  arch-guards:
+    name: vocabulary and boundary guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "guard: no clap in non-CLI crates"
+        run: |
+          hits=$(grep -rn "clap::\|use clap" cs-domain/src/ cs-backtest/src/ \
+                   --include="*.rs" | wc -l)
+          [ "$hits" -eq 0 ] || {
+            grep -rn "clap::\|use clap" cs-domain/src/ cs-backtest/src/ --include="*.rs"
+            exit 1
+          }
+          echo "OK: no clap in cs-domain or cs-backtest"
+
+      - name: "guard: deprecated vocabulary has not reappeared"
+        run: |
+          fail=0
+          check() {
+            local label=$1 pattern=$2 path=$3
+            hits=$(grep -rn "$pattern" "$path" --include="*.rs" | wc -l)
+            if [ "$hits" -gt 0 ]; then
+              echo "FAIL [$label]:"
+              grep -rn "$pattern" "$path" --include="*.rs"
+              fail=1
+            else
+              echo "OK   [$label]"
+            fi
+          }
+          check "Straddle alias"           "pub type Straddle"           cs-domain/src/
+          check "ShortIronButterfly alias" "pub type ShortIronButterfly" cs-domain/src/
+          check "TradingStrategy trait"    "pub trait TradingStrategy"   cs-domain/src/
+          check "StraddleStrategy alias"   "pub type StraddleStrategy"   cs-backtest/src/
+          [ "$fail" -eq 0 ] || exit 1
