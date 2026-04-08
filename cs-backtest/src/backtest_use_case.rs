@@ -4,7 +4,8 @@ use tracing::{info, debug};
 use rust_decimal::Decimal;
 
 use cs_domain::*;
-use cs_domain::strike_selection::{StrikeSelector, ATMStrategy, DeltaStrategy, ExpirationCriteria};
+use cs_domain::strike_selection::ExpirationCriteria;
+use crate::strike_selection::{StrikeSelector, ATMStrategy, DeltaStrategy};
 use cs_domain::pnl::{TradePnlRecord, PnlStatistics, ToPnlRecord};
 use crate::config::{BacktestConfig, SelectionType};
 use crate::execution::ExecutionConfig;

@@ -29,22 +29,19 @@ from collections import defaultdict
 
 # Hard failures: these paths must never exist.
 FORBIDDEN: list[tuple[str, str]] = [
-    ("cs-domain",   "cs-backtest"),
-    ("cs-domain",   "cs-cli"),
-    ("cs-domain",   "cs-python"),
-    ("cs-analytics","cs-backtest"),
-    ("cs-analytics","cs-cli"),
-    ("cs-analytics","cs-python"),
+    ("cs-domain",    "cs-analytics"),  # DAL-92: domain must not depend on analytics
+    ("cs-domain",    "cs-backtest"),
+    ("cs-domain",    "cs-cli"),
+    ("cs-domain",    "cs-python"),
+    ("cs-analytics", "cs-backtest"),
+    ("cs-analytics", "cs-cli"),
+    ("cs-analytics", "cs-python"),
     ("cs-backtest",  "cs-cli"),
     ("cs-backtest",  "cs-python"),
 ]
 
 # Known concerns: log but do not fail (to be resolved in future issues).
-KNOWN_CONCERNS: list[tuple[str, str]] = [
-    # cs-domain depends on cs-analytics (value objects use analytics types).
-    # Tracked for future cleanup.
-    # ("cs-domain", "cs-analytics"),
-]
+KNOWN_CONCERNS: list[tuple[str, str]] = []
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

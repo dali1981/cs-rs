@@ -304,7 +304,7 @@ fn calculate_pnl_attribution(
 
     for ((entry_leg, position), (exit_leg, _)) in entry_pricing.legs.iter().zip(exit_pricing.legs.iter()) {
         let sign = position.sign();
-        let leg_pnl = cs_domain::calculate_option_leg_pnl(
+        let leg_pnl = cs_analytics::calculate_option_leg_pnl(
             entry_leg.greeks.as_ref(),
             entry_leg.iv,
             exit_leg.iv,

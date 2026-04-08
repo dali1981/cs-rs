@@ -1,8 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use cs_analytics::Greeks;
-
 /// Position-level Greeks (already scaled by contract multiplier)
 /// These represent real P&L exposure, not per-share values
 ///
@@ -23,41 +21,16 @@ impl PositionGreeks {
     /// Convert from per-share Greeks to position-level Greeks
     ///
     /// # Arguments
-    /// * `greeks` - Per-share Greeks from pricing model
+    /// * `delta` / `gamma` / `theta` / `vega` - Per-share Greek values from pricing model
     /// * `multiplier` - Contract multiplier (typically 100 for equity options)
-    ///
-    /// # Example
-    /// ```
-    /// let per_share = Greeks { delta: 0.5, gamma: 0.03, theta: -0.15, vega: 0.25, rho: 0.0 };
-    /// let position = PositionGreeks::from_per_share(&per_share, 100);
-    /// assert_eq!(position.delta, 50.0);
-    /// assert_eq!(position.gamma, 3.0);
-    /// ```
-    pub fn from_per_share(greeks: &Greeks, multiplier: i32) -> Self {
+    pub fn from_per_share(delta: f64, gamma: f64, theta: f64, vega: f64, multiplier: i32) -> Self {
         let m = multiplier as f64;
         Self {
-            delta: greeks.delta * m,
-            gamma: greeks.gamma * m,
-            theta: greeks.theta * m,
-            vega: greeks.vega * m,
+            delta: delta * m,
+            gamma: gamma * m,
+            theta: theta * m,
+            vega: vega * m,
         }
-    }
-
-    /// Combine call + put Greeks for a straddle position
-    ///
-    /// # Arguments
-    /// * `call` - Per-share Greeks for the call leg
-    /// * `put` - Per-share Greeks for the put leg
-    /// * `multiplier` - Contract multiplier (typically 100)
-    ///
-    /// # Example
-    /// Long ATM straddle:
-    /// - Call: delta=0.5, gamma=0.03, theta=-0.10, vega=0.15
-    /// - Put: delta=-0.5, gamma=0.03, theta=-0.10, vega=0.15
-    /// - Combined (×100): delta≈0, gamma=6.0, theta=-20, vega=30
-    pub fn straddle(call: &Greeks, put: &Greeks, multiplier: i32) -> Self {
-        let combined = *call + *put;
-        Self::from_per_share(&combined, multiplier)
     }
 }
 
@@ -129,50 +102,12 @@ mod tests {
 
     #[test]
     fn test_position_greeks_from_per_share() {
-        let per_share = Greeks {
-            delta: 0.5,
-            gamma: 0.03,
-            theta: -0.15,
-            vega: 0.25,
-            rho: 0.0,
-        };
-
-        let position = PositionGreeks::from_per_share(&per_share, 100);
+        let position = PositionGreeks::from_per_share(0.5, 0.03, -0.15, 0.25, 100);
 
         assert_eq!(position.delta, 50.0);
         assert_eq!(position.gamma, 3.0);
         assert_eq!(position.theta, -15.0);
         assert_eq!(position.vega, 25.0);
-    }
-
-    #[test]
-    fn test_position_greeks_straddle() {
-        let call = Greeks {
-            delta: 0.5,
-            gamma: 0.03,
-            theta: -0.10,
-            vega: 0.15,
-            rho: 0.0,
-        };
-
-        let put = Greeks {
-            delta: -0.5,
-            gamma: 0.03,
-            theta: -0.10,
-            vega: 0.15,
-            rho: 0.0,
-        };
-
-        let straddle = PositionGreeks::straddle(&call, &put, 100);
-
-        // Delta should be near zero for ATM straddle
-        assert!((straddle.delta - 0.0).abs() < 0.01);
-        // Gamma adds (both legs positive)
-        assert_eq!(straddle.gamma, 6.0);
-        // Theta adds (both legs negative)
-        assert_eq!(straddle.theta, -20.0);
-        // Vega adds (both legs positive)
-        assert_eq!(straddle.vega, 30.0);
     }
 
     #[test]

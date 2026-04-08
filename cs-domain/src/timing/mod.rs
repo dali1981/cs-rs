@@ -29,11 +29,3 @@ pub use straddle::StraddleTradeTiming;
 pub use post_earnings::PostEarningsStraddleTiming;
 pub use trading_calendar::TradingCalendar;
 
-// Re-export PnL types from cs_analytics for backwards compatibility
-pub use cs_analytics::{
-    PnLAttribution,
-    LegPnL,
-    calculate_pnl_attribution,
-    calculate_spread_pnl_attribution,
-    calculate_option_leg_pnl,
-};

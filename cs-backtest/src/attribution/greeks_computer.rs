@@ -76,7 +76,7 @@ impl<'a, T: CompositeTrade> GreeksComputer<'a, T> {
         }
 
         // Scale to position level
-        PositionGreeks::from_per_share(&total, self.contract_multiplier)
+        PositionGreeks::from_per_share(total.delta, total.gamma, total.theta, total.vega, self.contract_multiplier)
     }
 
     /// Compute position Greeks from IV surface (per-leg IV)
@@ -131,7 +131,7 @@ impl<'a, T: CompositeTrade> GreeksComputer<'a, T> {
             total.vega += leg_greeks.vega * sign;
         }
 
-        PositionGreeks::from_per_share(&total, self.contract_multiplier)
+        PositionGreeks::from_per_share(total.delta, total.gamma, total.theta, total.vega, self.contract_multiplier)
     }
 
     /// Compute average IV across position legs from surface

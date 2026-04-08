@@ -35,6 +35,7 @@ pub mod minute_aligned_iv_use_case;
 pub mod earnings_analysis_use_case;
 pub mod attribution;
 pub mod rules;  // Rule evaluation for entry filtering
+pub mod strike_selection;  // IVSurface-based strike selection strategies
 
 // Application commands (clean boundary between CLI/config and use cases)
 pub use commands::{
