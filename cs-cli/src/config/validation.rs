@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use chrono::{NaiveDate, Utc};
-use cs_backtest::{DataSourceConfig, EarningsSourceConfig, RunBacktestCommand};
+use cs_backtest::{
+    DataSourceConfig, EarningsSourceConfig, RunBacktestCommand, SelectionType, SpreadType,
+};
 use cs_domain::TradingCostConfig;
 use rust_decimal::Decimal;
 
@@ -21,16 +23,16 @@ pub enum ValidationError {
         date: NaiveDate,
         today: NaiveDate,
     },
-    #[error(
-        "Unknown strategy '{strategy}'. Supported values: PreEarnings, PostEarnings, CrossEarnings"
-    )]
-    UnknownStrategy { strategy: String },
     #[error("Invalid strategy parameter '{field}': {reason}")]
     InvalidStrategyParameter { field: &'static str, reason: String },
     #[error("Invalid cost model configuration: {reason}")]
     InvalidCostModel { reason: String },
-    #[error("Missing input data for {field}: {path}")]
-    MissingInputData { field: &'static str, path: PathBuf },
+    #[error("Missing input data for {field}: {path} ({reason})")]
+    MissingInputData {
+        field: &'static str,
+        path: PathBuf,
+        reason: String,
+    },
     #[error("Input data is empty for {field}: {path}")]
     EmptyInputData { field: &'static str, path: PathBuf },
 }
@@ -93,18 +95,6 @@ fn validate_dates(command: &RunBacktestCommand, today: NaiveDate) -> Result<(), 
 }
 
 fn validate_strategy(command: &RunBacktestCommand) -> Result<(), ValidationError> {
-    if let Some(strategy) = &command.strategy.timing_strategy {
-        let valid = matches!(
-            strategy.as_str(),
-            "PreEarnings" | "PostEarnings" | "CrossEarnings"
-        );
-        if !valid {
-            return Err(ValidationError::UnknownStrategy {
-                strategy: strategy.clone(),
-            });
-        }
-    }
-
     let target_delta = command.execution.target_delta;
     if !target_delta.is_finite() || !(0.0..=1.0).contains(&target_delta) {
         return Err(ValidationError::InvalidStrategyParameter {
@@ -113,52 +103,66 @@ fn validate_strategy(command: &RunBacktestCommand) -> Result<(), ValidationError
         });
     }
 
-    let (delta_min, delta_max) = command.execution.delta_range;
-    if !delta_min.is_finite()
-        || !delta_max.is_finite()
-        || !(0.0..=1.0).contains(&delta_min)
-        || !(0.0..=1.0).contains(&delta_max)
-        || delta_min >= delta_max
+    if command.strategy.selection_strategy == SelectionType::DeltaScan {
+        let (delta_min, delta_max) = command.execution.delta_range;
+        if !delta_min.is_finite()
+            || !delta_max.is_finite()
+            || !(0.0..=1.0).contains(&delta_min)
+            || !(0.0..=1.0).contains(&delta_max)
+            || delta_min >= delta_max
+        {
+            return Err(ValidationError::InvalidStrategyParameter {
+                field: "delta_range",
+                reason: "must be finite, within [0.0, 1.0], and min < max".to_string(),
+            });
+        }
+
+        if command.execution.delta_scan_steps == 0 {
+            return Err(ValidationError::InvalidStrategyParameter {
+                field: "delta_scan_steps",
+                reason: "must be greater than 0".to_string(),
+            });
+        }
+    }
+
+    if matches!(
+        command.strategy.spread,
+        SpreadType::IronButterfly | SpreadType::LongIronButterfly
+    ) && (!command.strategy.wing_width.is_finite() || command.strategy.wing_width <= 0.0)
     {
-        return Err(ValidationError::InvalidStrategyParameter {
-            field: "delta_range",
-            reason: "must be finite, within [0.0, 1.0], and min < max".to_string(),
-        });
-    }
-
-    if command.execution.delta_scan_steps == 0 {
-        return Err(ValidationError::InvalidStrategyParameter {
-            field: "delta_scan_steps",
-            reason: "must be greater than 0".to_string(),
-        });
-    }
-
-    if !command.strategy.wing_width.is_finite() || command.strategy.wing_width <= 0.0 {
         return Err(ValidationError::InvalidStrategyParameter {
             field: "wing_width",
             reason: "must be greater than 0".to_string(),
         });
     }
 
-    if command.strategy.straddle_entry_days == 0 {
-        return Err(ValidationError::InvalidStrategyParameter {
-            field: "straddle_entry_days",
-            reason: "must be greater than 0".to_string(),
-        });
+    if matches!(
+        command.strategy.spread,
+        SpreadType::Straddle | SpreadType::ShortStraddle
+    ) {
+        if command.strategy.straddle_entry_days == 0 {
+            return Err(ValidationError::InvalidStrategyParameter {
+                field: "straddle_entry_days",
+                reason: "must be greater than 0".to_string(),
+            });
+        }
+        if command.strategy.straddle_exit_days == 0 {
+            return Err(ValidationError::InvalidStrategyParameter {
+                field: "straddle_exit_days",
+                reason: "must be greater than 0".to_string(),
+            });
+        }
+        if command.strategy.min_straddle_dte <= 0 {
+            return Err(ValidationError::InvalidStrategyParameter {
+                field: "min_straddle_dte",
+                reason: "must be greater than 0".to_string(),
+            });
+        }
     }
-    if command.strategy.straddle_exit_days == 0 {
-        return Err(ValidationError::InvalidStrategyParameter {
-            field: "straddle_exit_days",
-            reason: "must be greater than 0".to_string(),
-        });
-    }
-    if command.strategy.min_straddle_dte <= 0 {
-        return Err(ValidationError::InvalidStrategyParameter {
-            field: "min_straddle_dte",
-            reason: "must be greater than 0".to_string(),
-        });
-    }
-    if command.strategy.post_earnings_holding_days == 0 {
+
+    if command.strategy.spread == SpreadType::PostEarningsStraddle
+        && command.strategy.post_earnings_holding_days == 0
+    {
         return Err(ValidationError::InvalidStrategyParameter {
             field: "post_earnings_holding_days",
             reason: "must be greater than 0".to_string(),
@@ -197,6 +201,22 @@ fn validate_strategy(command: &RunBacktestCommand) -> Result<(), ValidationError
 }
 
 fn validate_cost_model(config: &TradingCostConfig) -> Result<(), ValidationError> {
+    validate_cost_model_with_depth(config, 0)
+}
+
+fn validate_cost_model_with_depth(
+    config: &TradingCostConfig,
+    depth: usize,
+) -> Result<(), ValidationError> {
+    const MAX_COMPOSITE_DEPTH: usize = 16;
+    if depth > MAX_COMPOSITE_DEPTH {
+        return Err(ValidationError::InvalidCostModel {
+            reason: format!(
+                "composite cost model nesting exceeds max depth ({MAX_COMPOSITE_DEPTH})"
+            ),
+        });
+    }
+
     match config {
         TradingCostConfig::None => Ok(()),
         TradingCostConfig::Preset { .. } => Ok(()),
@@ -258,8 +278,8 @@ fn validate_cost_model(config: &TradingCostConfig) -> Result<(), ValidationError
             slippage,
             commission,
         } => {
-            validate_cost_model(slippage)?;
-            validate_cost_model(commission)?;
+            validate_cost_model_with_depth(slippage, depth + 1)?;
+            validate_cost_model_with_depth(commission, depth + 1)?;
             Ok(())
         }
     }
@@ -319,18 +339,12 @@ fn validate_existing_and_non_empty(
     field: &'static str,
     path: &Path,
 ) -> Result<(), ValidationError> {
-    if !path.exists() {
-        return Err(ValidationError::MissingInputData {
-            field,
-            path: path.to_path_buf(),
-        });
-    }
-
     let metadata = path
         .metadata()
-        .map_err(|_| ValidationError::MissingInputData {
+        .map_err(|e| ValidationError::MissingInputData {
             field,
             path: path.to_path_buf(),
+            reason: e.to_string(),
         })?;
 
     if metadata.is_file() {
@@ -346,9 +360,10 @@ fn validate_existing_and_non_empty(
     if metadata.is_dir() {
         let mut entries = path
             .read_dir()
-            .map_err(|_| ValidationError::MissingInputData {
+            .map_err(|e| ValidationError::MissingInputData {
                 field,
                 path: path.to_path_buf(),
+                reason: e.to_string(),
             })?;
 
         if entries.next().is_none() {
@@ -363,17 +378,22 @@ fn validate_existing_and_non_empty(
     Err(ValidationError::MissingInputData {
         field,
         path: path.to_path_buf(),
+        reason: "unsupported file type".to_string(),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use chrono::NaiveDate;
-    use cs_backtest::{BacktestConfig, DataSourceConfig, EarningsSourceConfig};
+    use cs_backtest::{
+        BacktestConfig, DataSourceConfig, EarningsSourceConfig, SelectionType, SpreadType,
+    };
+    use cs_domain::TradingCostConfig;
+    use rust_decimal::Decimal;
 
     use crate::mapping::map_config_to_command;
 
@@ -394,12 +414,12 @@ mod tests {
         std::env::temp_dir().join(format!("dal154_validation_{suffix}_{ts}"))
     }
 
-    fn make_non_empty_dir(path: &PathBuf) {
+    fn make_non_empty_dir(path: &Path) {
         fs::create_dir_all(path).unwrap();
         fs::write(path.join("marker.txt"), b"x").unwrap();
     }
 
-    fn make_empty_dir(path: &PathBuf) {
+    fn make_empty_dir(path: &Path) {
         fs::create_dir_all(path).unwrap();
     }
 
@@ -458,14 +478,14 @@ mod tests {
     }
 
     #[test]
-    fn fails_on_unknown_strategy() {
-        let data_dir = unique_test_dir("unknown_strategy_data");
-        let earnings_dir = unique_test_dir("unknown_strategy_earnings");
+    fn fails_on_future_date() {
+        let data_dir = unique_test_dir("future_date_data");
+        let earnings_dir = unique_test_dir("future_date_earnings");
         make_non_empty_dir(&data_dir);
         make_non_empty_dir(&earnings_dir);
 
         let mut command = sample_command();
-        command.strategy.timing_strategy = Some("NotARealStrategy".to_string());
+        command.period.end_date = NaiveDate::from_ymd_opt(2026, 1, 2).unwrap();
         let data_source = DataSourceConfig::Finq {
             data_dir: data_dir.clone(),
         };
@@ -482,7 +502,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(err, ValidationError::UnknownStrategy { .. }));
+        assert!(matches!(err, ValidationError::FutureDateUnsupported { .. }));
 
         let _ = fs::remove_dir_all(data_dir);
         let _ = fs::remove_dir_all(earnings_dir);
@@ -540,6 +560,181 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, ValidationError::EmptyInputData { .. }));
+
+        let _ = fs::remove_dir_all(data_dir);
+        let _ = fs::remove_dir_all(earnings_dir);
+    }
+
+    #[test]
+    fn passes_valid_input() {
+        let data_dir = unique_test_dir("valid_data");
+        let earnings_dir = unique_test_dir("valid_earnings");
+        make_non_empty_dir(&data_dir);
+        make_non_empty_dir(&earnings_dir);
+
+        let command = sample_command();
+        let data_source = DataSourceConfig::Finq {
+            data_dir: data_dir.clone(),
+        };
+        let earnings_source = EarningsSourceConfig::Provider {
+            dir: earnings_dir.clone(),
+            source: Default::default(),
+        };
+
+        let result = validate_run_input_with_today(
+            &command,
+            &data_source,
+            &earnings_source,
+            NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        );
+
+        assert!(result.is_ok());
+        let _ = fs::remove_dir_all(data_dir);
+        let _ = fs::remove_dir_all(earnings_dir);
+    }
+
+    #[test]
+    fn allows_unused_strategy_fields_for_calendar_spread() {
+        let data_dir = unique_test_dir("calendar_spread_data");
+        let earnings_dir = unique_test_dir("calendar_spread_earnings");
+        make_non_empty_dir(&data_dir);
+        make_non_empty_dir(&earnings_dir);
+
+        let mut command = sample_command();
+        command.strategy.spread = SpreadType::Calendar;
+        command.strategy.wing_width = 0.0;
+        command.strategy.straddle_entry_days = 0;
+        command.strategy.straddle_exit_days = 0;
+        command.strategy.min_straddle_dte = 0;
+        command.execution.delta_range = (0.9, 0.1);
+        command.strategy.selection_strategy = SelectionType::ATM;
+
+        let data_source = DataSourceConfig::Finq {
+            data_dir: data_dir.clone(),
+        };
+        let earnings_source = EarningsSourceConfig::Provider {
+            dir: earnings_dir.clone(),
+            source: Default::default(),
+        };
+
+        let result = validate_run_input_with_today(
+            &command,
+            &data_source,
+            &earnings_source,
+            NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        );
+
+        assert!(result.is_ok());
+        let _ = fs::remove_dir_all(data_dir);
+        let _ = fs::remove_dir_all(earnings_dir);
+    }
+
+    #[test]
+    fn fails_on_invalid_wing_width_for_iron_butterfly() {
+        let data_dir = unique_test_dir("ibf_data");
+        let earnings_dir = unique_test_dir("ibf_earnings");
+        make_non_empty_dir(&data_dir);
+        make_non_empty_dir(&earnings_dir);
+
+        let mut command = sample_command();
+        command.strategy.spread = SpreadType::IronButterfly;
+        command.strategy.wing_width = 0.0;
+        let data_source = DataSourceConfig::Finq {
+            data_dir: data_dir.clone(),
+        };
+        let earnings_source = EarningsSourceConfig::Provider {
+            dir: earnings_dir.clone(),
+            source: Default::default(),
+        };
+
+        let err = validate_run_input_with_today(
+            &command,
+            &data_source,
+            &earnings_source,
+            NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ValidationError::InvalidStrategyParameter {
+                field: "wing_width",
+                ..
+            }
+        ));
+
+        let _ = fs::remove_dir_all(data_dir);
+        let _ = fs::remove_dir_all(earnings_dir);
+    }
+
+    #[test]
+    fn fails_on_invalid_delta_range_for_delta_scan() {
+        let data_dir = unique_test_dir("delta_scan_data");
+        let earnings_dir = unique_test_dir("delta_scan_earnings");
+        make_non_empty_dir(&data_dir);
+        make_non_empty_dir(&earnings_dir);
+
+        let mut command = sample_command();
+        command.strategy.selection_strategy = SelectionType::DeltaScan;
+        command.execution.delta_range = (0.8, 0.2);
+        let data_source = DataSourceConfig::Finq {
+            data_dir: data_dir.clone(),
+        };
+        let earnings_source = EarningsSourceConfig::Provider {
+            dir: earnings_dir.clone(),
+            source: Default::default(),
+        };
+
+        let err = validate_run_input_with_today(
+            &command,
+            &data_source,
+            &earnings_source,
+            NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ValidationError::InvalidStrategyParameter {
+                field: "delta_range",
+                ..
+            }
+        ));
+
+        let _ = fs::remove_dir_all(data_dir);
+        let _ = fs::remove_dir_all(earnings_dir);
+    }
+
+    #[test]
+    fn fails_on_invalid_cost_model_parameters() {
+        let data_dir = unique_test_dir("cost_model_data");
+        let earnings_dir = unique_test_dir("cost_model_earnings");
+        make_non_empty_dir(&data_dir);
+        make_non_empty_dir(&earnings_dir);
+
+        let mut command = sample_command();
+        command.risk.trading_costs = TradingCostConfig::Percentage {
+            slippage_bps: 10,
+            min_cost_per_leg: Some(Decimal::new(5, 0)),
+            max_cost_per_leg: Some(Decimal::new(1, 0)),
+        };
+        let data_source = DataSourceConfig::Finq {
+            data_dir: data_dir.clone(),
+        };
+        let earnings_source = EarningsSourceConfig::Provider {
+            dir: earnings_dir.clone(),
+            source: Default::default(),
+        };
+
+        let err = validate_run_input_with_today(
+            &command,
+            &data_source,
+            &earnings_source,
+            NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, ValidationError::InvalidCostModel { .. }));
 
         let _ = fs::remove_dir_all(data_dir);
         let _ = fs::remove_dir_all(earnings_dir);

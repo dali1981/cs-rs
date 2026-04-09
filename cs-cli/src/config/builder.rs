@@ -55,6 +55,9 @@ impl BacktestConfigBuilder {
     /// factory can wire each independently (ADR-0003).
     pub fn build(self) -> Result<(RunBacktestCommand, DataSourceConfig, EarningsSourceConfig)> {
         let config = self.build_raw_config()?;
+        config
+            .timing_spec()
+            .map_err(|e| anyhow::anyhow!("Invalid timing strategy configuration: {e}"))?;
         let data_source = config.data_source.clone();
         let earnings_source = config.earnings_source.clone();
         let command = map_config_to_command(&config);
@@ -555,5 +558,29 @@ model = "not_a_real_model"
         );
 
         let _ = fs::remove_file(conf_path);
+    }
+
+    #[test]
+    fn build_rejects_unknown_timing_strategy() {
+        let mut args = minimal_backtest_args(Vec::new());
+        args.timing.timing_strategy = Some("NotARealStrategy".to_string());
+
+        let global = GlobalArgs {
+            data_dir: None,
+            verbose: false,
+        };
+
+        let result = BacktestConfigBuilder::from_args(&args)
+            .with_global(&global)
+            .with_config_files(&args.conf)
+            .unwrap()
+            .build();
+
+        assert!(result.is_err(), "expected unknown timing strategy to fail");
+        let err_msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            err_msg.contains("Unknown timing strategy"),
+            "unexpected error message: {err_msg}"
+        );
     }
 }
