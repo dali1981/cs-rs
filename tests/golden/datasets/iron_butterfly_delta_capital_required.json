@@ -1,0 +1,33 @@
+{
+  "id": "iron_butterfly_delta_capital_required",
+  "trades": [
+    {
+      "entry_cash_flow_cents": -1500,
+      "exit_cash_flow_cents": 1000,
+      "realized_pnl_cents": -500,
+      "pnl_pct_hundredths": -3333,
+      "capital_required_cents": 5000
+    },
+    {
+      "entry_cash_flow_cents": -1000,
+      "exit_cash_flow_cents": 1200,
+      "realized_pnl_cents": 200,
+      "pnl_pct_hundredths": 2000,
+      "capital_required_cents": 4000
+    },
+    {
+      "entry_cash_flow_cents": -1200,
+      "exit_cash_flow_cents": 1100,
+      "realized_pnl_cents": -100,
+      "pnl_pct_hundredths": -833,
+      "capital_required_cents": 4500
+    },
+    {
+      "entry_cash_flow_cents": -900,
+      "exit_cash_flow_cents": 1000,
+      "realized_pnl_cents": 100,
+      "pnl_pct_hundredths": 1111,
+      "capital_required_cents": 3500
+    }
+  ]
+}

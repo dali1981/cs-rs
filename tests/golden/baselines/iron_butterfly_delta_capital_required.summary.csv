@@ -1,0 +1,2 @@
+case_id,trade_count,win_rate_pct,net_pnl,max_drawdown,profit_factor,strategy,selection_strategy,return_basis,start_date,end_date
+iron_butterfly_delta_capital_required,4,50,-3.00,5.00,0.500000,iron-butterfly,delta,capital-required,2025-02-01,2025-02-28

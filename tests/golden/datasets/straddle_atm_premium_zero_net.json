@@ -1,0 +1,33 @@
+{
+  "id": "straddle_atm_premium_zero_net",
+  "trades": [
+    {
+      "entry_cash_flow_cents": -2000,
+      "exit_cash_flow_cents": 2800,
+      "realized_pnl_cents": 800,
+      "pnl_pct_hundredths": 4000,
+      "capital_required_cents": 2000
+    },
+    {
+      "entry_cash_flow_cents": -2000,
+      "exit_cash_flow_cents": 800,
+      "realized_pnl_cents": -1200,
+      "pnl_pct_hundredths": -6000,
+      "capital_required_cents": 2000
+    },
+    {
+      "entry_cash_flow_cents": -2000,
+      "exit_cash_flow_cents": 2600,
+      "realized_pnl_cents": 600,
+      "pnl_pct_hundredths": 3000,
+      "capital_required_cents": 2000
+    },
+    {
+      "entry_cash_flow_cents": -2000,
+      "exit_cash_flow_cents": 1800,
+      "realized_pnl_cents": -200,
+      "pnl_pct_hundredths": -1000,
+      "capital_required_cents": 2000
+    }
+  ]
+}

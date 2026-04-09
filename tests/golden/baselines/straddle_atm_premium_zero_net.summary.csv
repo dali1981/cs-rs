@@ -1,0 +1,2 @@
+case_id,trade_count,win_rate_pct,net_pnl,max_drawdown,profit_factor,strategy,selection_strategy,return_basis,start_date,end_date
+straddle_atm_premium_zero_net,4,50,0.00,12.00,1.000000,straddle,atm,premium,2025-03-01,2025-03-31
