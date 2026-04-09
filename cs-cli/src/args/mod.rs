@@ -4,42 +4,52 @@
 //! related arguments into separate structs and using #[command(flatten)]
 //! to compose them into command-specific argument structures.
 
+#[cfg(feature = "experimental-cli")]
+pub mod analyze;
+#[cfg(feature = "experimental-cli")]
+pub mod atm_iv;
+pub mod attribution;
+pub mod backtest;
+#[cfg(feature = "experimental-cli")]
+pub mod campaign;
 pub mod common;
-pub mod timing;
+#[cfg(feature = "experimental-cli")]
+pub mod earnings;
+pub mod hedging;
+pub mod metrics;
+#[cfg(feature = "experimental-cli")]
+pub mod price;
+pub mod rules;
 pub mod selection;
 pub mod strategy;
-pub mod hedging;
-pub mod attribution;
-pub mod rules;
-pub mod metrics;
-pub mod backtest;
-pub mod atm_iv;
-pub mod earnings;
-pub mod campaign;
-pub mod price;
-pub mod analyze;
+pub mod timing;
 
 // CLI wrapper types with ValueEnum (convert to domain types)
-pub mod spread_type;
-pub mod selection_type;
 pub mod option_type;
+pub mod selection_type;
+pub mod spread_type;
 
+#[cfg(feature = "experimental-cli")]
+pub use analyze::AnalyzeArgs;
+#[cfg(feature = "experimental-cli")]
+pub use atm_iv::AtmIvArgs;
+pub use attribution::AttributionArgs;
+pub use backtest::BacktestArgs;
+#[cfg(feature = "experimental-cli")]
+pub use campaign::CampaignArgs;
 pub use common::GlobalArgs;
-pub use timing::TimingArgs;
+#[cfg(feature = "experimental-cli")]
+pub use earnings::EarningsAnalysisArgs;
+pub use hedging::HedgingArgs;
+pub use metrics::MetricsArgs;
+#[cfg(feature = "experimental-cli")]
+pub use price::PriceArgs;
+pub use rules::RulesArgs;
 pub use selection::SelectionArgs;
 pub use strategy::StrategyArgs;
-pub use hedging::HedgingArgs;
-pub use attribution::AttributionArgs;
-pub use rules::RulesArgs;
-pub use metrics::MetricsArgs;
-pub use backtest::BacktestArgs;
-pub use atm_iv::AtmIvArgs;
-pub use earnings::EarningsAnalysisArgs;
-pub use campaign::CampaignArgs;
-pub use price::PriceArgs;
-pub use analyze::AnalyzeArgs;
+pub use timing::TimingArgs;
 
 // Re-export wrapper types
-pub use spread_type::SpreadTypeArg;
-pub use selection_type::SelectionTypeArg;
 pub use option_type::OptionTypeArg;
+pub use selection_type::SelectionTypeArg;
+pub use spread_type::SpreadTypeArg;

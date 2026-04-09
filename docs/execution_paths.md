@@ -76,15 +76,8 @@ The table below classifies all audited executable surfaces (entrypoints, orchest
 | `cs-backtest/src/session_executor.rs` | `experimental` | Session/campaign executor for non-canonical strategy set. |
 | `cs-backtest/src/earnings_analysis_use_case.rs` | `experimental` | Use case retained for analysis surfaces, not canonical backtest path. |
 | `cs-cli/src/bin/{debug_idxx.rs,test_load_idxx.rs,test_earnings.rs,test_ib_chain_schema.rs,view_atm_iv.rs,plot_atm_iv.rs}` | `experimental` | Utility/test binaries, not canonical runtime command path. |
-| `cs-cli/src/commands/analyze.rs::execute` | `dead` | CLI-exposed but TODO stub; currently prints only and does not perform analysis. |
-| `cs-cli/src/commands/price.rs::execute` | `dead` | CLI-exposed but TODO stub; currently prints only and does not perform pricing flow. |
-| `cs-cli/src/commands/earnings.rs::execute` | `dead` | CLI-exposed but TODO stub; currently prints only and does not perform analysis use case. |
-| `cs-cli/src/handlers/mod.rs` + `cs-cli/src/handlers/earnings_output.rs::{save_earnings_parquet,save_earnings_csv,save_earnings_json}` | `dead` | Unused legacy handler layer; only commented re-export remains. |
-| `cs-cli/src/parsing/earnings_loader.rs::{load_earnings_from_file,load_earnings_for_symbols}` | `dead` | No call sites in current runtime/test paths. |
-| `cs-cli/src/parsing/roll_policy.rs::{parse_roll_policy,parse_campaign_roll_policy}` | `dead` | No call sites in current runtime/test paths. |
+| `cs-cli/src/commands/{analyze.rs,price.rs,earnings.rs}` | `experimental` | Quarantined behind non-default `experimental-cli` feature due DAL-152 dead classification. |
 | `cs-cli/src/parsing/time_config.rs::parse_delta_range` | `test-support` | Currently exercised only by local unit tests; not part of runtime path. |
-| `cs-backtest/src/backtest_use_case.rs::{execute_batch,load_earnings_for_strategy,report_progress}` | `dead` | Explicitly marked old/deprecated date-centric helpers and unused in canonical execution. |
-| `cs-backtest/src/backtest_use_case.rs::{execute_calendar_spread,execute_iron_butterfly,execute_straddle,execute_post_earnings_straddle,execute_calendar_straddle}` | `dead` | Legacy API wrappers; no internal call sites found for canonical runtime. |
 | `cs-backtest/src/lib.rs` legacy exports + files `{straddle_pricer.rs,iron_butterfly_pricer.rs,calendar_straddle_pricer.rs}` | `dead` | Deprecated legacy pricer surface superseded by `CompositePricer` family. |
 | `workspace benches` | `benchmark` | No benchmark harnesses currently present in this repository. |
 
@@ -92,10 +85,25 @@ The table below classifies all audited executable surfaces (entrypoints, orchest
 
 | Item | Problem | Proposed action |
 |---|---|---|
-| `analyze`, `price`, `earnings-analysis` command handlers | Exposed in help output but implementations are TODO stubs. | `quarantine`: hide behind non-default feature or mark as experimental in CLI help until implemented. |
-| Legacy backtest wrapper APIs in `BacktestUseCase` | Parallel legacy API surface creates ambiguity vs canonical `execute`. | `remove`: delete wrappers after confirming no external consumers. |
+| `analyze`, `price`, `earnings-analysis`, `atm-iv`, `campaign` command surfaces | Non-canonical paths can appear production-like when always exposed. | `quarantine` complete in DAL-153: gated behind non-default `experimental-cli` and labeled experimental. |
+| Legacy backtest wrapper APIs in `BacktestUseCase` | Parallel legacy API surface creates ambiguity vs canonical `execute`. | `remove` complete in DAL-153. |
 | Legacy pricer exports in `cs-backtest/src/lib.rs` | Deprecated surface remains exported and can be imported accidentally. | `quarantine` immediately (feature-gate or stop re-export), then `remove` in follow-up ticket. |
-| Unused earnings/parsing helper modules in `cs-cli` | Maintains misleading alternative paths with no current callers. | `remove` if no upcoming ticket depends on them; otherwise `quarantine` under `legacy` module. |
+| Unused earnings/parsing helper modules in `cs-cli` | Maintains misleading alternative paths with no current callers. | `remove` complete in DAL-153. |
+
+## DAL-153 removals from prior dead classification
+
+- Removed `cs-cli/src/handlers/mod.rs` and `cs-cli/src/handlers/earnings_output.rs`.
+- Removed `cs-cli/src/parsing/earnings_loader.rs` and `cs-cli/src/parsing/roll_policy.rs`.
+- Removed legacy date-centric internals from `cs-backtest/src/backtest_use_case.rs`:
+  - `execute_batch`
+  - `load_earnings_for_strategy`
+  - `report_progress`
+- Removed legacy strategy wrapper APIs from `cs-backtest/src/backtest_use_case.rs`:
+  - `execute_calendar_spread`
+  - `execute_iron_butterfly`
+  - `execute_straddle`
+  - `execute_post_earnings_straddle`
+  - `execute_calendar_straddle`
 
 ## Benchmark status
 

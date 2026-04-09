@@ -4,11 +4,10 @@ use std::path::PathBuf;
 
 use cs_backtest::EarningsSourceConfig;
 use cs_domain::{
-    EarningsRepository, OptionsDataRepository, EquityDataRepository,
     infrastructure::{
-        IbOptionsRepository, IbEquityRepository,
-        EarningsReaderAdapter, ParquetEarningsRepository,
+        EarningsReaderAdapter, IbEquityRepository, IbOptionsRepository, ParquetEarningsRepository,
     },
+    EarningsRepository,
 };
 
 use super::repository_factory::DataRepositoryFactory;
@@ -42,7 +41,7 @@ impl IbRepositoryFactory {
                 // Use earnings-rs adapter with configured source
                 Box::new(EarningsReaderAdapter::with_source(
                     dir.clone(),
-                    source.to_earnings_rs()
+                    source.to_earnings_rs(),
                 ))
             }
         }
