@@ -161,4 +161,4 @@ Each invariant is intentionally testable and tied to concrete code paths.
 
 ### Experimental or non-canonical run surfaces
 - Session/campaign-only trade structures in `SessionExecutor` paths (`strangle`, `butterfly`, `condor`, `iron_condor`) are not part of the canonical `cs backtest` contract.
-- Legacy direct strategy methods in `BacktestUseCase` are retained for compatibility, but canonical execution should route through `execute`.
+- Legacy direct strategy wrapper methods in `BacktestUseCase` were removed in DAL-153; canonical execution routes through `execute`.

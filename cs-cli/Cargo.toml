@@ -9,6 +9,8 @@ default = ["full"]
 full = ["cs-domain/full", "cs-backtest/full"]
 # Demo mode: uses fixture data, no external data dependencies
 demo = ["cs-domain/demo", "cs-backtest/demo"]
+# Non-canonical command and utility surfaces (DAL-153 quarantine)
+experimental-cli = []
 
 [[bin]]
 name = "cs"
@@ -18,27 +20,32 @@ path = "src/main.rs"
 [[bin]]
 name = "test_earnings"
 path = "src/bin/test_earnings.rs"
-required-features = ["full"]
+required-features = ["full", "experimental-cli"]
 
 [[bin]]
 name = "debug_idxx"
 path = "src/bin/debug_idxx.rs"
-required-features = ["full"]
+required-features = ["full", "experimental-cli"]
 
 [[bin]]
 name = "test_load_idxx"
 path = "src/bin/test_load_idxx.rs"
-required-features = ["full"]
+required-features = ["full", "experimental-cli"]
+
+[[bin]]
+name = "test_ib_chain_schema"
+path = "src/bin/test_ib_chain_schema.rs"
+required-features = ["full", "experimental-cli"]
 
 [[bin]]
 name = "view_atm_iv"
 path = "src/bin/view_atm_iv.rs"
-required-features = ["full"]
+required-features = ["full", "experimental-cli"]
 
 [[bin]]
 name = "plot_atm_iv"
 path = "src/bin/plot_atm_iv.rs"
-required-features = ["full"]
+required-features = ["full", "experimental-cli"]
 
 [dev-dependencies]
 assert_cmd = "2"

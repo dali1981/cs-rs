@@ -1,21 +1,17 @@
-use std::sync::Arc;
 use chrono::NaiveDate;
-use tracing::{info, debug};
 use rust_decimal::Decimal;
+use std::sync::Arc;
+use tracing::{debug, info};
 
-use cs_domain::*;
-use cs_domain::strike_selection::ExpirationCriteria;
-use crate::strike_selection::{StrikeSelector, ATMStrategy, DeltaStrategy};
-use cs_domain::pnl::{TradePnlRecord, PnlStatistics, ToPnlRecord};
+use crate::bpr::HasBprTimeline;
 use crate::config::{BacktestConfig, SelectionType};
 use crate::execution::ExecutionConfig;
 use crate::rules::RuleEvaluator;
-use crate::bpr::HasBprTimeline;
-use crate::trade_strategy::{
-    TradeExecutionOutcome, TradeStrategy, StrategyDispatch,
-    CalendarSpreadStrategy, IronButterflyStrategy, LongStraddleStrategy,
-    PostEarningsStraddleStrategy, CalendarStraddleStrategy,
-};
+use crate::strike_selection::{ATMStrategy, DeltaStrategy, StrikeSelector};
+use crate::trade_strategy::{StrategyDispatch, TradeExecutionOutcome, TradeStrategy};
+use cs_domain::pnl::{PnlStatistics, ToPnlRecord, TradePnlRecord};
+use cs_domain::strike_selection::ExpirationCriteria;
+use cs_domain::*;
 
 /// Backtest execution result
 #[derive(Debug)]
@@ -163,9 +159,7 @@ impl<R: TradeResultMethods> BacktestResult<R> {
     }
 
     pub fn total_pnl(&self) -> rust_decimal::Decimal {
-        self.results.iter()
-            .map(|r| r.pnl())
-            .sum()
+        self.results.iter().map(|r| r.pnl()).sum()
     }
 
     /// Check if any trades have hedging data
@@ -175,14 +169,13 @@ impl<R: TradeResultMethods> BacktestResult<R> {
 
     /// Total hedge P&L from all trades
     pub fn total_hedge_pnl(&self) -> rust_decimal::Decimal {
-        self.results.iter()
-            .filter_map(|r| r.hedge_pnl())
-            .sum()
+        self.results.iter().filter_map(|r| r.hedge_pnl()).sum()
     }
 
     /// Total P&L including hedges
     pub fn total_pnl_with_hedge(&self) -> rust_decimal::Decimal {
-        self.results.iter()
+        self.results
+            .iter()
             .map(|r| r.total_pnl_with_hedge().unwrap_or(r.pnl()))
             .sum()
     }
@@ -193,10 +186,11 @@ impl<R: TradeResultMethods> BacktestResult<R> {
 
     /// Get percentage returns for statistical analysis
     fn pnl_pcts(&self) -> Vec<f64> {
-        self.results.iter()
+        self.results
+            .iter()
             .map(|r| {
                 let pnl_pct: f64 = r.pnl_pct().try_into().unwrap_or(0.0);
-                pnl_pct / 100.0  // Convert from percentage to decimal (50% -> 0.5)
+                pnl_pct / 100.0 // Convert from percentage to decimal (50% -> 0.5)
             })
             .collect()
     }
@@ -218,9 +212,8 @@ impl<R: TradeResultMethods> BacktestResult<R> {
             return 0.0;
         }
         let mean = self.mean_return();
-        let variance = returns.iter()
-            .map(|r| (r - mean).powi(2))
-            .sum::<f64>() / (returns.len() - 1) as f64;
+        let variance =
+            returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (returns.len() - 1) as f64;
         variance.sqrt()
     }
 
@@ -231,15 +224,13 @@ impl<R: TradeResultMethods> BacktestResult<R> {
             0.0
         } else {
             let mean = self.mean_return();
-            (mean / std) * 16.0  // sqrt(252) ≈ 16
+            (mean / std) * 16.0 // sqrt(252) ≈ 16
         }
     }
 
     /// Average winning trade (in dollars)
     pub fn avg_winner(&self) -> rust_decimal::Decimal {
-        let winners: Vec<_> = self.results.iter()
-            .filter(|r| r.is_winner())
-            .collect();
+        let winners: Vec<_> = self.results.iter().filter(|r| r.is_winner()).collect();
         if winners.is_empty() {
             rust_decimal::Decimal::ZERO
         } else {
@@ -250,13 +241,12 @@ impl<R: TradeResultMethods> BacktestResult<R> {
 
     /// Average winning trade (in percent)
     pub fn avg_winner_pct(&self) -> f64 {
-        let winners: Vec<_> = self.results.iter()
-            .filter(|r| r.is_winner())
-            .collect();
+        let winners: Vec<_> = self.results.iter().filter(|r| r.is_winner()).collect();
         if winners.is_empty() {
             0.0
         } else {
-            let sum: f64 = winners.iter()
+            let sum: f64 = winners
+                .iter()
                 .map(|r| {
                     let pct: f64 = r.pnl_pct().try_into().unwrap_or(0.0);
                     pct / 100.0
@@ -268,7 +258,9 @@ impl<R: TradeResultMethods> BacktestResult<R> {
 
     /// Average losing trade (in dollars)
     pub fn avg_loser(&self) -> rust_decimal::Decimal {
-        let losers: Vec<_> = self.results.iter()
+        let losers: Vec<_> = self
+            .results
+            .iter()
             .filter(|r| r.pnl() < rust_decimal::Decimal::ZERO)
             .collect();
         if losers.is_empty() {
@@ -281,13 +273,16 @@ impl<R: TradeResultMethods> BacktestResult<R> {
 
     /// Average losing trade (in percent)
     pub fn avg_loser_pct(&self) -> f64 {
-        let losers: Vec<_> = self.results.iter()
+        let losers: Vec<_> = self
+            .results
+            .iter()
             .filter(|r| r.pnl() < rust_decimal::Decimal::ZERO)
             .collect();
         if losers.is_empty() {
             0.0
         } else {
-            let sum: f64 = losers.iter()
+            let sum: f64 = losers
+                .iter()
                 .map(|r| {
                     let pct: f64 = r.pnl_pct().try_into().unwrap_or(0.0);
                     pct / 100.0
@@ -317,8 +312,12 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
         let mut total_basis = 0.0;
 
         for r in &self.results {
-            let Some(basis) = r.return_basis_value(self.return_basis) else { continue };
-            let Some(ret) = r.return_on_basis(self.return_basis) else { continue };
+            let Some(basis) = r.return_basis_value(self.return_basis) else {
+                continue;
+            };
+            let Some(ret) = r.return_on_basis(self.return_basis) else {
+                continue;
+            };
 
             let basis_f = basis.to_f64().unwrap_or(0.0);
             if basis_f > 0.0 {
@@ -336,7 +335,8 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
 
     /// Total basis deployed across all trades
     pub fn total_capital_deployed(&self) -> Decimal {
-        self.results.iter()
+        self.results
+            .iter()
             .filter_map(|r| r.return_basis_value(self.return_basis))
             .sum()
     }
@@ -363,11 +363,15 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
     /// Profit factor (gross profit / gross loss)
     pub fn profit_factor(&self) -> f64 {
         use rust_decimal::prelude::ToPrimitive;
-        let gross_profit: Decimal = self.results.iter()
+        let gross_profit: Decimal = self
+            .results
+            .iter()
             .filter(|r| r.is_winner())
             .map(|r| r.pnl())
             .sum();
-        let gross_loss: Decimal = self.results.iter()
+        let gross_loss: Decimal = self
+            .results
+            .iter()
             .filter(|r| r.pnl() < Decimal::ZERO)
             .map(|r| r.pnl().abs())
             .sum();
@@ -385,8 +389,9 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
 
     /// Sharpe ratio using capital-weighted returns (more accurate)
     pub fn capital_weighted_sharpe(&self) -> f64 {
-
-        let returns: Vec<f64> = self.results.iter()
+        let returns: Vec<f64> = self
+            .results
+            .iter()
             .filter_map(|r| r.return_on_basis(self.return_basis))
             .collect();
 
@@ -395,9 +400,8 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
         }
 
         let mean = self.capital_weighted_return();
-        let variance = returns.iter()
-            .map(|r| (r - mean).powi(2))
-            .sum::<f64>() / (returns.len() - 1) as f64;
+        let variance =
+            returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (returns.len() - 1) as f64;
         let std = variance.sqrt();
 
         if std > 0.0 {
@@ -409,10 +413,7 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
 
     /// Get comprehensive statistics using the accounting module
     pub fn accounting_statistics(&self) -> cs_domain::TradeStatistics {
-
-        let accountings: Vec<_> = self.results.iter()
-            .map(|r| r.to_accounting())
-            .collect();
+        let accountings: Vec<_> = self.results.iter().map(|r| r.to_accounting()).collect();
 
         cs_domain::TradeStatistics::from_trades_with_basis(&accountings, self.return_basis)
     }
@@ -420,7 +421,9 @@ impl<R: TradeResultMethods + cs_domain::HasAccounting> BacktestResult<R> {
     /// Number of trades that provide the configured return basis.
     pub fn return_basis_coverage(&self) -> (usize, usize) {
         let total = self.results.len();
-        let supported = self.results.iter()
+        let supported = self
+            .results
+            .iter()
             .filter(|r| r.return_basis_value(self.return_basis).is_some())
             .count();
         (supported, total)
@@ -455,9 +458,7 @@ impl<R: TradeResultMethods + cs_domain::HasTradingCost> BacktestResult<R> {
 
     /// Total trading costs across all trades
     pub fn total_trading_costs(&self) -> Decimal {
-        self.results.iter()
-            .filter_map(|r| r.total_costs())
-            .sum()
+        self.results.iter().filter_map(|r| r.total_costs()).sum()
     }
 
     /// Total gross P&L before costs
@@ -465,14 +466,16 @@ impl<R: TradeResultMethods + cs_domain::HasTradingCost> BacktestResult<R> {
     /// For trades with costs, uses the stored gross P&L.
     /// For trades without costs, uses the current P&L (which is gross).
     pub fn total_gross_pnl(&self) -> Decimal {
-        self.results.iter()
+        self.results
+            .iter()
             .map(|r| r.gross_pnl().unwrap_or_else(|| r.pnl()))
             .sum()
     }
 
     /// Total slippage costs across all trades
     pub fn total_slippage(&self) -> Decimal {
-        self.results.iter()
+        self.results
+            .iter()
             .filter_map(|r| r.cost_summary())
             .map(|cs| cs.costs.breakdown.slippage)
             .sum()
@@ -480,7 +483,8 @@ impl<R: TradeResultMethods + cs_domain::HasTradingCost> BacktestResult<R> {
 
     /// Total commission costs across all trades
     pub fn total_commissions(&self) -> Decimal {
-        self.results.iter()
+        self.results
+            .iter()
             .filter_map(|r| r.cost_summary())
             .map(|cs| cs.costs.breakdown.commission)
             .sum()
@@ -516,14 +520,6 @@ impl<R: TradeResultMethods + cs_domain::HasTradingCost> BacktestResult<R> {
             self.total_trading_costs() / Decimal::from(count)
         }
     }
-}
-
-/// Session progress callback
-#[derive(Debug, Clone)]
-pub struct SessionProgress {
-    pub session_date: NaiveDate,
-    pub entries_count: usize,
-    pub events_found: usize,
 }
 
 /// Trade generation error
@@ -576,31 +572,31 @@ where
 
         match strategy {
             StrategyDispatch::CalendarSpread(s) => {
-                let result = self.execute_with_strategy(&s, None).await?;
+                let result = self.execute_with_strategy(&s).await?;
                 Ok(UnifiedBacktestResult::CalendarSpread(result))
             }
             StrategyDispatch::IronButterfly(s) => {
-                let result = self.execute_with_strategy(&s, None).await?;
+                let result = self.execute_with_strategy(&s).await?;
                 Ok(UnifiedBacktestResult::IronButterfly(result))
             }
             StrategyDispatch::LongIronButterfly(s) => {
-                let result = self.execute_with_strategy(&s, None).await?;
+                let result = self.execute_with_strategy(&s).await?;
                 Ok(UnifiedBacktestResult::IronButterfly(result))
             }
             StrategyDispatch::LongStraddle(s) => {
-                let result = self.execute_with_strategy(&s, None).await?;
+                let result = self.execute_with_strategy(&s).await?;
                 Ok(UnifiedBacktestResult::Straddle(result))
             }
             StrategyDispatch::ShortStraddle(s) => {
-                let result = self.execute_with_strategy(&s, None).await?;
+                let result = self.execute_with_strategy(&s).await?;
                 Ok(UnifiedBacktestResult::Straddle(result))
             }
             StrategyDispatch::PostEarningsStraddle(s) => {
-                let result = self.execute_with_strategy(&s, None).await?;
+                let result = self.execute_with_strategy(&s).await?;
                 Ok(UnifiedBacktestResult::PostEarningsStraddle(result))
             }
             StrategyDispatch::CalendarStraddle(s) => {
-                let result = self.execute_with_strategy(&s, None).await?;
+                let result = self.execute_with_strategy(&s).await?;
                 Ok(UnifiedBacktestResult::CalendarStraddle(result))
             }
         }
@@ -618,7 +614,6 @@ where
     pub async fn execute_with_strategy<S, R>(
         &self,
         strategy: &S,
-        _on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
     ) -> Result<BacktestResult<R>, BacktestError>
     where
         S: TradeStrategy<R> + Sync,
@@ -639,7 +634,8 @@ where
 
         // 1. Determine trading range and timing spec
         let trading_range = self.config.trading_range();
-        let timing_spec = self.config
+        let timing_spec = self
+            .config
             .timing_spec()
             .map_err(|e| BacktestError::Config(e.to_string()))?;
         let filter_criteria = self.config.filter_criteria();
@@ -661,7 +657,8 @@ where
         );
 
         // 3. Load all potentially relevant events
-        let all_events = self.earnings_repo
+        let all_events = self
+            .earnings_repo
             .load_earnings(search_start, search_end, self.config.symbols.as_deref())
             .await
             .map_err(|e| BacktestError::Repository(e.to_string()))?;
@@ -671,24 +668,28 @@ where
         // 4. Discover tradable events (entry date in trading range)
         let tradable_events = trading_range.discover_tradable_events(&all_events, &timing_spec);
 
-        info!(tradable_events = tradable_events.len(), "Tradable events discovered");
+        info!(
+            tradable_events = tradable_events.len(),
+            "Tradable events discovered"
+        );
 
         // Debug: Log what's in the config
         debug!(
             "Config values: min_market_cap={:?}, symbols={:?}",
-            self.config.min_market_cap,
-            self.config.symbols
+            self.config.min_market_cap, self.config.symbols
         );
         debug!(
             "FilterCriteria values: min_market_cap={:?}, symbols={:?}",
-            filter_criteria.min_market_cap,
-            filter_criteria.symbols
+            filter_criteria.min_market_cap, filter_criteria.symbols
         );
 
         // Log active filters
         info!("Applying entry filters:");
         if let Some(min_cap) = filter_criteria.min_market_cap {
-            info!("  - Market cap >= ${:.0}B", min_cap as f64 / 1_000_000_000.0);
+            info!(
+                "  - Market cap >= ${:.0}B",
+                min_cap as f64 / 1_000_000_000.0
+            );
         } else {
             info!("  - Market cap filter: NOT CONFIGURED");
         }
@@ -704,7 +705,10 @@ where
                 }
             }
             if !rules_config.market.is_empty() {
-                info!("  - Market rules: {} rule(s) (checked during execution)", rules_config.market.len());
+                info!(
+                    "  - Market rules: {} rule(s) (checked during execution)",
+                    rules_config.market.len()
+                );
                 for rule in &rules_config.market {
                     info!("    • {}", rule.name());
                 }
@@ -778,13 +782,15 @@ where
 
         // 6. Execute trades (trade-by-trade)
         let tradable_refs: Vec<&TradableEvent> = filtered_events.iter().collect();
-        let batch_results = self.execute_tradable_batch(
-            &tradable_refs,
-            strategy,
-            &*selector,
-            &criteria,
-            &exec_config,
-        ).await;
+        let batch_results = self
+            .execute_tradable_batch(
+                &tradable_refs,
+                strategy,
+                &*selector,
+                &criteria,
+                &exec_config,
+            )
+            .await;
 
         // 7. Collect and apply post-execution filters
         let min_iv_ratio = self.config.selection.min_iv_ratio;
@@ -793,7 +799,9 @@ where
                 TradeExecutionOutcome::Executed(result) => {
                     if strategy.apply_filter(&result, min_iv_ratio) {
                         all_results.push(result);
-                    } else if let Some(error) = strategy.create_filter_error(&result, &tradable.event) {
+                    } else if let Some(error) =
+                        strategy.create_filter_error(&result, &tradable.event)
+                    {
                         dropped_events.push(error);
                     }
                 }
@@ -857,103 +865,8 @@ where
                 tradable.entry_datetime(),
                 tradable.exit_datetime(),
             )
-        }).await
-    }
-
-    /// Execute a batch of trades (OLD: date-centric - deprecated)
-    ///
-    /// This is the old method kept for backwards compatibility.
-    /// New code should use execute_tradable_batch instead.
-    #[allow(dead_code)]
-    async fn execute_batch<S, R>(
-        &self,
-        events: &[EarningsEvent],
-        strategy: &S,
-        selector: &dyn StrikeSelector,
-        criteria: &ExpirationCriteria,
-        exec_config: &ExecutionConfig,
-    ) -> Vec<TradeExecutionOutcome<R>>
-    where
-        S: TradeStrategy<R> + Sync,
-        R: TradeResultMethods + TradeResult + ApplyCosts + HasBprTimeline + Send,
-    {
-        let options_repo = Arc::clone(&self.options_repo);
-        let equity_repo = Arc::clone(&self.equity_repo);
-        crate::execution::run_batch(events, self.config.parallel, |event| {
-            let entry_time = strategy.entry_datetime(event);
-            let exit_time = strategy.exit_datetime(event);
-            strategy.execute_trade(
-                Arc::clone(&options_repo) as Arc<dyn OptionsDataRepository>,
-                Arc::clone(&equity_repo) as Arc<dyn EquityDataRepository>,
-                selector,
-                criteria,
-                exec_config,
-                event,
-                entry_time,
-                exit_time,
-            )
-        }).await
-    }
-
-    /// Load earnings events for a strategy (OLD: date-centric - deprecated)
-    ///
-    /// This method is deprecated in favor of loading all events at once
-    /// and using TradingRange.discover_tradable_events() for filtering.
-    ///
-    /// Different strategies need different lookahead windows:
-    /// - Earnings timing: small window around session date
-    /// - Straddle timing: large lookahead (entry N days before earnings)
-    /// - Post-earnings: lookback (entry after earnings)
-    #[allow(dead_code)]
-    async fn load_earnings_for_strategy<S, R>(
-        &self,
-        session_date: NaiveDate,
-        strategy: &S,
-    ) -> Result<Vec<EarningsEvent>, BacktestError>
-    where
-        S: TradeStrategy<R>,
-        R: TradeResultMethods + TradeResult + ApplyCosts + HasBprTimeline + Send,
-    {
-        let lookahead = strategy.lookahead_days();
-
-        let (start, end) = if lookahead < 0 {
-            // Lookback (post-earnings): look backwards from session_date
-            let lookback = -lookahead;
-            (session_date - chrono::Duration::days(lookback), session_date)
-        } else if lookahead <= 3 {
-            // Small window (earnings timing): use adjacent days
-            let start = TradingCalendar::previous_trading_day(session_date);
-            let end = TradingCalendar::next_trading_day(session_date);
-            (start, end)
-        } else {
-            // Large lookahead (straddle): session_date to session_date + lookahead
-            (session_date, session_date + chrono::Duration::days(lookahead))
-        };
-
-        self.earnings_repo
-            .load_earnings(start, end, self.config.symbols.as_deref())
-            .await
-            .map_err(|e| BacktestError::Repository(e.to_string()))
-    }
-
-    /// Report progress to callback (OLD: date-centric - deprecated)
-    ///
-    /// This is no longer used in trade-centric execution but kept for compatibility.
-    #[allow(dead_code)]
-    fn report_progress(
-        &self,
-        on_progress: &Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-        session_date: NaiveDate,
-        entries_count: usize,
-        events_found: usize,
-    ) {
-        if let Some(ref callback) = on_progress {
-            callback(SessionProgress {
-                session_date,
-                entries_count,
-                events_found,
-            });
-        }
+        })
+        .await
     }
 
     /// Create strike selector based on config
@@ -961,14 +874,11 @@ where
         match self.config.selection_strategy {
             SelectionType::ATM => Box::new(
                 ATMStrategy::new(self.config.selection.clone())
-                    .with_strike_match_mode(self.config.strike_match_mode)
+                    .with_strike_match_mode(self.config.strike_match_mode),
             ),
             SelectionType::Delta => Box::new(
-                DeltaStrategy::fixed(
-                    self.config.target_delta,
-                    self.config.selection.clone(),
-                )
-                .with_strike_match_mode(self.config.strike_match_mode)
+                DeltaStrategy::fixed(self.config.target_delta, self.config.selection.clone())
+                    .with_strike_match_mode(self.config.strike_match_mode),
             ),
             SelectionType::DeltaScan => Box::new(
                 DeltaStrategy::scanning(
@@ -976,7 +886,7 @@ where
                     self.config.delta_scan_steps,
                     self.config.selection.clone(),
                 )
-                .with_strike_match_mode(self.config.strike_match_mode)
+                .with_strike_match_mode(self.config.strike_match_mode),
             ),
         }
     }
@@ -996,12 +906,20 @@ where
         use crate::config::SpreadType;
         let base_config = match self.config.spread {
             SpreadType::Calendar => ExecutionConfig::for_calendar_spread(self.config.max_entry_iv),
-            SpreadType::IronButterfly => ExecutionConfig::for_iron_butterfly(self.config.max_entry_iv),
-            SpreadType::LongIronButterfly => ExecutionConfig::for_iron_butterfly(self.config.max_entry_iv),
+            SpreadType::IronButterfly => {
+                ExecutionConfig::for_iron_butterfly(self.config.max_entry_iv)
+            }
+            SpreadType::LongIronButterfly => {
+                ExecutionConfig::for_iron_butterfly(self.config.max_entry_iv)
+            }
             SpreadType::Straddle => ExecutionConfig::for_straddle(self.config.max_entry_iv),
             SpreadType::ShortStraddle => ExecutionConfig::for_straddle(self.config.max_entry_iv),
-            SpreadType::CalendarStraddle => ExecutionConfig::for_calendar_straddle(self.config.max_entry_iv),
-            SpreadType::PostEarningsStraddle => ExecutionConfig::for_straddle(self.config.max_entry_iv),
+            SpreadType::CalendarStraddle => {
+                ExecutionConfig::for_calendar_straddle(self.config.max_entry_iv)
+            }
+            SpreadType::PostEarningsStraddle => {
+                ExecutionConfig::for_straddle(self.config.max_entry_iv)
+            }
         };
 
         // Add trading costs and hedging config from backtest config
@@ -1015,138 +933,6 @@ where
         } else {
             config
         }
-    }
-
-    #[allow(dead_code)]
-    fn passes_market_cap_filter(&self, event: &EarningsEvent) -> bool {
-        match (self.config.min_market_cap, event.market_cap) {
-            (Some(min), Some(cap)) => cap >= min,
-            (Some(_), None) => false,
-            (None, _) => true,
-        }
-    }
-
-    // ========================================================================
-    // Legacy API - Kept for backwards compatibility
-    // These methods delegate to execute_with_strategy with specific strategies
-    // ========================================================================
-
-    /// Execute calendar spread backtest (legacy API)
-    pub async fn execute_calendar_spread(
-        &self,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-        option_type: finq_core::OptionType,
-        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult<CalendarSpreadResult>, BacktestError> {
-        let mut config = self.config.clone();
-        config.start_date = start_date;
-        config.end_date = end_date;
-
-        let strategy = CalendarSpreadStrategy::new(&config)
-            .with_option_type(option_type);
-
-        // Create a temporary use case with updated config
-        let temp_use_case = BacktestUseCase {
-            earnings_repo: Arc::clone(&self.earnings_repo),
-            options_repo: Arc::clone(&self.options_repo),
-            equity_repo: Arc::clone(&self.equity_repo),
-            config,
-        };
-
-        temp_use_case.execute_with_strategy(&strategy, on_progress).await
-    }
-
-    /// Execute iron butterfly backtest (legacy API)
-    pub async fn execute_iron_butterfly(
-        &self,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult<IronButterflyResult>, BacktestError> {
-        let mut config = self.config.clone();
-        config.start_date = start_date;
-        config.end_date = end_date;
-
-        let strategy = IronButterflyStrategy::new(&config);
-
-        let temp_use_case = BacktestUseCase {
-            earnings_repo: Arc::clone(&self.earnings_repo),
-            options_repo: Arc::clone(&self.options_repo),
-            equity_repo: Arc::clone(&self.equity_repo),
-            config,
-        };
-
-        temp_use_case.execute_with_strategy(&strategy, on_progress).await
-    }
-
-    /// Execute straddle backtest (legacy API)
-    pub async fn execute_straddle(
-        &self,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult<StraddleResult>, BacktestError> {
-        let mut config = self.config.clone();
-        config.start_date = start_date;
-        config.end_date = end_date;
-
-        let strategy = LongStraddleStrategy::new(&config);
-
-        let temp_use_case = BacktestUseCase {
-            earnings_repo: Arc::clone(&self.earnings_repo),
-            options_repo: Arc::clone(&self.options_repo),
-            equity_repo: Arc::clone(&self.equity_repo),
-            config,
-        };
-
-        temp_use_case.execute_with_strategy(&strategy, on_progress).await
-    }
-
-    /// Execute post-earnings straddle backtest (legacy API)
-    pub async fn execute_post_earnings_straddle(
-        &self,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult<StraddleResult>, BacktestError> {
-        let mut config = self.config.clone();
-        config.start_date = start_date;
-        config.end_date = end_date;
-
-        let strategy = PostEarningsStraddleStrategy::new(&config);
-
-        let temp_use_case = BacktestUseCase {
-            earnings_repo: Arc::clone(&self.earnings_repo),
-            options_repo: Arc::clone(&self.options_repo),
-            equity_repo: Arc::clone(&self.equity_repo),
-            config,
-        };
-
-        temp_use_case.execute_with_strategy(&strategy, on_progress).await
-    }
-
-    /// Execute calendar straddle backtest (legacy API)
-    pub async fn execute_calendar_straddle(
-        &self,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-        on_progress: Option<Box<dyn Fn(SessionProgress) + Send + Sync>>,
-    ) -> Result<BacktestResult<CalendarStraddleResult>, BacktestError> {
-        let mut config = self.config.clone();
-        config.start_date = start_date;
-        config.end_date = end_date;
-
-        let strategy = CalendarStraddleStrategy::new(&config);
-
-        let temp_use_case = BacktestUseCase {
-            earnings_repo: Arc::clone(&self.earnings_repo),
-            options_repo: Arc::clone(&self.options_repo),
-            equity_repo: Arc::clone(&self.equity_repo),
-            config,
-        };
-
-        temp_use_case.execute_with_strategy(&strategy, on_progress).await
     }
 }
 

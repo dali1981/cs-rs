@@ -1,11 +1,10 @@
-pub mod config;
-pub mod cli_args;
 pub mod args;
 pub mod cli;
+pub mod cli_args;
 pub mod commands;
-pub mod parsing;
+pub mod config;
 pub mod display;
-pub mod handlers;
 pub mod factory;
 pub mod mapping;
 pub mod output;
+pub mod parsing;
