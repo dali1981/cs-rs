@@ -29,6 +29,7 @@ pub mod timing_strategy;
 pub mod trade_strategy;
 pub mod backtest_use_case;
 pub mod campaign_use_case;
+pub mod run_contract;
 mod backtest_use_case_helpers;
 pub mod atm_iv_use_case;
 pub mod minute_aligned_iv_use_case;
@@ -50,6 +51,7 @@ pub use campaign_config::CampaignConfig;
 // Use cases
 pub use backtest_use_case::{BacktestUseCase, BacktestResult, UnifiedBacktestResult, BacktestError, SessionProgress, TradeGenerationError, TradeResultMethods};
 pub use campaign_use_case::{CampaignUseCase, CampaignError, CampaignResult};
+pub use run_contract::{RunInput, RunOutput, RunSummary, StrategyFamily};
 pub use atm_iv_use_case::{GenerateIvTimeSeriesUseCase, IvTimeSeriesResult, IvTimeSeriesError};
 pub use minute_aligned_iv_use_case::{MinuteAlignedIvUseCase, MinuteAlignedIvResult, MinuteAlignedIvError};
 pub use earnings_analysis_use_case::{EarningsAnalysisUseCase, EarningsAnalysisResult, EarningsAnalysisError};
