@@ -1,5 +1,5 @@
 use chrono::{NaiveDate, NaiveTime, TimeZone, Utc};
-use cs_backtest::BacktestConfig;
+use cs_backtest::{BacktestConfig, RuleEvaluator};
 use cs_domain::testing::EarningsEventBuilder;
 use cs_domain::{
     EventRule, LegContext, MarginCalculator, RulesConfig, TradeAccounting, TradeRule, TradeType,
@@ -85,14 +85,14 @@ fn strategy_signal_rules_are_deterministic() {
         .market_cap(250_000_000)
         .build();
 
-    assert!(rules.event.iter().all(|rule| rule.eval(&passing_event)));
-    assert!(!rules.event.iter().all(|rule| rule.eval(&failing_event)));
+    let evaluator = RuleEvaluator::new(rules);
+    assert!(evaluator.eval_event_rules(&passing_event));
+    assert!(!evaluator.eval_event_rules(&failing_event));
 
-    // Trade-level logic: price range deterministic boundaries.
-    let trade_rule = &rules.trade[0];
-    assert!(trade_rule.eval_price(10.0));
-    assert!(!trade_rule.eval_price(0.25));
-    assert!(!trade_rule.eval_price(75.0));
+    // Trade-level logic via evaluator API: deterministic boundaries.
+    assert!(evaluator.eval_trade_rules(&passing_event, 10.0));
+    assert!(!evaluator.eval_trade_rules(&passing_event, 0.25));
+    assert!(!evaluator.eval_trade_rules(&passing_event, 75.0));
 }
 
 #[test]
