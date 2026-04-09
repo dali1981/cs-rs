@@ -1,6 +1,6 @@
 # Bounded Context Map
 
-Date: 2026-04-07
+Date: 2026-04-08
 Status: Accepted (living document — update as modules move)
 
 This document maps every current module in the `cs-rs` workspace to one of six bounded
@@ -121,11 +121,12 @@ rules for selecting strikes, building spreads, and determining structural validi
 
 | Module | Crate | Notes |
 |--------|-------|-------|
-| `strike_selection/atm.rs` | `cs-domain` | ✅ |
-| `strike_selection/delta.rs` | `cs-domain` | ✅ |
-| `strike_selection/iron_butterfly.rs` | `cs-domain` | ✅ |
-| `strike_selection/straddle.rs` | `cs-domain` | ✅ |
-| `strike_selection/multi_leg.rs` | `cs-domain` | ✅ |
+| `strike_selection/atm.rs` | `cs-backtest` | ✅ moved from cs-domain (DAL-92) — requires `IVSurface` from cs-analytics |
+| `strike_selection/delta.rs` | `cs-backtest` | ✅ moved from cs-domain (DAL-92) |
+| `strike_selection/multi_leg.rs` | `cs-backtest` | ✅ moved from cs-domain (DAL-92) |
+| `strike_selection/iron_butterfly.rs` | — | removed (DAL-92) — no external callers |
+| `strike_selection/straddle.rs` | — | removed (DAL-92) — no external callers |
+| `strike_selection/mod.rs` (pure helpers) | `cs-domain` | ✅ — `select_expirations`, `find_closest_strike`, `StrategyError`, `TradeSelectionCriteria`, `StrikeMatchMode` |
 | `entities.rs` → `CalendarSpread`, `IronButterfly`, `LongStraddle`, `OptionLeg` | `cs-domain` | ✅ |
 | `expiration/` | `cs-domain` | ✅ |
 | `rules/event.rs` | `cs-domain` | ?? event rule evaluated on `EarningsEvent` — Market Data boundary |
@@ -352,6 +353,11 @@ dependency assembly, config resolution, and result formatting.
 | `entities.rs` (mixed) | `cs-domain` | Market Data + Strategy | ?? monolith | Split into context modules |
 | `value_objects.rs` (mixed) | `cs-domain` | Multiple contexts | ?? monolith | Split incrementally |
 | `rules/event.rs` | `cs-domain` | Strategy / Market Data boundary | ?? | Keep; type ownership is correct |
+| `strike_selection/atm.rs` | `cs-backtest` | Strategy Definition | ✅ moved (DAL-92) | Keep in cs-backtest |
+| `strike_selection/delta.rs` | `cs-backtest` | Strategy Definition | ✅ moved (DAL-92) | Keep in cs-backtest |
+| `strike_selection/multi_leg.rs` | `cs-backtest` | Strategy Definition | ✅ moved (DAL-92) | Keep in cs-backtest |
+| `strike_selection/iron_butterfly.rs` | — | Strategy Definition | removed (DAL-92) | — |
+| `strike_selection/straddle.rs` | — | Strategy Definition | removed (DAL-92) | — |
 | `campaign_config.rs` | `cs-backtest` | Campaign (DTO part) + Application | ?? DTO/domain mixed | Refactor per ADR-0003 |
 | `campaign_use_case.rs` | `cs-backtest` | Application | ✅ correct intent | Clarify in module docs |
 | `timing_strategy.rs` | `cs-backtest` | Execution / Campaign boundary | ?? | Keep in Execution; document |
