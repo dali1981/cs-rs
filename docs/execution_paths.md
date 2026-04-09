@@ -82,7 +82,7 @@ The table below classifies all audited executable surfaces (entrypoints, orchest
 | `cs-cli/src/handlers/mod.rs` + `cs-cli/src/handlers/earnings_output.rs::{save_earnings_parquet,save_earnings_csv,save_earnings_json}` | `dead` | Unused legacy handler layer; only commented re-export remains. |
 | `cs-cli/src/parsing/earnings_loader.rs::{load_earnings_from_file,load_earnings_for_symbols}` | `dead` | No call sites in current runtime/test paths. |
 | `cs-cli/src/parsing/roll_policy.rs::{parse_roll_policy,parse_campaign_roll_policy}` | `dead` | No call sites in current runtime/test paths. |
-| `cs-cli/src/parsing/time_config.rs::parse_delta_range` | `dead` | Used only by local unit tests; not used in runtime path. |
+| `cs-cli/src/parsing/time_config.rs::parse_delta_range` | `test-support` | Currently exercised only by local unit tests; not part of runtime path. |
 | `cs-backtest/src/backtest_use_case.rs::{execute_batch,load_earnings_for_strategy,report_progress}` | `dead` | Explicitly marked old/deprecated date-centric helpers and unused in canonical execution. |
 | `cs-backtest/src/backtest_use_case.rs::{execute_calendar_spread,execute_iron_butterfly,execute_straddle,execute_post_earnings_straddle,execute_calendar_straddle}` | `dead` | Legacy API wrappers; no internal call sites found for canonical runtime. |
 | `cs-backtest/src/lib.rs` legacy exports + files `{straddle_pricer.rs,iron_butterfly_pricer.rs,calendar_straddle_pricer.rs}` | `dead` | Deprecated legacy pricer surface superseded by `CompositePricer` family. |
