@@ -37,10 +37,11 @@ pub struct RunSummary {
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
     pub sessions_processed: usize,
+    pub total_entries: usize,
     pub total_opportunities: usize,
     pub trade_count: usize,
     pub dropped_event_count: usize,
-    pub win_rate_pct: f64,
+    pub win_rate_pct: Decimal,
     pub total_pnl: Decimal,
     pub hedging_enabled: bool,
     pub total_hedge_pnl: Option<Decimal>,
@@ -52,7 +53,7 @@ pub struct RunSummary {
 Required summary guarantees:
 - always includes strategy identity (`strategy_family`, `strategy`, `selection_strategy`)
 - always includes run window (`start_date`, `end_date`)
-- always includes participation counts (`total_opportunities`, `trade_count`, `dropped_event_count`)
+- always includes participation counts (`total_entries`, `total_opportunities`, `trade_count`, `dropped_event_count`)
 - always includes performance basis (`return_basis`) and PnL summary (`total_pnl`)
 - hedging metrics are populated only when hedging was used
 
@@ -89,7 +90,7 @@ Mapping from `SpreadType`:
 ## Construction
 
 ### Build input
-- `RunInput::new(command, data_source, earnings_source)`
+- construct `RunInput` with a struct literal
 
 ### Build summary directly from backtest result
 - `RunSummary::from_backtest_result(...)`

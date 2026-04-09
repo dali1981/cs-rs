@@ -70,11 +70,15 @@ mlruns/
 !README.md
 !docs/adr/*.md
 !docs/architecture/*.md
+!docs/ARCHITECTURE_AND_RUN_SPEC.md
+!docs/run_contract.md
 
 # Analysis and research
 docs/*
 !docs/adr/
 !docs/architecture/
+!docs/ARCHITECTURE_AND_RUN_SPEC.md
+!docs/run_contract.md
 specs/
 scripts/
 !scripts/check_arch.sh

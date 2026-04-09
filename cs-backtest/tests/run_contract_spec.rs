@@ -101,10 +101,11 @@ fn run_summary_captures_required_fields() {
     assert_eq!(summary.end_date, period.end_date);
     assert_eq!(summary.strategy, SpreadType::Calendar);
     assert_eq!(summary.selection_strategy, SelectionType::ATM);
+    assert_eq!(summary.total_entries, 2);
     assert_eq!(summary.total_opportunities, 3);
     assert_eq!(summary.trade_count, 2);
     assert_eq!(summary.total_pnl, Decimal::new(950, 2));
-    assert!((summary.win_rate_pct - 50.0).abs() < f64::EPSILON);
+    assert_eq!(summary.win_rate_pct, Decimal::from(50u64));
     assert_eq!(summary.return_basis, ReturnBasis::Premium);
 }
 

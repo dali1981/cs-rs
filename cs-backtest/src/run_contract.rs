@@ -5,6 +5,7 @@
 
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
+use std::fmt;
 
 use crate::{
     BacktestPeriod, BacktestResult, DataSourceConfig, EarningsSourceConfig, RunBacktestCommand,
@@ -18,20 +19,6 @@ pub struct RunInput {
     pub command: RunBacktestCommand,
     pub data_source: DataSourceConfig,
     pub earnings_source: EarningsSourceConfig,
-}
-
-impl RunInput {
-    pub fn new(
-        command: RunBacktestCommand,
-        data_source: DataSourceConfig,
-        earnings_source: EarningsSourceConfig,
-    ) -> Self {
-        Self {
-            command,
-            data_source,
-            earnings_source,
-        }
-    }
 }
 
 /// Coarse-grained strategy family used in summaries and reporting.
@@ -56,6 +43,18 @@ impl StrategyFamily {
     }
 }
 
+impl fmt::Display for StrategyFamily {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CalendarSpread => write!(f, "calendar-spread"),
+            Self::IronButterfly => write!(f, "iron-butterfly"),
+            Self::Straddle => write!(f, "straddle"),
+            Self::CalendarStraddle => write!(f, "calendar-straddle"),
+            Self::PostEarningsStraddle => write!(f, "post-earnings-straddle"),
+        }
+    }
+}
+
 /// Required summary for every completed run.
 #[derive(Debug, Clone)]
 pub struct RunSummary {
@@ -65,10 +64,11 @@ pub struct RunSummary {
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
     pub sessions_processed: usize,
+    pub total_entries: usize,
     pub total_opportunities: usize,
     pub trade_count: usize,
     pub dropped_event_count: usize,
-    pub win_rate_pct: f64,
+    pub win_rate_pct: Decimal,
     pub total_pnl: Decimal,
     pub hedging_enabled: bool,
     pub total_hedge_pnl: Option<Decimal>,
@@ -88,6 +88,14 @@ impl RunSummary {
     where
         R: TradeResultMethods,
     {
+        let winners = result.results.iter().filter(|r| r.is_winner()).count();
+        let successful_trades = result.successful_trades();
+        let win_rate_pct = if successful_trades == 0 {
+            Decimal::ZERO
+        } else {
+            (Decimal::from(winners as u64) * Decimal::from(100u64))
+                / Decimal::from(successful_trades as u64)
+        };
         let hedging_enabled = result.has_hedging();
 
         Self {
@@ -97,10 +105,11 @@ impl RunSummary {
             start_date: period.start_date,
             end_date: period.end_date,
             sessions_processed: result.sessions_processed,
+            total_entries: result.total_entries,
             total_opportunities: result.total_opportunities,
-            trade_count: result.successful_trades(),
+            trade_count: successful_trades,
             dropped_event_count: result.dropped_events.len(),
-            win_rate_pct: result.win_rate() * 100.0,
+            win_rate_pct,
             total_pnl: result.total_pnl(),
             hedging_enabled,
             total_hedge_pnl: hedging_enabled.then_some(result.total_hedge_pnl()),
@@ -119,45 +128,51 @@ pub struct RunOutput {
 
 impl RunOutput {
     pub fn from_result(input: RunInput, result: &UnifiedBacktestResult) -> Self {
+        let strategy = input.command.strategy.spread;
+        let strategy_family = StrategyFamily::from_spread(strategy);
+        let selection_strategy = input.command.strategy.selection_strategy;
+        let period = &input.command.period;
+        let return_basis = input.command.risk.return_basis;
+
         let summary = match result {
             UnifiedBacktestResult::CalendarSpread(r) => RunSummary::from_backtest_result(
-                StrategyFamily::CalendarSpread,
-                input.command.strategy.spread,
-                input.command.strategy.selection_strategy,
-                &input.command.period,
-                input.command.risk.return_basis,
+                strategy_family,
+                strategy,
+                selection_strategy,
+                period,
+                return_basis,
                 r,
             ),
             UnifiedBacktestResult::IronButterfly(r) => RunSummary::from_backtest_result(
-                StrategyFamily::IronButterfly,
-                input.command.strategy.spread,
-                input.command.strategy.selection_strategy,
-                &input.command.period,
-                input.command.risk.return_basis,
+                strategy_family,
+                strategy,
+                selection_strategy,
+                period,
+                return_basis,
                 r,
             ),
             UnifiedBacktestResult::Straddle(r) => RunSummary::from_backtest_result(
-                StrategyFamily::Straddle,
-                input.command.strategy.spread,
-                input.command.strategy.selection_strategy,
-                &input.command.period,
-                input.command.risk.return_basis,
+                strategy_family,
+                strategy,
+                selection_strategy,
+                period,
+                return_basis,
                 r,
             ),
             UnifiedBacktestResult::CalendarStraddle(r) => RunSummary::from_backtest_result(
-                StrategyFamily::CalendarStraddle,
-                input.command.strategy.spread,
-                input.command.strategy.selection_strategy,
-                &input.command.period,
-                input.command.risk.return_basis,
+                strategy_family,
+                strategy,
+                selection_strategy,
+                period,
+                return_basis,
                 r,
             ),
             UnifiedBacktestResult::PostEarningsStraddle(r) => RunSummary::from_backtest_result(
-                StrategyFamily::PostEarningsStraddle,
-                input.command.strategy.spread,
-                input.command.strategy.selection_strategy,
-                &input.command.period,
-                input.command.risk.return_basis,
+                strategy_family,
+                strategy,
+                selection_strategy,
+                period,
+                return_basis,
                 r,
             ),
         };
