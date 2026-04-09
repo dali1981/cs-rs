@@ -1,0 +1,23 @@
+{
+  "case_id": "calendar_atm_premium",
+  "trade_count": 4,
+  "win_rate_pct": "75",
+  "net_pnl": "13.00",
+  "max_drawdown": "4.00",
+  "profit_factor": "4.250000",
+  "summary": {
+    "strategy_family": "calendar-spread",
+    "strategy": "calendar",
+    "selection_strategy": "atm",
+    "return_basis": "premium",
+    "start_date": "2025-01-01",
+    "end_date": "2025-01-31",
+    "sessions_processed": 1,
+    "total_entries": 4,
+    "total_opportunities": 5,
+    "trade_count": 4,
+    "dropped_event_count": 0,
+    "win_rate_pct": "75",
+    "total_pnl": "13.00"
+  }
+}

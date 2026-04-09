@@ -1,0 +1,2 @@
+case_id,trade_count,win_rate_pct,net_pnl,max_drawdown,profit_factor,strategy,selection_strategy,return_basis,start_date,end_date
+calendar_atm_premium,4,75,13.00,4.00,4.250000,calendar,atm,premium,2025-01-01,2025-01-31

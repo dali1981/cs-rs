@@ -1,0 +1,33 @@
+{
+  "id": "calendar_atm_premium",
+  "trades": [
+    {
+      "entry_cash_flow_cents": -1000,
+      "exit_cash_flow_cents": 2200,
+      "realized_pnl_cents": 1200,
+      "pnl_pct_hundredths": 120,
+      "capital_required_cents": 1000
+    },
+    {
+      "entry_cash_flow_cents": -1000,
+      "exit_cash_flow_cents": 600,
+      "realized_pnl_cents": -400,
+      "pnl_pct_hundredths": -40,
+      "capital_required_cents": 1000
+    },
+    {
+      "entry_cash_flow_cents": -1000,
+      "exit_cash_flow_cents": 1300,
+      "realized_pnl_cents": 300,
+      "pnl_pct_hundredths": 30,
+      "capital_required_cents": 1000
+    },
+    {
+      "entry_cash_flow_cents": -1000,
+      "exit_cash_flow_cents": 1200,
+      "realized_pnl_cents": 200,
+      "pnl_pct_hundredths": 20,
+      "capital_required_cents": 1000
+    }
+  ]
+}

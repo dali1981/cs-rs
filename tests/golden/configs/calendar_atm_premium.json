@@ -1,0 +1,12 @@
+{
+  "id": "calendar_atm_premium",
+  "dataset": "calendar_atm_premium",
+  "strategy": "calendar",
+  "selection_strategy": "atm",
+  "return_basis": "premium",
+  "start_date": "2025-01-01",
+  "end_date": "2025-01-31",
+  "sessions_processed": 1,
+  "total_entries": 4,
+  "total_opportunities": 5
+}
