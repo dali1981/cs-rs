@@ -4,6 +4,7 @@ mod app;
 mod builder;
 #[cfg(feature = "experimental-cli")]
 mod campaign_builder;
+mod validation;
 
 // Re-export everything from app module
 pub use app::*;
