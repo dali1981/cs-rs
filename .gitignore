@@ -72,6 +72,7 @@ mlruns/
 !docs/architecture/*.md
 !docs/ARCHITECTURE_AND_RUN_SPEC.md
 !docs/run_contract.md
+!docs/execution_paths.md
 
 # Analysis and research
 docs/*
@@ -79,6 +80,7 @@ docs/*
 !docs/architecture/
 !docs/ARCHITECTURE_AND_RUN_SPEC.md
 !docs/run_contract.md
+!docs/execution_paths.md
 specs/
 scripts/
 !scripts/check_arch.sh
