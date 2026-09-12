@@ -1,5 +1,11 @@
 # cs-rs
 
+
+> **Part of the options research platform** — one earnings strategy run through three
+> independent engines (`cs-q` in q/kdb+, `cs-rs` in Rust, `options_strategy` in Python)
+> on the same Polygon minute bars. The engines differ on staleness, cost modelling and
+> units in ways that matter when comparing their numbers: **`~/cs-q/PLATFORM.md`**.
+
 A quantitative research and backtesting engine for options volatility strategies,
 with realistic execution modeling, capital constraints, and risk attribution.
 
