@@ -86,6 +86,9 @@ scripts/
 !scripts/check_arch.sh
 simulation/
 tickets/
+
+# local holding area -- the project rule is to move, never delete
+_archive/
 output/
 custom_earnings/
 
