@@ -4,12 +4,12 @@ use std::sync::Arc;
 use tracing::info;
 
 use cs_domain::{
-    EarningsRepository, OptionsDataRepository, EquityDataRepository,
-    TradingCampaign, RepositoryError,
+    EarningsRepository, EquityDataRepository, OptionsDataRepository, RepositoryError,
+    TradingCampaign,
 };
 
 use crate::campaign_config::CampaignConfig;
-use crate::session_executor::{SessionExecutor, BatchResult};
+use crate::session_executor::{BatchResult, SessionExecutor};
 
 pub type CampaignResult<T> = Result<T, CampaignError>;
 
@@ -51,7 +51,10 @@ impl CampaignUseCase {
     ///
     /// Creates campaigns for each symbol, generates sessions, and executes them
     pub async fn execute(&self) -> CampaignResult<BatchResult> {
-        info!("Executing campaign for {} symbols", self.config.symbols.len());
+        info!(
+            "Executing campaign for {} symbols",
+            self.config.symbols.len()
+        );
 
         // 1. Load earnings calendar for the date range
         let earnings_calendar = self.load_earnings().await?;
@@ -79,7 +82,8 @@ impl CampaignUseCase {
 
     /// Load earnings events for the campaign period
     async fn load_earnings(&self) -> CampaignResult<Vec<cs_domain::EarningsEvent>> {
-        let events = self.earnings_repo
+        let events = self
+            .earnings_repo
             .load_earnings(
                 self.config.start_date,
                 self.config.end_date,
@@ -93,7 +97,8 @@ impl CampaignUseCase {
 
     /// Build trading campaigns from config
     fn build_campaigns(&self) -> Vec<TradingCampaign> {
-        self.config.symbols
+        self.config
+            .symbols
             .iter()
             .map(|symbol| TradingCampaign {
                 symbol: symbol.clone(),
@@ -111,9 +116,9 @@ impl CampaignUseCase {
 
     /// Create session executor with repositories
     fn create_executor(&self) -> CampaignResult<SessionExecutor> {
-        use cs_domain::TradeFactory;
         use crate::execution::ExecutionConfig;
         use crate::trade_factory_impl::DefaultTradeFactory;
+        use cs_domain::TradeFactory;
 
         // Create trade factory
         let trade_factory: Arc<dyn TradeFactory> = Arc::new(DefaultTradeFactory::new(

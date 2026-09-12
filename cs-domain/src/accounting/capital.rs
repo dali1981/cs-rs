@@ -84,9 +84,8 @@ impl CapitalBreakdown {
     /// Add hedge capital to existing breakdown
     pub fn with_hedge(mut self, hedge_capital: Decimal) -> Self {
         self.hedge_capital = hedge_capital;
-        self.total_bpr = self.option_premium.max(Decimal::ZERO)
-            + self.hedge_capital
-            + self.short_margin;
+        self.total_bpr =
+            self.option_premium.max(Decimal::ZERO) + self.hedge_capital + self.short_margin;
         self
     }
 }
@@ -147,9 +146,15 @@ impl CapitalRequirement {
         let is_credit = net_premium < Decimal::ZERO;
         let (calculation_method, breakdown) = if is_credit {
             // Use premium magnitude as a conservative proxy for capital.
-            (CapitalCalculationMethod::CreditReceived, CapitalBreakdown::credit(premium, premium))
+            (
+                CapitalCalculationMethod::CreditReceived,
+                CapitalBreakdown::credit(premium, premium),
+            )
         } else {
-            (CapitalCalculationMethod::LongOptionDebit, CapitalBreakdown::debit(premium))
+            (
+                CapitalCalculationMethod::LongOptionDebit,
+                CapitalBreakdown::debit(premium),
+            )
         };
 
         Self {
@@ -199,8 +204,7 @@ mod tests {
 
     #[test]
     fn test_hedged_requirement() {
-        let req = CapitalRequirement::for_debit(dec!(100))
-            .with_hedge(dec!(500)); // $500 for stock hedge
+        let req = CapitalRequirement::for_debit(dec!(100)).with_hedge(dec!(500)); // $500 for stock hedge
         assert_eq!(req.initial_requirement, dec!(600));
         assert_eq!(req.breakdown.option_premium, dec!(100));
         assert_eq!(req.breakdown.hedge_capital, dec!(500));

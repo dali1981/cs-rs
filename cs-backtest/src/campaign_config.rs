@@ -1,14 +1,13 @@
 //! Campaign configuration
 
-use std::path::PathBuf;
 use chrono::NaiveDate;
+use std::path::PathBuf;
 
-use cs_domain::{
-    TimingConfig, OptionStrategy, TradeDirection,
-    value_objects::{IronButterflyConfig, MultiLegStrategyConfig},
-    PeriodPolicy, ExpirationPolicy,
-};
 use crate::config::EarningsSourceConfig;
+use cs_domain::{
+    value_objects::{IronButterflyConfig, MultiLegStrategyConfig},
+    ExpirationPolicy, OptionStrategy, PeriodPolicy, TimingConfig, TradeDirection,
+};
 
 /// Configuration for running a trading campaign
 #[derive(Debug, Clone)]
@@ -41,7 +40,6 @@ pub struct CampaignConfig {
     // Execution options
     pub parallel: bool,
 }
-
 
 #[allow(dead_code)]
 fn default_true() -> bool {

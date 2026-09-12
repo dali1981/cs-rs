@@ -1,8 +1,8 @@
 //! Campaign-based backtest command arguments
 
+use super::HedgingArgs;
 use clap::Args;
 use std::path::PathBuf;
-use super::HedgingArgs;
 
 /// Arguments for the campaign command
 #[derive(Debug, Clone, Args)]

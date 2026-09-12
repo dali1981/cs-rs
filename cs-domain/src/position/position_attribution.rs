@@ -1,6 +1,6 @@
 use chrono::NaiveDate;
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use super::PositionSnapshot;
@@ -14,24 +14,24 @@ pub struct DailyAttribution {
     // Daily market data
     pub spot_open: f64,
     pub spot_close: f64,
-    pub spot_change: f64,  // Daily spot move
+    pub spot_change: f64, // Daily spot move
     pub iv_open: f64,
     pub iv_close: f64,
-    pub iv_change: f64,    // Daily IV move
+    pub iv_change: f64, // Daily IV move
 
     // Position state at start of day (Greeks recomputed daily)
-    pub option_delta: f64,  // Position-level (×100)
-    pub option_gamma: f64,  // Position-level (×100)
+    pub option_delta: f64, // Position-level (×100)
+    pub option_gamma: f64, // Position-level (×100)
     pub hedge_shares: i32,
-    pub net_delta: f64,     // option_delta + hedge_shares
+    pub net_delta: f64, // option_delta + hedge_shares
 
     // P&L components (position-level, in dollars)
-    pub gross_delta_pnl: f64,  // option_delta × daily_spot_change
-    pub hedge_delta_pnl: f64,  // hedge_shares × daily_spot_change
-    pub net_delta_pnl: f64,    // net_delta × daily_spot_change
-    pub gamma_pnl: f64,        // 0.5 × gamma × daily_spot_change²
-    pub theta_pnl: f64,        // theta (per day, recomputed daily)
-    pub vega_pnl: f64,         // vega × daily_iv_change × 100
+    pub gross_delta_pnl: f64, // option_delta × daily_spot_change
+    pub hedge_delta_pnl: f64, // hedge_shares × daily_spot_change
+    pub net_delta_pnl: f64,   // net_delta × daily_spot_change
+    pub gamma_pnl: f64,       // 0.5 × gamma × daily_spot_change²
+    pub theta_pnl: f64,       // theta (per day, recomputed daily)
+    pub vega_pnl: f64,        // vega × daily_iv_change × 100
 }
 
 impl DailyAttribution {
@@ -47,10 +47,7 @@ impl DailyAttribution {
     ///
     /// # Returns
     /// Daily attribution with breakdown of P&L by Greek
-    pub fn compute(
-        start_snapshot: &PositionSnapshot,
-        end_snapshot: &PositionSnapshot,
-    ) -> Self {
+    pub fn compute(start_snapshot: &PositionSnapshot, end_snapshot: &PositionSnapshot) -> Self {
         // Daily spot move (NOT total move from trade entry)
         let spot_change = end_snapshot.spot - start_snapshot.spot;
 
@@ -107,7 +104,7 @@ pub struct PositionAttribution {
     pub total_unexplained: Decimal,
 
     // Hedge effectiveness metrics
-    pub hedge_efficiency: f64,  // |hedge_delta_pnl| / |gross_delta_pnl| × 100
+    pub hedge_efficiency: f64, // |hedge_delta_pnl| / |gross_delta_pnl| × 100
 }
 
 impl PositionAttribution {
@@ -191,8 +188,8 @@ impl PositionAttribution {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
     use crate::position::PositionGreeks;
+    use chrono::Utc;
 
     #[test]
     fn test_daily_attribution_compute() {
@@ -205,14 +202,14 @@ mod tests {
 
         let start_snapshot = PositionSnapshot::new(
             Utc::now(),
-            100.0,  // spot_open
-            0.30,   // iv_open
+            100.0, // spot_open
+            0.30,  // iv_open
             start_greeks,
-            -30,    // hedge_shares (short 30)
+            -30, // hedge_shares (short 30)
         );
 
         let end_greeks = PositionGreeks {
-            delta: 60.0,  // Delta changed during day
+            delta: 60.0, // Delta changed during day
             gamma: 5.5,
             theta: -19.0,
             vega: 32.0,
@@ -220,8 +217,8 @@ mod tests {
 
         let end_snapshot = PositionSnapshot::new(
             Utc::now(),
-            102.0,  // spot_close (+2)
-            0.32,   // iv_close (+0.02)
+            102.0, // spot_close (+2)
+            0.32,  // iv_close (+0.02)
             end_greeks,
             -30,
         );
@@ -293,7 +290,7 @@ mod tests {
             vega_pnl: -30.0,
         };
 
-        let actual_pnl = Decimal::new(63, 0);  // $63
+        let actual_pnl = Decimal::new(63, 0); // $63
         let attr = PositionAttribution::from_daily(vec![day1, day2], actual_pnl);
 
         // Total gross delta = 100 + (-60) = 40
@@ -337,10 +334,10 @@ mod tests {
             iv_change: 0.0,
             option_delta: 50.0,
             option_gamma: 5.0,
-            hedge_shares: -50,  // Perfectly hedged
+            hedge_shares: -50, // Perfectly hedged
             net_delta: 0.0,
             gross_delta_pnl: 100.0,
-            hedge_delta_pnl: -100.0,  // Fully offsets
+            hedge_delta_pnl: -100.0, // Fully offsets
             net_delta_pnl: 0.0,
             gamma_pnl: 10.0,
             theta_pnl: -20.0,
@@ -366,7 +363,7 @@ mod tests {
             iv_change: 0.0,
             option_delta: 50.0,
             option_gamma: 5.0,
-            hedge_shares: 0,  // No hedge
+            hedge_shares: 0, // No hedge
             net_delta: 50.0,
             gross_delta_pnl: 100.0,
             hedge_delta_pnl: 0.0,

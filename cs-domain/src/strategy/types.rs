@@ -1,9 +1,9 @@
 //! Strategy configuration types
 
 use chrono::NaiveDate;
-use rust_decimal::Decimal;
 use finq_core::OptionType;
-use serde::{Serialize, Deserialize};
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 
 use crate::{EarningsTime, FailureReason};
 

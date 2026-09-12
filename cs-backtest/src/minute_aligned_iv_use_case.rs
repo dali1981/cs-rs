@@ -10,13 +10,14 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use cs_analytics::{
-    AtmIvComputer, AtmMethod, BSConfig,
-    ConstantMaturityInterpolator, ExpirationIv,
+    AtmIvComputer, AtmMethod, BSConfig, ConstantMaturityInterpolator, ExpirationIv,
     StraddlePriceComputer,
 };
 use cs_domain::{
     repositories::{EquityDataRepository, OptionsDataRepository},
-    value_objects::{AtmIvConfig, AtmIvObservation, CallPut, HvConfig, IvInterpolationMethod, OptionBar},
+    value_objects::{
+        AtmIvConfig, AtmIvObservation, CallPut, HvConfig, IvInterpolationMethod, OptionBar,
+    },
     MarketTime, TradingDate,
 };
 
@@ -120,17 +121,18 @@ where
             }
 
             // Move to next day
-            current_date = current_date
-                .succ_opt()
-                .ok_or_else(|| MinuteAlignedIvError::IoError(std::io::Error::new(
+            current_date = current_date.succ_opt().ok_or_else(|| {
+                MinuteAlignedIvError::IoError(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "Date overflow",
-                )))?;
+                ))
+            })?;
         }
 
         // Enrich with historical volatility if requested
         if let Some(hv_cfg) = hv_config {
-            self.enrich_with_hv(symbol, &mut observations, hv_cfg).await?;
+            self.enrich_with_hv(symbol, &mut observations, hv_cfg)
+                .await?;
         }
 
         Ok(MinuteAlignedIvResult {
@@ -212,10 +214,11 @@ where
                 }
 
                 // Store (strike, IV, is_call) grouped by (dte, expiration)
-                iv_results
-                    .entry((dte, opt.expiration))
-                    .or_default()
-                    .push((opt.strike, iv_value, opt.is_call));
+                iv_results.entry((dte, opt.expiration)).or_default().push((
+                    opt.strike,
+                    iv_value,
+                    opt.is_call,
+                ));
             }
         }
 
@@ -278,7 +281,8 @@ where
             }
             IvInterpolationMethod::ConstantMaturity => {
                 // Build term structure and compute CM IVs
-                let term_structure = self.build_term_structure(&iv_results, spot_f64, config, atm_method);
+                let term_structure =
+                    self.build_term_structure(&iv_results, spot_f64, config, atm_method);
                 self.compute_constant_maturity_ivs(&mut obs, &term_structure, config);
 
                 // Also compute rolling for comparison
@@ -287,7 +291,12 @@ where
         }
 
         // Compute straddle prices and expected moves
-        self.compute_straddle_and_expected_move(&mut obs, &options_with_timestamps, date, atm_method);
+        self.compute_straddle_and_expected_move(
+            &mut obs,
+            &options_with_timestamps,
+            date,
+            atm_method,
+        );
 
         // Calculate term spreads
         obs.calculate_spreads();
@@ -302,8 +311,10 @@ where
         chain: &[OptionBar],
     ) -> Result<Vec<TimestampedOption>, MinuteAlignedIvError> {
         // For each contract key, keep the bar with the latest timestamp
-        let mut latest: std::collections::HashMap<(u64, NaiveDate, bool), (DateTime<Utc>, &OptionBar)>
-            = std::collections::HashMap::new();
+        let mut latest: std::collections::HashMap<
+            (u64, NaiveDate, bool),
+            (DateTime<Utc>, &OptionBar),
+        > = std::collections::HashMap::new();
 
         for bar in chain {
             let ts = match bar.timestamp {
@@ -313,7 +324,11 @@ where
             if bar.close.map_or(true, |c| c <= 0.0) || bar.strike <= 0.0 {
                 continue;
             }
-            let key = (bar.strike.to_bits(), bar.expiration, matches!(bar.option_type, CallPut::Call));
+            let key = (
+                bar.strike.to_bits(),
+                bar.expiration,
+                matches!(bar.option_type, CallPut::Call),
+            );
             let should_update = latest.get(&key).map_or(true, |(prev_ts, _)| ts > *prev_ts);
             if should_update {
                 latest.insert(key, (ts, bar));
@@ -361,7 +376,12 @@ where
     }
 
     /// Select ATM strike based on method
-    fn select_atm_strike(&self, strikes: &[f64], spot_price: f64, method: AtmMethod) -> Option<f64> {
+    fn select_atm_strike(
+        &self,
+        strikes: &[f64],
+        spot_price: f64,
+        method: AtmMethod,
+    ) -> Option<f64> {
         if strikes.is_empty() {
             return None;
         }
@@ -592,8 +612,8 @@ where
             &option_data,
             spot_f64,
             date,
-            30,  // Target 30 DTE
-            7,   // Tolerance
+            30, // Target 30 DTE
+            7,  // Tolerance
             straddle_atm_method,
         ) {
             obs.straddle_price_30d = Some(straddle_30d.straddle_price);
@@ -610,7 +630,11 @@ where
         output_path: &PathBuf,
     ) -> Result<(), MinuteAlignedIvError> {
         // Build DataFrame from observations
-        let symbols: Vec<String> = result.observations.iter().map(|o| o.symbol.clone()).collect();
+        let symbols: Vec<String> = result
+            .observations
+            .iter()
+            .map(|o| o.symbol.clone())
+            .collect();
         let dates: Vec<i32> = result
             .observations
             .iter()
@@ -627,8 +651,13 @@ where
             .collect();
 
         // Rolling TTE fields (existing)
-        let iv_nearest: Vec<Option<f64>> = result.observations.iter().map(|o| o.atm_iv_nearest).collect();
-        let nearest_dte: Vec<Option<i64>> = result.observations.iter().map(|o| o.nearest_dte).collect();
+        let iv_nearest: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.atm_iv_nearest)
+            .collect();
+        let nearest_dte: Vec<Option<i64>> =
+            result.observations.iter().map(|o| o.nearest_dte).collect();
         let iv_30d: Vec<Option<f64>> = result.observations.iter().map(|o| o.atm_iv_30d).collect();
         let iv_60d: Vec<Option<f64>> = result.observations.iter().map(|o| o.atm_iv_60d).collect();
         let iv_90d: Vec<Option<f64>> = result.observations.iter().map(|o| o.atm_iv_90d).collect();
@@ -650,25 +679,69 @@ where
         let cm_iv_30d: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_iv_30d).collect();
         let cm_iv_60d: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_iv_60d).collect();
         let cm_iv_90d: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_iv_90d).collect();
-        let cm_interpolated: Vec<Option<bool>> = result.observations.iter().map(|o| o.cm_interpolated).collect();
-        let cm_num_expirations: Vec<Option<u32>> = result.observations.iter().map(|o| o.cm_num_expirations.map(|n| n as u32)).collect();
-        let cm_spread_7_30: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_spread_7_30).collect();
-        let cm_spread_30_60: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_spread_30_60).collect();
-        let cm_spread_30_90: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_spread_30_90).collect();
+        let cm_interpolated: Vec<Option<bool>> = result
+            .observations
+            .iter()
+            .map(|o| o.cm_interpolated)
+            .collect();
+        let cm_num_expirations: Vec<Option<u32>> = result
+            .observations
+            .iter()
+            .map(|o| o.cm_num_expirations.map(|n| n as u32))
+            .collect();
+        let cm_spread_7_30: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.cm_spread_7_30)
+            .collect();
+        let cm_spread_30_60: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.cm_spread_30_60)
+            .collect();
+        let cm_spread_30_90: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.cm_spread_30_90)
+            .collect();
 
         // HV columns
         let hv_10d: Vec<Option<f64>> = result.observations.iter().map(|o| o.hv_10d).collect();
         let hv_20d: Vec<Option<f64>> = result.observations.iter().map(|o| o.hv_20d).collect();
         let hv_30d: Vec<Option<f64>> = result.observations.iter().map(|o| o.hv_30d).collect();
         let hv_60d: Vec<Option<f64>> = result.observations.iter().map(|o| o.hv_60d).collect();
-        let iv_hv_spread_30d: Vec<Option<f64>> = result.observations.iter().map(|o| o.iv_hv_spread_30d).collect();
+        let iv_hv_spread_30d: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.iv_hv_spread_30d)
+            .collect();
 
         // Expected Move columns (from straddle)
-        let straddle_nearest: Vec<Option<f64>> = result.observations.iter().map(|o| o.straddle_price_nearest).collect();
-        let expected_move_pct: Vec<Option<f64>> = result.observations.iter().map(|o| o.expected_move_pct).collect();
-        let expected_move_85_pct: Vec<Option<f64>> = result.observations.iter().map(|o| o.expected_move_85_pct).collect();
-        let straddle_30d: Vec<Option<f64>> = result.observations.iter().map(|o| o.straddle_price_30d).collect();
-        let expected_move_30d_pct: Vec<Option<f64>> = result.observations.iter().map(|o| o.expected_move_30d_pct).collect();
+        let straddle_nearest: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.straddle_price_nearest)
+            .collect();
+        let expected_move_pct: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.expected_move_pct)
+            .collect();
+        let expected_move_85_pct: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.expected_move_85_pct)
+            .collect();
+        let straddle_30d: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.straddle_price_30d)
+            .collect();
+        let expected_move_30d_pct: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.expected_move_30d_pct)
+            .collect();
 
         let df = DataFrame::new(vec![
             Series::new("symbol", symbols),
@@ -745,12 +818,12 @@ where
             }
 
             // Move to next day
-            current_date = current_date
-                .succ_opt()
-                .ok_or_else(|| MinuteAlignedIvError::IoError(std::io::Error::new(
+            current_date = current_date.succ_opt().ok_or_else(|| {
+                MinuteAlignedIvError::IoError(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "Date overflow",
-                )))?;
+                ))
+            })?;
         }
 
         Ok(closes)
@@ -767,7 +840,9 @@ where
         let max_window = hv_config.windows.iter().max().copied().unwrap_or(60);
 
         // Collect all daily close prices with lookback buffer
-        let daily_closes = self.collect_daily_closes(symbol, observations, max_window + 10).await?;
+        let daily_closes = self
+            .collect_daily_closes(symbol, observations, max_window + 10)
+            .await?;
 
         // Build sorted price history
         let mut dates: Vec<NaiveDate> = daily_closes.keys().copied().collect();
@@ -776,7 +851,8 @@ where
         // For each observation, compute HV
         for obs in observations.iter_mut() {
             // Find all dates up to and including this observation's date
-            let prices: Vec<f64> = dates.iter()
+            let prices: Vec<f64> = dates
+                .iter()
                 .filter(|&&d| d <= obs.date)
                 .filter_map(|d| daily_closes.get(d).copied())
                 .collect();

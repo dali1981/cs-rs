@@ -164,10 +164,22 @@ mod tests {
 
     #[test]
     fn test_selection_model_parse() {
-        assert_eq!(SelectionModel::from_str("strike-space"), Some(SelectionModel::StrikeSpace));
-        assert_eq!(SelectionModel::from_str("strike"), Some(SelectionModel::StrikeSpace));
-        assert_eq!(SelectionModel::from_str("delta-space"), Some(SelectionModel::DeltaSpace));
-        assert_eq!(SelectionModel::from_str("delta"), Some(SelectionModel::DeltaSpace));
+        assert_eq!(
+            SelectionModel::from_str("strike-space"),
+            Some(SelectionModel::StrikeSpace)
+        );
+        assert_eq!(
+            SelectionModel::from_str("strike"),
+            Some(SelectionModel::StrikeSpace)
+        );
+        assert_eq!(
+            SelectionModel::from_str("delta-space"),
+            Some(SelectionModel::DeltaSpace)
+        );
+        assert_eq!(
+            SelectionModel::from_str("delta"),
+            Some(SelectionModel::DeltaSpace)
+        );
         assert_eq!(SelectionModel::from_str("invalid"), None);
     }
 
@@ -195,11 +207,7 @@ mod tests {
         let exp_short = base_date + chrono::Duration::days(7);
         let tte_short = 7.0 / 365.0;
         let slice_short = VolSlice::from_delta_iv_pairs(
-            vec![
-                (0.25, 0.40),
-                (0.50, 0.35),
-                (0.75, 0.38),
-            ],
+            vec![(0.25, 0.40), (0.50, 0.35), (0.75, 0.38)],
             spot,
             tte_short,
             rfr,
@@ -211,11 +219,7 @@ mod tests {
         let exp_long = base_date + chrono::Duration::days(30);
         let tte_long = 30.0 / 365.0;
         let slice_long = VolSlice::from_delta_iv_pairs(
-            vec![
-                (0.25, 0.32),
-                (0.50, 0.28),
-                (0.75, 0.30),
-            ],
+            vec![(0.25, 0.32), (0.50, 0.28), (0.75, 0.30)],
             spot,
             tte_long,
             rfr,
@@ -318,7 +322,11 @@ mod tests {
         let delta_provider = DeltaSpaceSelection;
 
         // Empty surface should return None
-        assert!(strike_provider.get_iv_pair(&empty_surface, 0.50, exp1, exp2, true).is_none());
-        assert!(delta_provider.get_iv_pair(&empty_surface, 0.50, exp1, exp2, true).is_none());
+        assert!(strike_provider
+            .get_iv_pair(&empty_surface, 0.50, exp1, exp2, true)
+            .is_none());
+        assert!(delta_provider
+            .get_iv_pair(&empty_surface, 0.50, exp1, exp2, true)
+            .is_none());
     }
 }

@@ -4,12 +4,12 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use console::style;
 
-use cs_backtest::CampaignConfig;
+use super::CommandHandler;
 use crate::args::{CampaignArgs, GlobalArgs};
 use crate::config::CampaignConfigBuilder;
 use crate::factory::UseCaseFactory;
 use crate::output::CampaignOutputHandler;
-use super::CommandHandler;
+use cs_backtest::CampaignConfig;
 
 /// Campaign command handler
 pub struct CampaignCommand {
@@ -39,7 +39,8 @@ impl CommandHandler for CampaignCommand {
         println!("{}", style("Running campaign...").bold());
 
         // 1. Build config from args (includes dates, earnings, everything)
-        let config = self.build_config()
+        let config = self
+            .build_config()
             .context("Failed to build campaign config")?;
 
         // Log configuration
@@ -51,12 +52,17 @@ impl CommandHandler for CampaignCommand {
             "default (~/polygon/data)"
         };
 
-        println!("  Data directory: {} (from {})",
+        println!(
+            "  Data directory: {} (from {})",
             style(config.data_dir.display()).cyan(),
-            style(data_dir_source).dim());
+            style(data_dir_source).dim()
+        );
 
         // Display earnings source configuration
-        println!("  Earnings source: {}", style(&config.earnings_source).cyan());
+        println!(
+            "  Earnings source: {}",
+            style(&config.earnings_source).cyan()
+        );
 
         println!("  Symbols: {}", config.symbols.join(", "));
         println!("  Strategy: {:?}", config.strategy);

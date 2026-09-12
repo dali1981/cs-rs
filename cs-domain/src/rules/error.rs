@@ -11,17 +11,11 @@ pub enum RuleError {
         field: &'static str,
     },
     /// IV surface doesn't have data for requested DTE
-    MissingDteData {
-        rule: &'static str,
-        dte: u16,
-    },
+    MissingDteData { rule: &'static str, dte: u16 },
     /// HV provider not available but required
     HvProviderRequired,
     /// Invalid rule configuration
-    InvalidConfig {
-        rule: &'static str,
-        message: String,
-    },
+    InvalidConfig { rule: &'static str, message: String },
 }
 
 impl fmt::Display for RuleError {
@@ -34,7 +28,10 @@ impl fmt::Display for RuleError {
                 write!(f, "Rule '{}' missing IV data for DTE {}", rule, dte)
             }
             Self::HvProviderRequired => {
-                write!(f, "Historical volatility provider required but not available")
+                write!(
+                    f,
+                    "Historical volatility provider required but not available"
+                )
             }
             Self::InvalidConfig { rule, message } => {
                 write!(f, "Rule '{}' invalid config: {}", rule, message)

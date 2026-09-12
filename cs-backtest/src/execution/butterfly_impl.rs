@@ -1,11 +1,11 @@
 //! ExecutableTrade implementation for Butterfly
 
-use rust_decimal::Decimal;
-use cs_domain::{Butterfly, ButterflyResult, CONTRACT_MULTIPLIER, EarningsEvent};
-use crate::multi_leg_pricer::{ButterflyPricer, ButterflyPricing};
-use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
+use super::types::ExecutionError;
 use super::types::{ExecutionConfig, SimulationOutput};
+use crate::multi_leg_pricer::{ButterflyPricer, ButterflyPricing};
+use cs_domain::{Butterfly, ButterflyResult, EarningsEvent, CONTRACT_MULTIPLIER};
+use rust_decimal::Decimal;
 
 impl ExecutableTrade for Butterfly {
     type Pricer = ButterflyPricer;
@@ -55,8 +55,7 @@ impl ExecutableTrade for Butterfly {
         if pricing.entry_debit < config.min_entry_cost {
             return Err(ExecutionError::InvalidSpread(format!(
                 "Entry debit too small: {} < {}",
-                pricing.entry_debit,
-                config.min_entry_cost,
+                pricing.entry_debit, config.min_entry_cost,
             )));
         }
 
@@ -226,7 +225,7 @@ impl ExecutableTrade for Butterfly {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
-            cost_summary: None,  // Costs applied separately via ApplyCosts trait
+            cost_summary: None, // Costs applied separately via ApplyCosts trait
         }
     }
 }

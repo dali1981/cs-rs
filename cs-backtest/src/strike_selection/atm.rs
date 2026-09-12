@@ -1,16 +1,16 @@
+use super::StrikeSelector;
+use chrono::NaiveDate;
+use cs_analytics::{bs_delta, DeltaVolSurface, IVSurface};
 use cs_domain::entities::{
     CalendarSpread, CalendarStraddle, IronButterfly, LongIronButterfly, LongStraddle, OptionLeg,
     ShortStraddle,
 };
+use cs_domain::strike_selection::StrikeMatchMode;
 use cs_domain::strike_selection::{
     find_closest_strike, select_expirations, ExpirationCriteria, SelectionError, StrategyError,
     TradeSelectionCriteria,
 };
 use cs_domain::value_objects::{SpotPrice, Strike};
-use cs_domain::strike_selection::StrikeMatchMode;
-use super::StrikeSelector;
-use chrono::NaiveDate;
-use cs_analytics::{DeltaVolSurface, IVSurface, bs_delta};
 use finq_core::OptionType;
 use rust_decimal::Decimal;
 
@@ -62,11 +62,19 @@ impl ATMStrategy {
     ) -> Result<Strike, SelectionError> {
         available
             .iter()
-            .filter(|s| if round_up { **s >= target } else { **s <= target })
+            .filter(|s| {
+                if round_up {
+                    **s >= target
+                } else {
+                    **s <= target
+                }
+            })
             .min_by(|a, b| {
                 let a_diff = (a.value() - target.value()).abs();
                 let b_diff = (b.value() - target.value()).abs();
-                a_diff.partial_cmp(&b_diff).unwrap_or(std::cmp::Ordering::Equal)
+                a_diff
+                    .partial_cmp(&b_diff)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .copied()
             .ok_or(SelectionError::NoStrikes)
@@ -152,8 +160,7 @@ impl StrikeSelector for ATMStrategy {
         let long_strike = match self.strike_match_mode {
             StrikeMatchMode::SameStrike => short_atm_strike,
             StrikeMatchMode::SameDelta => {
-                let delta_surface =
-                    DeltaVolSurface::from_iv_surface(surface, self.risk_free_rate);
+                let delta_surface = DeltaVolSurface::from_iv_surface(surface, self.risk_free_rate);
 
                 let is_call = option_type == OptionType::Call;
                 let short_strike_f64: f64 = short_atm_strike.into();
@@ -259,8 +266,7 @@ impl StrikeSelector for ATMStrategy {
         })?;
 
         let symbol = surface.underlying().to_string();
-        let short_call =
-            OptionLeg::new(symbol.clone(), atm_strike, short_exp, OptionType::Call);
+        let short_call = OptionLeg::new(symbol.clone(), atm_strike, short_exp, OptionType::Call);
         let short_put = OptionLeg::new(symbol.clone(), atm_strike, short_exp, OptionType::Put);
         let long_call = OptionLeg::new(symbol.clone(), atm_strike, long_exp, OptionType::Call);
         let long_put = OptionLeg::new(symbol, atm_strike, long_exp, OptionType::Put);
@@ -403,8 +409,7 @@ impl StrikeSelector for ATMStrategy {
 
         let (upper, lower) = match config.wing_mode {
             WingSelectionMode::Delta { wing_delta } => {
-                let delta_surface =
-                    DeltaVolSurface::from_iv_surface(surface, self.risk_free_rate);
+                let delta_surface = DeltaVolSurface::from_iv_surface(surface, self.risk_free_rate);
 
                 let upper_strike_f64 = delta_surface
                     .delta_to_strike(wing_delta, expiration, true)
@@ -414,10 +419,10 @@ impl StrikeSelector for ATMStrategy {
                     .delta_to_strike(-wing_delta, expiration, false)
                     .ok_or(SelectionError::NoIVSurface)?;
 
-                let upper_target = Strike::try_from(upper_strike_f64)
-                    .map_err(|_| SelectionError::NoStrikes)?;
-                let lower_target = Strike::try_from(lower_strike_f64)
-                    .map_err(|_| SelectionError::NoStrikes)?;
+                let upper_target =
+                    Strike::try_from(upper_strike_f64).map_err(|_| SelectionError::NoStrikes)?;
+                let lower_target =
+                    Strike::try_from(lower_strike_f64).map_err(|_| SelectionError::NoStrikes)?;
 
                 let upper_snapped = Self::snap_to_strike(upper_target, &strikes, true)?;
                 let lower_snapped = Self::snap_to_strike(lower_target, &strikes, false)?;
@@ -430,12 +435,10 @@ impl StrikeSelector for ATMStrategy {
                     if (upper_distance - lower_distance).abs() > tolerance {
                         let symmetric_distance =
                             (upper_distance + lower_distance) / Decimal::new(2, 0);
-                        let target_upper =
-                            Strike::new(center.value() + symmetric_distance)
-                                .map_err(|_| SelectionError::NoStrikes)?;
-                        let target_lower =
-                            Strike::new(center.value() - symmetric_distance)
-                                .map_err(|_| SelectionError::NoStrikes)?;
+                        let target_upper = Strike::new(center.value() + symmetric_distance)
+                            .map_err(|_| SelectionError::NoStrikes)?;
+                        let target_lower = Strike::new(center.value() - symmetric_distance)
+                            .map_err(|_| SelectionError::NoStrikes)?;
 
                         (
                             Self::snap_to_strike(target_upper, &strikes, true)?,
@@ -452,10 +455,10 @@ impl StrikeSelector for ATMStrategy {
                 let upper_strike_f64 = spot_f64 * (1.0 + wing_percent);
                 let lower_strike_f64 = spot_f64 * (1.0 - wing_percent);
 
-                let upper_target = Strike::try_from(upper_strike_f64)
-                    .map_err(|_| SelectionError::NoStrikes)?;
-                let lower_target = Strike::try_from(lower_strike_f64)
-                    .map_err(|_| SelectionError::NoStrikes)?;
+                let upper_target =
+                    Strike::try_from(upper_strike_f64).map_err(|_| SelectionError::NoStrikes)?;
+                let lower_target =
+                    Strike::try_from(lower_strike_f64).map_err(|_| SelectionError::NoStrikes)?;
 
                 (
                     Self::snap_to_strike(upper_target, &strikes, true)?,
@@ -471,14 +474,25 @@ impl StrikeSelector for ATMStrategy {
                 TradeDirection::Long => (upper, lower, center, center),
             };
 
-        let short_call =
-            OptionLeg::new(symbol.clone(), short_call_strike, expiration, OptionType::Call);
-        let short_put =
-            OptionLeg::new(symbol.clone(), short_put_strike, expiration, OptionType::Put);
-        let long_call =
-            OptionLeg::new(symbol.clone(), long_call_strike, expiration, OptionType::Call);
-        let long_put =
-            OptionLeg::new(symbol, long_put_strike, expiration, OptionType::Put);
+        let short_call = OptionLeg::new(
+            symbol.clone(),
+            short_call_strike,
+            expiration,
+            OptionType::Call,
+        );
+        let short_put = OptionLeg::new(
+            symbol.clone(),
+            short_put_strike,
+            expiration,
+            OptionType::Put,
+        );
+        let long_call = OptionLeg::new(
+            symbol.clone(),
+            long_call_strike,
+            expiration,
+            OptionType::Call,
+        );
+        let long_put = OptionLeg::new(symbol, long_put_strike, expiration, OptionType::Put);
 
         IronButterfly::new(short_call, short_put, long_call, long_put).map_err(Into::into)
     }

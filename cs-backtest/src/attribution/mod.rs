@@ -9,13 +9,13 @@ mod snapshot_collector;
 pub use greeks_computer::GreeksComputer;
 pub use snapshot_collector::SnapshotCollector;
 
-use std::sync::Arc;
 use chrono::{DateTime, Utc};
-use rust_decimal::Decimal;
 use cs_domain::{
-    AttributionConfig, CompositeTrade, EquityDataRepository, HedgePosition,
-    OptionsDataRepository, PositionAttribution,
+    AttributionConfig, CompositeTrade, EquityDataRepository, HedgePosition, OptionsDataRepository,
+    PositionAttribution,
 };
+use rust_decimal::Decimal;
+use std::sync::Arc;
 
 /// Compute P&L attribution from hedge history (standalone function)
 ///

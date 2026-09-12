@@ -1,4 +1,4 @@
-use ib_data_collector::database::{ParquetDatabase, DatabaseRepository};
+use ib_data_collector::database::{DatabaseRepository, ParquetDatabase};
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -10,7 +10,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Check all symbols
     let all_symbols = db.get_symbols()?;
     println!("Total symbols in database: {}", all_symbols.len());
-    println!("VWAV in symbols list: {}", all_symbols.contains(&"VWAV".to_string()));
+    println!(
+        "VWAV in symbols list: {}",
+        all_symbols.contains(&"VWAV".to_string())
+    );
 
     // Check equity data
     let has_equity = db.has_equity_data("VWAV")?;
@@ -38,7 +41,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !contracts.is_empty() {
         println!("\nSample contracts:");
         for contract in contracts.iter().take(5) {
-            println!("  - {:?} {} {:?} {:?}",
+            println!(
+                "  - {:?} {} {:?} {:?}",
                 contract.contract.expiration,
                 contract.contract.strike,
                 contract.contract.option_type,

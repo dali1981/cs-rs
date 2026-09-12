@@ -11,18 +11,14 @@ use rust_decimal::Decimal;
 use std::sync::Arc;
 
 use cs_domain::{
-    EquityDataRepository, OptionsDataRepository, MarketTime,
-    RollPolicy, RollPeriod, RollReason, RollingResult,
-    TradeFactory, TradingCalendar,
-    RollableTrade, TradeResult,
-    EarningsEvent,
-    HedgeConfig, RealizedVolatilityMetrics,
-    CompositeTrade,
+    CompositeTrade, EarningsEvent, EquityDataRepository, HedgeConfig, MarketTime,
+    OptionsDataRepository, RealizedVolatilityMetrics, RollPeriod, RollPolicy, RollReason,
+    RollableTrade, RollingResult, TradeFactory, TradeResult, TradingCalendar,
 };
 
+use crate::backtest_use_case_helpers::TradeSimulator;
 use crate::execution::{ExecutableTrade, ExecutionConfig};
 use crate::timing_strategy::TimingStrategy;
-use crate::backtest_use_case_helpers::TradeSimulator;
 
 /// Tracks spot prices during hedging for realized volatility computation
 #[allow(dead_code)]
@@ -174,7 +170,12 @@ where
 
         let mut result = match simulator.run(trade, &self.pricer).await {
             Ok(raw) => {
-                let mut result = trade.to_result(raw.entry_pricing.clone(), raw.exit_pricing.clone(), &raw.output, event);
+                let mut result = trade.to_result(
+                    raw.entry_pricing.clone(),
+                    raw.exit_pricing.clone(),
+                    &raw.output,
+                    event,
+                );
                 // Apply trading costs (post-processing pattern)
                 if self.config.has_trading_costs() {
                     use crate::execution::cost_helpers::apply_costs_to_result;
@@ -211,11 +212,8 @@ where
             if let (Some(ref hedge_config), Some(ref timing)) =
                 (&self.hedge_config, &self.timing_strategy)
             {
-                let rehedge_times = timing.rehedge_times(
-                    entry_time,
-                    exit_time,
-                    &hedge_config.strategy,
-                );
+                let rehedge_times =
+                    timing.rehedge_times(entry_time, exit_time, &hedge_config.strategy);
 
                 tracing::info!(
                     symbol = %result.symbol(),
@@ -225,7 +223,10 @@ where
                     "Applying hedging"
                 );
 
-                if let Err(e) = self.apply_hedging(trade, &mut result, entry_time, exit_time, rehedge_times).await {
+                if let Err(e) = self
+                    .apply_hedging(trade, &mut result, entry_time, exit_time, rehedge_times)
+                    .await
+                {
                     tracing::warn!("Hedging failed: {}", e);
                 }
             }
@@ -245,8 +246,9 @@ where
         entry_time: MarketTime,
         exit_time: MarketTime,
     ) -> RollingResult {
-        let roll_policy = self.roll_policy.clone()
-            .unwrap_or(RollPolicy::Weekly { roll_day: Weekday::Fri });
+        let roll_policy = self.roll_policy.clone().unwrap_or(RollPolicy::Weekly {
+            roll_day: Weekday::Fri,
+        });
 
         let mut rolls = Vec::new();
         let mut current_date = start_date;
@@ -266,7 +268,9 @@ where
                 symbol,
                 entry_dt,
                 min_expiration,
-            ).await {
+            )
+            .await
+            {
                 Ok(t) => t,
                 Err(e) => {
                     tracing::warn!("Failed to create trade at {}: {}", current_date, e);
@@ -276,12 +280,8 @@ where
             };
 
             // Determine exit date based on roll policy
-            let (exit_date, roll_reason) = self.determine_exit_date(
-                current_date,
-                end_date,
-                trade.expiration(),
-                &roll_policy,
-            );
+            let (exit_date, roll_reason) =
+                self.determine_exit_date(current_date, end_date, trade.expiration(), &roll_policy);
 
             let exit_dt = self.to_datetime(exit_date, exit_time);
 
@@ -324,22 +324,22 @@ where
         exit_time: DateTime<Utc>,
         rehedge_times: Vec<DateTime<Utc>>,
     ) -> Result<(), String> {
-        let hedge_config = self.hedge_config.as_ref()
-            .ok_or("Hedge config not set")?;
+        let hedge_config = self.hedge_config.as_ref().ok_or("Hedge config not set")?;
 
         let symbol = result.symbol();
         let entry_spot = result.spot_at_entry();
         let exit_spot = result.spot_at_exit();
 
         // Check if attribution is enabled
-        let attribution_enabled = self.attribution_config
+        let attribution_enabled = self
+            .attribution_config
             .as_ref()
             .map(|c| c.enabled)
             .unwrap_or(false);
 
         // Create delta provider based on mode
-        use cs_domain::DeltaComputation;
         use crate::delta_providers::*;
+        use cs_domain::DeltaComputation;
 
         // Helper macro to execute hedging with a specific provider
         macro_rules! hedge_with_provider {
@@ -357,7 +357,8 @@ where
                         break;
                     }
 
-                    let spot = self.equity_repo
+                    let spot = self
+                        .equity_repo
                         .get_spot_price(symbol, rehedge_time)
                         .await
                         .map_err(|e| e.to_string())?
@@ -400,7 +401,8 @@ where
             }
             DeltaComputation::EntryHV { window } => {
                 let entry_hv = self.compute_hv_at_time(symbol, entry_time, *window).await?;
-                let provider = EntryVolatilityProvider::new_entry_hv((*trade).clone(), entry_hv, 0.05);
+                let provider =
+                    EntryVolatilityProvider::new_entry_hv((*trade).clone(), entry_hv, 0.05);
 
                 // Manually expand hedge_with_provider to call set_entry_hv
                 let mut hedge_state = cs_domain::GenericHedgeState::new(
@@ -409,13 +411,14 @@ where
                     entry_spot,
                     attribution_enabled,
                 );
-                hedge_state.set_entry_hv(entry_hv);  // Store for RV metrics
+                hedge_state.set_entry_hv(entry_hv); // Store for RV metrics
 
                 for rehedge_time in &rehedge_times {
                     if hedge_state.at_max_rehedges() {
                         break;
                     }
-                    let spot = self.equity_repo
+                    let spot = self
+                        .equity_repo
                         .get_spot_price(symbol, *rehedge_time)
                         .await
                         .map_err(|e| e.to_string())?
@@ -428,10 +431,15 @@ where
                 hedge_state.finalize(exit_spot, entry_iv, exit_iv)
             }
             DeltaComputation::EntryIV { .. } => {
-                let entry_iv = result.entry_iv()
+                let entry_iv = result
+                    .entry_iv()
                     .map(|iv| iv.primary)
                     .ok_or("No entry IV available")?;
-                hedge_with_provider!(EntryVolatilityProvider::new_entry_iv((*trade).clone(), entry_iv, 0.05))
+                hedge_with_provider!(EntryVolatilityProvider::new_entry_iv(
+                    (*trade).clone(),
+                    entry_iv,
+                    0.05
+                ))
             }
             DeltaComputation::CurrentHV { window } => {
                 hedge_with_provider!(CurrentHVProvider::new(
@@ -465,14 +473,9 @@ where
 
         // Compute attribution if enabled
         let attribution = if attribution_enabled && hedge_position.rehedge_count() > 0 {
-            match self.compute_attribution(
-                trade,
-                &hedge_position,
-                entry_time,
-                exit_time,
-                result.pnl(),
-            )
-            .await
+            match self
+                .compute_attribution(trade, &hedge_position, entry_time, exit_time, result.pnl())
+                .await
             {
                 Ok(attr) => Some(attr),
                 Err(e) => {
@@ -524,10 +527,13 @@ where
         exit_time: DateTime<Utc>,
         actual_pnl: Decimal,
     ) -> Result<cs_domain::PositionAttribution, String> {
-        let attr_config = self.attribution_config.as_ref()
+        let attr_config = self
+            .attribution_config
+            .as_ref()
             .ok_or("Attribution config not set")?;
 
-        let contract_multiplier = self.hedge_config
+        let contract_multiplier = self
+            .hedge_config
             .as_ref()
             .map(|c| c.contract_multiplier)
             .unwrap_or(100);
@@ -557,7 +563,8 @@ where
 
         let end_date = at_time.date_naive();
 
-        let bars = self.equity_repo
+        let bars = self
+            .equity_repo
             .get_bars(symbol, end_date)
             .await
             .map_err(|e| format!("Failed to get bars: {}", e))?;
@@ -580,7 +587,8 @@ where
             return (entry_date, RollReason::EndOfCampaign);
         }
 
-        let next_roll = roll_policy.next_roll_date(entry_date)
+        let next_roll = roll_policy
+            .next_roll_date(entry_date)
             .unwrap_or(campaign_end);
 
         let exit_date = next_roll.min(expiration).min(campaign_end);
@@ -618,12 +626,13 @@ where
             spot_at_entry: result.spot_at_entry(),
             spot_at_exit: result.spot_at_exit(),
             spot_move_pct: ((result.spot_at_exit() - result.spot_at_entry())
-                / result.spot_at_entry() * 100.0),
+                / result.spot_at_entry()
+                * 100.0),
 
             // Greeks from result
             net_delta: result.net_delta(),
             net_gamma: result.net_gamma(),
-            net_theta: None,  // Could be added to TradeResult trait if needed
+            net_theta: None, // Could be added to TradeResult trait if needed
             net_vega: None,
 
             // IV now derived automatically from CompositeIV!
@@ -640,10 +649,12 @@ where
 
             // Hedging (NOW POPULATED!)
             hedge_pnl: result.hedge_pnl(),
-            hedge_count: result.hedge_position()
+            hedge_count: result
+                .hedge_position()
                 .map(|p| p.rehedge_count())
                 .unwrap_or(0),
-            transaction_cost: result.hedge_position()
+            transaction_cost: result
+                .hedge_position()
                 .map(|p| p.total_cost)
                 .unwrap_or(Decimal::ZERO),
 
@@ -651,12 +662,14 @@ where
             position_attribution: None,
 
             // Extract realized vol metrics from hedge position (Phase 1c)
-            realized_vol_metrics: result.hedge_position()
+            realized_vol_metrics: result
+                .hedge_position()
                 .and_then(|hp| hp.realized_vol_metrics.clone()),
 
             // Extract capital metrics from hedge position (Phase 2b + Issue B/D fix)
             hedge_capital: {
-                let margin_rate = self.hedge_config
+                let margin_rate = self
+                    .hedge_config
                     .as_ref()
                     .map(|c| c.margin_rate)
                     .unwrap_or(0.5);

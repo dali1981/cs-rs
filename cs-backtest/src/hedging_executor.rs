@@ -53,13 +53,12 @@
 use chrono::{DateTime, Utc};
 
 use cs_domain::{
-    EquityDataRepository, OptionsDataRepository,
-    HedgeConfig, HedgePosition, HedgeStrategy, DeltaComputation,
-    GenericHedgeState, TradeResult, CompositeTrade,
+    CompositeTrade, DeltaComputation, EquityDataRepository, GenericHedgeState, HedgeConfig,
+    HedgePosition, HedgeStrategy, OptionsDataRepository, TradeResult,
 };
 
-use crate::timing_strategy::TimingStrategy;
 use crate::delta_providers::*;
+use crate::timing_strategy::TimingStrategy;
 
 /// Apply delta hedging to a trade
 ///
@@ -152,12 +151,14 @@ where
                 rehedge_times,
                 result.entry_iv().map(|iv| iv.primary),
                 result.exit_iv().map(|iv| iv.primary),
-            ).await?
+            )
+            .await?
         }
 
         DeltaComputation::EntryIV { .. } => {
             // Recompute delta from Black-Scholes using entry IV
-            let entry_iv = result.entry_iv()
+            let entry_iv = result
+                .entry_iv()
                 .map(|iv| iv.primary)
                 .ok_or("No entry IV available for EntryIV hedging mode")?;
 
@@ -178,7 +179,8 @@ where
                 rehedge_times,
                 Some(entry_iv),
                 result.exit_iv().map(|iv| iv.primary),
-            ).await?
+            )
+            .await?
         }
 
         DeltaComputation::EntryHV { window } => {
@@ -203,7 +205,8 @@ where
                 rehedge_times,
                 result.entry_iv().map(|iv| iv.primary),
                 result.exit_iv().map(|iv| iv.primary),
-            ).await?
+            )
+            .await?
         }
 
         DeltaComputation::CurrentHV { window } => {
@@ -233,7 +236,8 @@ where
                 rehedge_times,
                 result.entry_iv().map(|iv| iv.primary),
                 result.exit_iv().map(|iv| iv.primary),
-            ).await?
+            )
+            .await?
         }
 
         DeltaComputation::CurrentMarketIV { .. } => {
@@ -255,7 +259,8 @@ where
                 rehedge_times,
                 result.entry_iv().map(|iv| iv.primary),
                 result.exit_iv().map(|iv| iv.primary),
-            ).await?
+            )
+            .await?
         }
 
         DeltaComputation::HistoricalAverageIV { .. } => {
@@ -277,7 +282,8 @@ where
                 rehedge_times,
                 result.entry_iv().map(|iv| iv.primary),
                 result.exit_iv().map(|iv| iv.primary),
-            ).await?
+            )
+            .await?
         }
     };
 

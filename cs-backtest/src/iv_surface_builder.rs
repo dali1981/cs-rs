@@ -8,10 +8,10 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use tracing::{debug, trace, warn};
 
-use cs_analytics::{bs_implied_volatility, BSConfig, IVPoint, IVSurface};
-use cs_domain::{CallPut, MarketTime, OptionBar, TradingDate, TradingTimestamp};
-use cs_domain::repositories::EquityDataRepository;
 use crate::iv_validation::validate_iv_for_surface;
+use cs_analytics::{bs_implied_volatility, BSConfig, IVPoint, IVSurface};
+use cs_domain::repositories::EquityDataRepository;
+use cs_domain::{CallPut, MarketTime, OptionBar, TradingDate, TradingTimestamp};
 
 /// Build an IV surface from an option chain slice.
 ///
@@ -44,17 +44,11 @@ pub fn build_iv_surface(
 
         let is_call = matches!(bar.option_type, CallPut::Call);
 
-        let iv = match bs_implied_volatility(
-            close,
-            spot_price,
-            bar.strike,
-            ttm,
-            is_call,
-            &bs_config,
-        ) {
-            Some(v) => v,
-            None => continue,
-        };
+        let iv =
+            match bs_implied_volatility(close, spot_price, bar.strike, ttm, is_call, &bs_config) {
+                Some(v) => v,
+                None => continue,
+            };
 
         if !validate_iv_for_surface(iv) {
             continue;
@@ -109,7 +103,10 @@ pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository + ?Sized>(
     let market_close = MarketTime::new(16, 0);
 
     let total_options = chain.len();
-    debug!("Building IV surface for {} with {} options in chain", symbol, total_options);
+    debug!(
+        "Building IV surface for {} with {} options in chain",
+        symbol, total_options
+    );
 
     let mut points = Vec::new();
     let mut latest_timestamp: Option<DateTime<Utc>> = None;
@@ -183,14 +180,8 @@ pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository + ?Sized>(
             continue;
         }
 
-        let iv = match bs_implied_volatility(
-            close,
-            spot_f64,
-            bar.strike,
-            ttm,
-            is_call,
-            &bs_config,
-        ) {
+        let iv = match bs_implied_volatility(close, spot_f64, bar.strike, ttm, is_call, &bs_config)
+        {
             Some(v) => v,
             None => {
                 skipped_iv_calc_failed += 1;
@@ -216,7 +207,10 @@ pub async fn build_iv_surface_minute_aligned<R: EquityDataRepository + ?Sized>(
             Ok(d) => d,
             Err(e) => {
                 skipped_decimal_conversion += 1;
-                debug!("Decimal conversion failed for strike {} - {}", bar.strike, e);
+                debug!(
+                    "Decimal conversion failed for strike {} - {}",
+                    bar.strike, e
+                );
                 continue;
             }
         };
@@ -310,7 +304,12 @@ mod tests {
             make_bar(95.0, exp, true, 6.0),
             make_bar(100.0, exp, true, 3.5),
             make_bar(105.0, exp, true, 1.5),
-            make_bar(100.0, NaiveDate::from_ymd_opt(2025, 3, 21).unwrap(), true, 5.0),
+            make_bar(
+                100.0,
+                NaiveDate::from_ymd_opt(2025, 3, 21).unwrap(),
+                true,
+                5.0,
+            ),
         ];
 
         let pricing_time = NaiveDate::from_ymd_opt(2025, 1, 15)

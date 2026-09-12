@@ -60,7 +60,12 @@ pub fn compute_iron_butterfly_net_greeks(
     long_call_greeks: Option<Greeks>,
     long_put_greeks: Option<Greeks>,
 ) -> (Option<f64>, Option<f64>, Option<f64>, Option<f64>) {
-    match (short_call_greeks, short_put_greeks, long_call_greeks, long_put_greeks) {
+    match (
+        short_call_greeks,
+        short_put_greeks,
+        long_call_greeks,
+        long_put_greeks,
+    ) {
         (Some(sc), Some(sp), Some(lc), Some(lp)) => {
             // Short legs contribute negatively, long legs contribute positively
             let net_delta = sc.delta + sp.delta - lc.delta - lp.delta;
@@ -68,7 +73,12 @@ pub fn compute_iron_butterfly_net_greeks(
             let net_theta = sc.theta + sp.theta - lc.theta - lp.theta;
             let net_vega = sc.vega + sp.vega - lc.vega - lp.vega;
 
-            (Some(net_delta), Some(net_gamma), Some(net_theta), Some(net_vega))
+            (
+                Some(net_delta),
+                Some(net_gamma),
+                Some(net_theta),
+                Some(net_vega),
+            )
         }
         _ => (None, None, None, None),
     }
@@ -82,7 +92,12 @@ pub fn compute_calendar_straddle_net_greeks(
     long_call_greeks: Option<Greeks>,
     long_put_greeks: Option<Greeks>,
 ) -> (Option<f64>, Option<f64>, Option<f64>, Option<f64>) {
-    match (short_call_greeks, short_put_greeks, long_call_greeks, long_put_greeks) {
+    match (
+        short_call_greeks,
+        short_put_greeks,
+        long_call_greeks,
+        long_put_greeks,
+    ) {
         (Some(sc), Some(sp), Some(lc), Some(lp)) => {
             // Short near-term legs - long far-term legs
             let net_delta = sc.delta + sp.delta - lc.delta - lp.delta;
@@ -90,7 +105,12 @@ pub fn compute_calendar_straddle_net_greeks(
             let net_theta = sc.theta + sp.theta - lc.theta - lp.theta;
             let net_vega = sc.vega + sp.vega - lc.vega - lp.vega;
 
-            (Some(net_delta), Some(net_gamma), Some(net_theta), Some(net_vega))
+            (
+                Some(net_delta),
+                Some(net_gamma),
+                Some(net_theta),
+                Some(net_vega),
+            )
         }
         _ => (None, None, None, None),
     }
@@ -98,7 +118,10 @@ pub fn compute_calendar_straddle_net_greeks(
 
 /// Compute IV change between two time points for two-leg instruments
 /// Handles cases where one or both IV values may be missing
-pub fn compute_iv_change(entry_iv: Option<f64>, exit_iv: Option<f64>) -> (Option<f64>, Option<f64>, Option<f64>) {
+pub fn compute_iv_change(
+    entry_iv: Option<f64>,
+    exit_iv: Option<f64>,
+) -> (Option<f64>, Option<f64>, Option<f64>) {
     let iv_change = match (entry_iv, exit_iv) {
         (Some(entry), Some(exit)) => Some(exit - entry),
         _ => None,

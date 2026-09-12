@@ -6,11 +6,11 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use super::TradingCostCalculator;
 use super::models::{
-    NoCost, FixedPerLegSlippage, PercentageOfPremiumSlippage,
-    HalfSpreadSlippage, IVBasedSlippage, CommissionModel, CompositeCostCalculator,
+    CommissionModel, CompositeCostCalculator, FixedPerLegSlippage, HalfSpreadSlippage,
+    IVBasedSlippage, NoCost, PercentageOfPremiumSlippage,
 };
+use super::TradingCostCalculator;
 
 /// Configuration for trading costs
 ///
@@ -111,7 +111,9 @@ pub enum TradingCostConfig {
     },
 }
 
-fn default_max_spread() -> f64 { 0.20 }
+fn default_max_spread() -> f64 {
+    0.20
+}
 
 /// Preset cost configurations
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,10 +141,13 @@ impl TradingCostConfig {
         match self {
             Self::None => Box::new(NoCost),
 
-            Self::FixedPerLeg { cost_per_leg } =>
-                Box::new(FixedPerLegSlippage::new(*cost_per_leg)),
+            Self::FixedPerLeg { cost_per_leg } => Box::new(FixedPerLegSlippage::new(*cost_per_leg)),
 
-            Self::Percentage { slippage_bps, min_cost_per_leg, max_cost_per_leg } => {
+            Self::Percentage {
+                slippage_bps,
+                min_cost_per_leg,
+                max_cost_per_leg,
+            } => {
                 let mut model = PercentageOfPremiumSlippage::new(*slippage_bps);
                 if let Some(min) = min_cost_per_leg {
                     model.min_cost_per_leg = *min;
@@ -151,26 +156,35 @@ impl TradingCostConfig {
                 Box::new(model)
             }
 
-            Self::IvBased { base_spread_pct, iv_multiplier, max_spread_pct } => {
+            Self::IvBased {
+                base_spread_pct,
+                iv_multiplier,
+                max_spread_pct,
+            } => {
                 let mut model = IVBasedSlippage::new(*base_spread_pct, *iv_multiplier);
                 model.max_spread_pct = *max_spread_pct;
                 Box::new(model)
             }
 
-            Self::HalfSpread { spread_pct } =>
-                Box::new(HalfSpreadSlippage::new(*spread_pct)),
+            Self::HalfSpread { spread_pct } => Box::new(HalfSpreadSlippage::new(*spread_pct)),
 
-            Self::Commission { per_contract, max_per_leg } => {
+            Self::Commission {
+                per_contract,
+                max_per_leg,
+            } => {
                 let mut model = CommissionModel::new(*per_contract);
                 model.max_per_leg = *max_per_leg;
                 Box::new(model)
             }
 
-            Self::Composite { slippage, commission } => {
-                Box::new(CompositeCostCalculator::new()
+            Self::Composite {
+                slippage,
+                commission,
+            } => Box::new(
+                CompositeCostCalculator::new()
                     .with_boxed(slippage.build())
-                    .with_boxed(commission.build()))
-            }
+                    .with_boxed(commission.build()),
+            ),
 
             Self::Preset { name } => name.build(),
         }
@@ -219,7 +233,7 @@ impl CostPreset {
 
 impl Default for TradingCostConfig {
     fn default() -> Self {
-        Self::None  // Explicit opt-in for costs
+        Self::None // Explicit opt-in for costs
     }
 }
 
@@ -257,7 +271,9 @@ mod tests {
 
     #[test]
     fn test_config_preset() {
-        let config = TradingCostConfig::Preset { name: CostPreset::Normal };
+        let config = TradingCostConfig::Preset {
+            name: CostPreset::Normal,
+        };
         let calc = config.build();
         assert_eq!(calc.name(), "HalfSpread");
     }
@@ -300,7 +316,12 @@ mod tests {
             name = "realistic"
         "#;
         let config: TradingCostConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(config, TradingCostConfig::Preset { name: CostPreset::Realistic });
+        assert_eq!(
+            config,
+            TradingCostConfig::Preset {
+                name: CostPreset::Realistic
+            }
+        );
     }
 
     #[test]
@@ -319,7 +340,10 @@ mod tests {
         let config: TradingCostConfig = toml::from_str(toml_str).unwrap();
 
         match config {
-            TradingCostConfig::Composite { slippage, commission } => {
+            TradingCostConfig::Composite {
+                slippage,
+                commission,
+            } => {
                 assert!(matches!(*slippage, TradingCostConfig::HalfSpread { .. }));
                 assert!(matches!(*commission, TradingCostConfig::Commission { .. }));
             }

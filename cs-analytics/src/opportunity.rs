@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::delta_surface::DeltaVolSurface;
 use crate::math_utils::linspace;
-use crate::selection_model::{SelectionModel, SelectionIVProvider, StrikeSpaceSelection};
+use crate::selection_model::{SelectionIVProvider, SelectionModel, StrikeSpaceSelection};
 
 /// Calendar spread opportunity identified in delta-space
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,7 +48,12 @@ impl Default for OpportunityAnalyzerConfig {
 
 impl OpportunityAnalyzerConfig {
     /// Create config with custom delta range
-    pub fn with_delta_range(min_ratio: f64, delta_start: f64, delta_end: f64, steps: usize) -> Self {
+    pub fn with_delta_range(
+        min_ratio: f64,
+        delta_start: f64,
+        delta_end: f64,
+        steps: usize,
+    ) -> Self {
         Self {
             min_iv_ratio: min_ratio,
             delta_targets: linspace(delta_start, delta_end, steps),
@@ -121,7 +126,9 @@ impl OpportunityAnalyzer {
 
         // Sort by score descending
         opportunities.sort_by(|a, b| {
-            b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         opportunities
@@ -194,11 +201,14 @@ mod tests {
         let tte1 = 7.0 / 365.0;
         let slice1 = VolSlice::from_delta_iv_pairs(
             vec![
-                (0.25, 0.55),  // High IV for earnings
+                (0.25, 0.55), // High IV for earnings
                 (0.50, 0.50),
                 (0.75, 0.48),
             ],
-            spot, tte1, rfr, exp1,
+            spot,
+            tte1,
+            rfr,
+            exp1,
         );
         surface.add_slice(slice1);
 
@@ -206,12 +216,11 @@ mod tests {
         let exp2 = base_date + chrono::Duration::days(30);
         let tte2 = 30.0 / 365.0;
         let slice2 = VolSlice::from_delta_iv_pairs(
-            vec![
-                (0.25, 0.35),
-                (0.50, 0.30),
-                (0.75, 0.28),
-            ],
-            spot, tte2, rfr, exp2,
+            vec![(0.25, 0.35), (0.50, 0.30), (0.75, 0.28)],
+            spot,
+            tte2,
+            rfr,
+            exp2,
         );
         surface.add_slice(slice2);
 
@@ -245,11 +254,7 @@ mod tests {
         let expirations = surface.expirations();
         let analyzer = OpportunityAnalyzer::default();
 
-        let opportunities = analyzer.find_opportunities(
-            &surface,
-            expirations[0],
-            expirations[1],
-        );
+        let opportunities = analyzer.find_opportunities(&surface, expirations[0], expirations[1]);
 
         // Should be sorted by score descending
         for i in 1..opportunities.len() {
@@ -266,11 +271,7 @@ mod tests {
         let expirations = surface.expirations();
         let analyzer = OpportunityAnalyzer::default();
 
-        let opportunities = analyzer.find_opportunities(
-            &surface,
-            expirations[0],
-            expirations[1],
-        );
+        let opportunities = analyzer.find_opportunities(&surface, expirations[0], expirations[1]);
 
         // Check IV ratio calculation
         for opp in &opportunities {
@@ -286,16 +287,12 @@ mod tests {
 
         // Set high min ratio that filters everything
         let config = OpportunityAnalyzerConfig {
-            min_iv_ratio: 2.0,  // Very high
+            min_iv_ratio: 2.0, // Very high
             delta_targets: vec![0.50],
         };
         let analyzer = OpportunityAnalyzer::new(config);
 
-        let opportunities = analyzer.find_opportunities(
-            &surface,
-            expirations[0],
-            expirations[1],
-        );
+        let opportunities = analyzer.find_opportunities(&surface, expirations[0], expirations[1]);
 
         // Should find no opportunities with such high min ratio
         assert!(opportunities.is_empty());
@@ -321,11 +318,8 @@ mod tests {
 
         let best = best.unwrap();
         // Best should have the highest score among all opportunities
-        let all_opportunities = analyzer.find_opportunities(
-            &surface,
-            expirations[0],
-            expirations[1],
-        );
+        let all_opportunities =
+            analyzer.find_opportunities(&surface, expirations[0], expirations[1]);
 
         if let Some(top) = all_opportunities.first() {
             assert!((best.score - top.score).abs() < 1e-10);

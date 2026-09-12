@@ -73,7 +73,16 @@ mod tests {
 
     #[test]
     fn parse_earnings_time_bmo_variants() {
-        for s in &["BMO", "bmo", "BEFORE_MARKET", "before_market", "BEFOREMARKET", "beforemarket", "before_market_open", "pre-market"] {
+        for s in &[
+            "BMO",
+            "bmo",
+            "BEFORE_MARKET",
+            "before_market",
+            "BEFOREMARKET",
+            "beforemarket",
+            "before_market_open",
+            "pre-market",
+        ] {
             assert_eq!(
                 parse_earnings_time(s),
                 EarningsTime::BeforeMarketOpen,
@@ -84,7 +93,16 @@ mod tests {
 
     #[test]
     fn parse_earnings_time_amc_variants() {
-        for s in &["AMC", "amc", "AFTER_MARKET", "after_market", "AFTERMARKET", "aftermarket", "after_market_close", "post-market"] {
+        for s in &[
+            "AMC",
+            "amc",
+            "AFTER_MARKET",
+            "after_market",
+            "AFTERMARKET",
+            "aftermarket",
+            "after_market_close",
+            "post-market",
+        ] {
             assert_eq!(
                 parse_earnings_time(s),
                 EarningsTime::AfterMarketClose,
@@ -165,7 +183,10 @@ mod tests {
             assert_eq!(domain.company_name, Some("NVIDIA Corporation".into()));
             assert_eq!(domain.earnings_time, EarningsTime::AfterMarketClose);
             assert_eq!(domain.market_cap, Some(3_000_000_000_000u64));
-            assert_eq!(domain.earnings_date, NaiveDate::from_ymd_opt(2024, 11, 20).unwrap());
+            assert_eq!(
+                domain.earnings_date,
+                NaiveDate::from_ymd_opt(2024, 11, 20).unwrap()
+            );
         }
 
         #[test]

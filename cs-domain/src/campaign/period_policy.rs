@@ -1,7 +1,7 @@
 // cs-domain/src/campaign/period_policy.rs
 
-use chrono::{NaiveTime, Weekday};
 use crate::{RollPolicy, TradingPeriodSpec};
+use chrono::{NaiveTime, Weekday};
 
 /// Policy for when to trade within a campaign
 #[derive(Debug, Clone)]
@@ -74,7 +74,9 @@ impl PeriodPolicy {
         Self::InterEarnings {
             entry_days_after_earnings: 2,
             exit_days_before_earnings: 3,
-            roll_policy: RollPolicy::Weekly { roll_day: Weekday::Fri },
+            roll_policy: RollPolicy::Weekly {
+                roll_day: Weekday::Fri,
+            },
         }
     }
 
@@ -83,7 +85,9 @@ impl PeriodPolicy {
         Self::InterEarnings {
             entry_days_after_earnings: 2,
             exit_days_before_earnings: 5,
-            roll_policy: RollPolicy::Monthly { roll_week_offset: 0 },
+            roll_policy: RollPolicy::Monthly {
+                roll_week_offset: 0,
+            },
         }
     }
 }

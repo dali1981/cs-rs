@@ -18,8 +18,8 @@ use cs_domain::hedging::DeltaProvider;
 /// # Delta Convention
 /// Returns per-share delta (e.g., 0.5 for ATM call, NOT 50)
 pub struct GammaApproximationProvider {
-    option_delta: f64,      // Per-share delta
-    option_gamma: f64,      // Per-share gamma
+    option_delta: f64, // Per-share delta
+    option_gamma: f64, // Per-share gamma
     last_spot: f64,
 }
 
@@ -47,7 +47,7 @@ impl DeltaProvider for GammaApproximationProvider {
         self.option_delta += self.option_gamma * spot_change;
         self.last_spot = spot;
 
-        Ok(self.option_delta)  // Per-share, NO multiplier
+        Ok(self.option_delta) // Per-share, NO multiplier
     }
 
     fn compute_gamma(&self, _spot: f64, _timestamp: DateTime<Utc>) -> Option<f64> {
@@ -97,6 +97,10 @@ mod tests {
         let delta = provider.compute_delta(100.0, Utc::now()).await.unwrap();
 
         // Delta should be per-share (0.5), NOT multiplied by 100
-        assert!(delta.abs() < 2.0, "Delta should be per-share, got {}", delta);
+        assert!(
+            delta.abs() < 2.0,
+            "Delta should be per-share, got {}",
+            delta
+        );
     }
 }

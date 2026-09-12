@@ -5,8 +5,8 @@
 //! - File config (FileRulesConfig) is partial with Option<T> fields
 //! - Merge via apply_file() method
 
-use serde::{Deserialize, Serialize};
 use super::{EventRule, MarketRule, TradeRule};
+use serde::{Deserialize, Serialize};
 
 /// Runtime rules configuration (source of truth for defaults)
 ///
@@ -127,7 +127,9 @@ mod tests {
     fn test_apply_file_event_rules() {
         let config = RulesConfig::default();
         let file = FileRulesConfig {
-            event: Some(vec![EventRule::MinMarketCap { threshold: 1_000_000_000 }]),
+            event: Some(vec![EventRule::MinMarketCap {
+                threshold: 1_000_000_000,
+            }]),
             market: None,
             trade: None,
         };
@@ -139,11 +141,14 @@ mod tests {
 
     #[test]
     fn test_apply_file_replaces_not_merges() {
-        let config = RulesConfig::default()
-            .with_event_rule(EventRule::MinMarketCap { threshold: 500_000_000 });
+        let config = RulesConfig::default().with_event_rule(EventRule::MinMarketCap {
+            threshold: 500_000_000,
+        });
 
         let file = FileRulesConfig {
-            event: Some(vec![EventRule::Symbols { include: vec!["AAPL".to_string()] }]),
+            event: Some(vec![EventRule::Symbols {
+                include: vec!["AAPL".to_string()],
+            }]),
             market: None,
             trade: None,
         };
@@ -158,9 +163,14 @@ mod tests {
     #[test]
     fn test_builder_pattern() {
         let config = RulesConfig::default()
-            .with_event_rule(EventRule::MinMarketCap { threshold: 1_000_000_000 })
+            .with_event_rule(EventRule::MinMarketCap {
+                threshold: 1_000_000_000,
+            })
             .with_market_rule(MarketRule::MaxEntryIv { threshold: 1.5 })
-            .with_trade_rule(TradeRule::EntryPriceRange { min: Some(0.50), max: None });
+            .with_trade_rule(TradeRule::EntryPriceRange {
+                min: Some(0.50),
+                max: None,
+            });
 
         assert!(config.has_event_rules());
         assert!(config.has_market_rules());

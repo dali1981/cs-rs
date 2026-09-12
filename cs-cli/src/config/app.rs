@@ -6,15 +6,20 @@
 //! 3. System config (~/.config/cs/system.toml)
 //! 4. Code defaults
 
-use figment::{Figment, providers::{Format, Toml, Serialized}};
-use serde::{Serialize, Deserialize};
-use std::path::PathBuf;
 use anyhow::Result;
+use figment::{
+    providers::{Format, Serialized, Toml},
+    Figment,
+};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
-use cs_backtest::{SpreadType, SelectionType};
-use cs_analytics::{PricingModel, InterpolationMode};
-use cs_domain::{StrikeMatchMode, AttributionConfig, VolatilitySource, SnapshotTimes, ReturnBasis, MarginConfig};
 use crate::cli_args::CliOverrides;
+use cs_analytics::{InterpolationMode, PricingModel};
+use cs_backtest::{SelectionType, SpreadType};
+use cs_domain::{
+    AttributionConfig, MarginConfig, ReturnBasis, SnapshotTimes, StrikeMatchMode, VolatilitySource,
+};
 
 /// Full layered configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,13 +121,13 @@ pub struct MetricsConfig {
 #[serde(default)]
 pub struct HedgingConfig {
     pub enabled: bool,
-    pub strategy: String,  // "time", "delta", "gamma"
+    pub strategy: String, // "time", "delta", "gamma"
     pub interval_hours: u64,
     pub delta_threshold: f64,
     pub max_rehedges: Option<usize>,
     pub cost_per_share: f64,
-    pub delta_mode: String,  // "gamma", "entry-hv", "entry-iv", "current-hv", "current-iv", "historical-iv"
-    pub hv_window: u32,  // HV lookback window in days
+    pub delta_mode: String, // "gamma", "entry-hv", "entry-iv", "current-hv", "current-iv", "historical-iv"
+    pub hv_window: u32,     // HV lookback window in days
     pub track_realized_vol: bool,
     /// Margin rate for short hedge positions (Issue D fix)
     /// Default is 0.5 (50%). Typical broker requirements range from 25-50%.
@@ -251,10 +256,7 @@ impl Default for HedgingConfig {
 }
 
 /// Load configuration with full layering
-pub fn load_config(
-    conf_files: &[PathBuf],
-    mut cli_overrides: CliOverrides,
-) -> Result<AppConfig> {
+pub fn load_config(conf_files: &[PathBuf], mut cli_overrides: CliOverrides) -> Result<AppConfig> {
     let system_config = dirs::config_dir()
         .map(|p| p.join("cs/system.toml"))
         .unwrap_or_else(|| PathBuf::from("~/.config/cs/system.toml"));
@@ -433,8 +435,8 @@ impl AppConfig {
 
     /// Convert hedging config to domain HedgeConfig
     fn hedging_to_domain_config(&self) -> cs_domain::HedgeConfig {
-        use cs_domain::{HedgeConfig, HedgeStrategy};
         use chrono::Duration;
+        use cs_domain::{HedgeConfig, HedgeStrategy};
         use rust_decimal::Decimal;
 
         if !self.hedging.enabled {
@@ -464,13 +466,20 @@ impl AppConfig {
             "current-hv" => cs_domain::DeltaComputation::CurrentHV {
                 window: self.hedging.hv_window,
             },
-            "current-iv" | "current-market-iv" => cs_domain::DeltaComputation::CurrentMarketIV { _marker: () },
-            "historical-iv" | "historical-average-iv" => cs_domain::DeltaComputation::HistoricalAverageIV {
-                lookback_days: self.hedging.hv_window,
-                _marker: (),
-            },
+            "current-iv" | "current-market-iv" => {
+                cs_domain::DeltaComputation::CurrentMarketIV { _marker: () }
+            }
+            "historical-iv" | "historical-average-iv" => {
+                cs_domain::DeltaComputation::HistoricalAverageIV {
+                    lookback_days: self.hedging.hv_window,
+                    _marker: (),
+                }
+            }
             _ => {
-                tracing::warn!("Unknown delta mode '{}', using GammaApproximation", self.hedging.delta_mode);
+                tracing::warn!(
+                    "Unknown delta mode '{}', using GammaApproximation",
+                    self.hedging.delta_mode
+                );
                 cs_domain::DeltaComputation::GammaApproximation
             }
         };
@@ -479,7 +488,8 @@ impl AppConfig {
             strategy,
             max_rehedges: self.hedging.max_rehedges,
             min_hedge_size: 1,
-            transaction_cost_per_share: Decimal::try_from(self.hedging.cost_per_share).unwrap_or(Decimal::ZERO),
+            transaction_cost_per_share: Decimal::try_from(self.hedging.cost_per_share)
+                .unwrap_or(Decimal::ZERO),
             contract_multiplier: 100,
             delta_computation,
             // Auto-enable RV tracking when attribution is enabled (attribution needs vol data)
@@ -506,8 +516,8 @@ pub fn build_hedge_config_from_args(
     attribution_enabled: bool,
     margin_rate: Option<f64>,
 ) -> Option<cs_domain::HedgeConfig> {
-    use cs_domain::{HedgeConfig, HedgeStrategy};
     use chrono::Duration;
+    use cs_domain::{HedgeConfig, HedgeStrategy};
     use rust_decimal::Decimal;
 
     if !enabled {
@@ -535,13 +545,20 @@ pub fn build_hedge_config_from_args(
         "entry-hv" => cs_domain::DeltaComputation::EntryHV { window: hv_window },
         "entry-iv" => cs_domain::DeltaComputation::EntryIV { _marker: () },
         "current-hv" => cs_domain::DeltaComputation::CurrentHV { window: hv_window },
-        "current-iv" | "current-market-iv" => cs_domain::DeltaComputation::CurrentMarketIV { _marker: () },
-        "historical-iv" | "historical-average-iv" => cs_domain::DeltaComputation::HistoricalAverageIV {
-            lookback_days: hv_window,
-            _marker: (),
-        },
+        "current-iv" | "current-market-iv" => {
+            cs_domain::DeltaComputation::CurrentMarketIV { _marker: () }
+        }
+        "historical-iv" | "historical-average-iv" => {
+            cs_domain::DeltaComputation::HistoricalAverageIV {
+                lookback_days: hv_window,
+                _marker: (),
+            }
+        }
         _ => {
-            tracing::warn!("Unknown delta mode '{}', using GammaApproximation", delta_mode);
+            tracing::warn!(
+                "Unknown delta mode '{}', using GammaApproximation",
+                delta_mode
+            );
             cs_domain::DeltaComputation::GammaApproximation
         }
     };

@@ -1,11 +1,11 @@
 //! ExecutableTrade implementation for Strangle
 
-use rust_decimal::Decimal;
-use cs_domain::{Strangle, StrangleResult, CONTRACT_MULTIPLIER, EarningsEvent};
-use crate::multi_leg_pricer::{StranglePricer, StranglePricing};
-use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
+use super::types::ExecutionError;
 use super::types::{ExecutionConfig, SimulationOutput};
+use crate::multi_leg_pricer::{StranglePricer, StranglePricing};
+use cs_domain::{EarningsEvent, Strangle, StrangleResult, CONTRACT_MULTIPLIER};
+use rust_decimal::Decimal;
 
 impl ExecutableTrade for Strangle {
     type Pricer = StranglePricer;
@@ -26,10 +26,7 @@ impl ExecutableTrade for Strangle {
     ) -> Result<(), ExecutionError> {
         // Validate max IV at entry
         if let Some(max_iv) = config.max_entry_iv {
-            for (leg_name, leg_iv) in [
-                ("call", pricing.call.iv),
-                ("put", pricing.put.iv),
-            ] {
+            for (leg_name, leg_iv) in [("call", pricing.call.iv), ("put", pricing.put.iv)] {
                 if let Some(iv) = leg_iv {
                     if iv > max_iv {
                         return Err(ExecutionError::InvalidSpread(format!(
@@ -54,8 +51,7 @@ impl ExecutableTrade for Strangle {
         if pricing.entry_debit < config.min_entry_cost {
             return Err(ExecutionError::InvalidSpread(format!(
                 "Entry debit too small: {} < {}",
-                pricing.entry_debit,
-                config.min_entry_cost,
+                pricing.entry_debit, config.min_entry_cost,
             )));
         }
 
@@ -113,7 +109,8 @@ impl ExecutableTrade for Strangle {
         let pnl_per_share = exit_pricing.entry_debit - entry_pricing.entry_debit;
         let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
         let pnl_pct = if entry_pricing.entry_debit.abs() > Decimal::ZERO {
-            (pnl / (entry_pricing.entry_debit.abs() * Decimal::from(CONTRACT_MULTIPLIER))) * Decimal::from(100)
+            (pnl / (entry_pricing.entry_debit.abs() * Decimal::from(CONTRACT_MULTIPLIER)))
+                * Decimal::from(100)
         } else {
             Decimal::ZERO
         };
@@ -202,7 +199,7 @@ impl ExecutableTrade for Strangle {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
-            cost_summary: None,  // Costs applied separately via ApplyCosts trait
+            cost_summary: None, // Costs applied separately via ApplyCosts trait
         }
     }
 }

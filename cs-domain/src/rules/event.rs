@@ -1,7 +1,7 @@
 //! Event-level rules (no market data needed)
 
-use serde::{Deserialize, Serialize};
 use crate::EarningsEvent;
+use serde::{Deserialize, Serialize};
 
 /// Event-level rules that filter by earnings event metadata
 ///
@@ -37,9 +37,9 @@ impl EventRule {
             Self::MinMarketCap { threshold } => {
                 event.market_cap.map_or(false, |cap| cap >= *threshold)
             }
-            Self::Symbols { include } => {
-                include.iter().any(|s| s.eq_ignore_ascii_case(&event.symbol))
-            }
+            Self::Symbols { include } => include
+                .iter()
+                .any(|s| s.eq_ignore_ascii_case(&event.symbol)),
         }
     }
 }
@@ -57,21 +57,27 @@ mod tests {
 
     #[test]
     fn test_min_market_cap_passes() {
-        let rule = EventRule::MinMarketCap { threshold: 1_000_000_000 };
+        let rule = EventRule::MinMarketCap {
+            threshold: 1_000_000_000,
+        };
         let event = mock_event("AAPL", Some(2_000_000_000));
         assert!(rule.eval(&event));
     }
 
     #[test]
     fn test_min_market_cap_fails() {
-        let rule = EventRule::MinMarketCap { threshold: 1_000_000_000 };
+        let rule = EventRule::MinMarketCap {
+            threshold: 1_000_000_000,
+        };
         let event = mock_event("SMALL", Some(500_000_000));
         assert!(!rule.eval(&event));
     }
 
     #[test]
     fn test_min_market_cap_missing_fails() {
-        let rule = EventRule::MinMarketCap { threshold: 1_000_000_000 };
+        let rule = EventRule::MinMarketCap {
+            threshold: 1_000_000_000,
+        };
         let event = mock_event("UNKNOWN", None);
         assert!(!rule.eval(&event));
     }

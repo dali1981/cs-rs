@@ -3,9 +3,9 @@
 //! This module provides the single point of cost application, eliminating duplication
 //! across individual strategy implementations.
 
+use super::types::ExecutionConfig;
 use chrono::{DateTime, Utc};
 use cs_domain::{ApplyCosts, TradeType, TradingContext};
-use super::types::ExecutionConfig;
 
 /// Trait for pricing types that can generate a TradingContext
 pub trait ToTradingContext {

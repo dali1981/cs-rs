@@ -1,8 +1,8 @@
 use crate::expiration::ExpirationPolicy;
-use crate::trading_period::TradingPeriodSpec;
-use crate::roll::RollPolicy;
 use crate::hedging::HedgeConfig;
+use crate::roll::RollPolicy;
 use crate::strike_selection::StrikeMatchMode;
+use crate::trading_period::TradingPeriodSpec;
 use finq_core::OptionType;
 
 /// Complete trade strategy configuration
@@ -43,9 +43,7 @@ pub enum TradeStructureConfig {
     CalendarStraddle,
 
     /// Iron butterfly
-    IronButterfly {
-        wing_width: rust_decimal::Decimal,
-    },
+    IronButterfly { wing_width: rust_decimal::Decimal },
 }
 
 /// Filters for trade entry

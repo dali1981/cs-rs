@@ -90,11 +90,16 @@ impl PnlStatistics {
         // Hedge cost metrics
         let hedge_cost_ratios: Vec<f64> = records.iter().map(|r| r.hedge_cost_ratio()).collect();
         let mean_hedge_cost_ratio = hedge_cost_ratios.iter().sum::<f64>() / n as f64;
-        let trades_with_excessive_hedge_costs =
-            records.iter().filter(|r| r.has_excessive_hedge_costs()).count();
+        let trades_with_excessive_hedge_costs = records
+            .iter()
+            .filter(|r| r.has_excessive_hedge_costs())
+            .count();
 
         // Win rate
-        let winners = records.iter().filter(|r| r.total_pnl() > Decimal::ZERO).count();
+        let winners = records
+            .iter()
+            .filter(|r| r.total_pnl() > Decimal::ZERO)
+            .count();
         let win_rate = winners as f64 / n as f64;
 
         // Average duration
@@ -159,7 +164,11 @@ mod tests {
     use super::*;
     use rust_decimal_macros::dec;
 
-    fn make_record(option_pnl: Decimal, peak_capital: Decimal, duration_days: i64) -> TradePnlRecord {
+    fn make_record(
+        option_pnl: Decimal,
+        peak_capital: Decimal,
+        duration_days: i64,
+    ) -> TradePnlRecord {
         TradePnlRecord::new(
             peak_capital, // option_premium = peak_capital for simplicity
             option_pnl,
@@ -173,9 +182,9 @@ mod tests {
     #[test]
     fn test_statistics_basic() {
         let records = vec![
-            make_record(dec!(10), dec!(100), 5),   // +10% over 5 days
-            make_record(dec!(20), dec!(100), 10),  // +20% over 10 days
-            make_record(dec!(-5), dec!(100), 5),   // -5% over 5 days
+            make_record(dec!(10), dec!(100), 5),  // +10% over 5 days
+            make_record(dec!(20), dec!(100), 10), // +20% over 10 days
+            make_record(dec!(-5), dec!(100), 5),  // -5% over 5 days
         ];
 
         let stats = PnlStatistics::from_records(&records).unwrap();
@@ -268,9 +277,9 @@ mod tests {
         // Trade B: $170 capital, -50% daily return (for simplicity, 1-day trades)
         // Trade C: $50 capital, +50% daily return
         let records = vec![
-            TradePnlRecord::unhedged(dec!(75), dec!(7.5), 1),   // +10%
-            TradePnlRecord::unhedged(dec!(170), dec!(-85), 1),  // -50%
-            TradePnlRecord::unhedged(dec!(50), dec!(25), 1),    // +50%
+            TradePnlRecord::unhedged(dec!(75), dec!(7.5), 1), // +10%
+            TradePnlRecord::unhedged(dec!(170), dec!(-85), 1), // -50%
+            TradePnlRecord::unhedged(dec!(50), dec!(25), 1),  // +50%
         ];
 
         let stats = PnlStatistics::from_records(&records).unwrap();

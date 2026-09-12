@@ -1,7 +1,7 @@
 //! Strategy-specific arguments
 
+use super::{OptionTypeArg, SelectionTypeArg, SpreadTypeArg};
 use clap::Args;
-use super::{SpreadTypeArg, SelectionTypeArg, OptionTypeArg};
 
 /// Strategy configuration arguments
 #[derive(Debug, Clone, Args)]

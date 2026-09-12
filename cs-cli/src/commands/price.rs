@@ -3,8 +3,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::args::{PriceArgs, GlobalArgs};
 use super::CommandHandler;
+use crate::args::{GlobalArgs, PriceArgs};
 
 /// Price command handler
 pub struct PriceCommand {
@@ -24,7 +24,10 @@ impl PriceCommand {
 impl CommandHandler for PriceCommand {
     async fn execute(&self) -> Result<()> {
         // TODO: Implement price command execution
-        println!("Pricing {} strike {} on {}", self.args.symbol, self.args.strike, self.args.date);
+        println!(
+            "Pricing {} strike {} on {}",
+            self.args.symbol, self.args.strike, self.args.date
+        );
         Ok(())
     }
 }

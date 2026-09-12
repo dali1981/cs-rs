@@ -30,7 +30,9 @@ impl ArbitrageViolation {
     pub fn severity(&self) -> f64 {
         match self {
             ArbitrageViolation::Butterfly { severity, .. } => *severity,
-            ArbitrageViolation::Calendar { forward_variance, .. } => forward_variance.abs(),
+            ArbitrageViolation::Calendar {
+                forward_variance, ..
+            } => forward_variance.abs(),
         }
     }
 
@@ -71,7 +73,10 @@ impl ArbitrageReport {
     }
 
     pub fn butterfly_violations(&self) -> Vec<&ArbitrageViolation> {
-        self.violations.iter().filter(|v| v.is_butterfly()).collect()
+        self.violations
+            .iter()
+            .filter(|v| v.is_butterfly())
+            .collect()
     }
 
     pub fn calendar_violations(&self) -> Vec<&ArbitrageViolation> {
@@ -265,7 +270,7 @@ mod tests {
             vec![
                 (0.25, 0.30),
                 (0.40, 0.35),
-                (0.50, 0.20),  // Artificially low - creates concavity
+                (0.50, 0.20), // Artificially low - creates concavity
                 (0.60, 0.35),
                 (0.75, 0.30),
             ],
@@ -280,34 +285,43 @@ mod tests {
     fn test_convex_smile_no_butterfly() {
         let slice = create_convex_slice(0.1, 0.25);
         let violations = check_butterfly_arbitrage(&slice);
-        assert!(violations.is_empty(), "Convex smile should have no butterfly arb");
+        assert!(
+            violations.is_empty(),
+            "Convex smile should have no butterfly arb"
+        );
     }
 
     #[test]
     fn test_non_convex_smile_has_butterfly() {
         let slice = create_non_convex_slice(0.1);
         let violations = check_butterfly_arbitrage(&slice);
-        assert!(!violations.is_empty(), "Non-convex smile should have butterfly arb");
+        assert!(
+            !violations.is_empty(),
+            "Non-convex smile should have butterfly arb"
+        );
     }
 
     #[test]
     fn test_normal_term_structure_no_calendar() {
         // Higher IV for near-term, lower for far-term (normal earnings pattern)
-        let near = create_convex_slice(0.05, 0.35);  // 18 days, high IV
-        let far = create_convex_slice(0.15, 0.25);   // 55 days, lower IV
+        let near = create_convex_slice(0.05, 0.35); // 18 days, high IV
+        let far = create_convex_slice(0.15, 0.25); // 55 days, lower IV
 
         let violations = check_calendar_arbitrage(&near, &far);
 
         // With higher near-term IV, variance should increase with time
         // So forward variance should be positive
-        assert!(violations.is_empty(), "Normal term structure should have no calendar arb");
+        assert!(
+            violations.is_empty(),
+            "Normal term structure should have no calendar arb"
+        );
     }
 
     #[test]
     fn test_inverted_term_structure_has_calendar() {
         // Lower IV for near-term, much higher for far-term (unusual)
-        let near = create_convex_slice(0.05, 0.15);  // Low IV
-        let far = create_convex_slice(0.15, 0.50);   // Very high IV
+        let near = create_convex_slice(0.05, 0.15); // Low IV
+        let far = create_convex_slice(0.15, 0.50); // Very high IV
 
         // This might or might not have calendar arb depending on exact numbers
         // Calendar arb = var_far < var_near (inverted variance)
@@ -325,7 +339,10 @@ mod tests {
         let exp = Utc::now().date_naive() + chrono::Duration::days(30);
 
         let violations = check_butterfly_arbitrage_svi(&params, exp, (-0.5, 0.5), 21);
-        assert!(violations.is_empty(), "Valid SVI should have no butterfly arb");
+        assert!(
+            violations.is_empty(),
+            "Valid SVI should have no butterfly arb"
+        );
     }
 
     #[test]

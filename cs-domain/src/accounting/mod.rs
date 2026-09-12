@@ -31,22 +31,20 @@
 //!
 //! Now the return matches the economic reality.
 
-mod capital;
 mod bpr;
+mod capital;
 mod has_accounting;
 mod margin;
 mod return_basis;
 mod statistics;
 mod trade_accounting;
 
-pub use capital::{
-    CapitalBreakdown, CapitalCalculationMethod, CapitalRequirement,
-};
 pub use bpr::{
-    BprInputs, BprSnapshot, BprSummary, BprTimeline, HedgeInput, OptionLegInput, OptionRight,
-    MarginConfig, MarginMode, StockMarginConfig, StockMarginMode, OptionsMarginConfig,
-    margin_engine_for_config,
+    margin_engine_for_config, BprInputs, BprSnapshot, BprSummary, BprTimeline, HedgeInput,
+    MarginConfig, MarginMode, OptionLegInput, OptionRight, OptionsMarginConfig, StockMarginConfig,
+    StockMarginMode,
 };
+pub use capital::{CapitalBreakdown, CapitalCalculationMethod, CapitalRequirement};
 pub use has_accounting::HasAccounting;
 pub use margin::MarginCalculator;
 pub use return_basis::ReturnBasis;

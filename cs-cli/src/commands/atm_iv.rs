@@ -14,9 +14,9 @@ use cs_domain::infrastructure::{FinqEquityRepository, FinqOptionsRepository};
 #[cfg(feature = "demo")]
 use cs_domain::infrastructure::{DemoEquityRepository, DemoOptionsRepository};
 
+use super::CommandHandler;
 use crate::args::{AtmIvArgs, GlobalArgs};
 use crate::factory::UseCaseFactory;
-use super::CommandHandler;
 
 /// ATM IV command handler
 pub struct AtmIvCommand {
@@ -67,17 +67,34 @@ impl CommandHandler for AtmIvCommand {
         };
 
         // Determine data directory
-        let data_dir = self.global.data_dir
+        let data_dir = self
+            .global
+            .data_dir
             .clone()
-            .or_else(|| std::env::var("FINQ_DATA_DIR").ok().map(std::path::PathBuf::from))
+            .or_else(|| {
+                std::env::var("FINQ_DATA_DIR")
+                    .ok()
+                    .map(std::path::PathBuf::from)
+            })
             .context("Data directory not specified. Use --data-dir or set FINQ_DATA_DIR")?;
 
         println!("{}", style("ATM IV Time Series Generation").bold().cyan());
-        println!("Mode: {}", if self.args.eod_pricing { "EOD" } else { "Minute-Aligned (default)" });
-        println!("Interpolation: {}", match config.interpolation_method {
-            IvInterpolationMethod::Rolling => "Rolling TTE",
-            IvInterpolationMethod::ConstantMaturity => "Constant-Maturity (variance interpolation)",
-        });
+        println!(
+            "Mode: {}",
+            if self.args.eod_pricing {
+                "EOD"
+            } else {
+                "Minute-Aligned (default)"
+            }
+        );
+        println!(
+            "Interpolation: {}",
+            match config.interpolation_method {
+                IvInterpolationMethod::Rolling => "Rolling TTE",
+                IvInterpolationMethod::ConstantMaturity =>
+                    "Constant-Maturity (variance interpolation)",
+            }
+        );
         println!("Symbols: {}", self.args.symbols.join(", "));
         println!("Date range: {} to {}", start_date, end_date);
         println!("Maturities: {:?}", config.maturity_targets);
@@ -97,7 +114,9 @@ impl CommandHandler for AtmIvCommand {
             for symbol in &self.args.symbols {
                 println!("{}", style(format!("Processing {}...", symbol)).bold());
 
-                let result = use_case.execute(symbol, start_date, end_date, &config, hv_config.as_ref()).await?;
+                let result = use_case
+                    .execute(symbol, start_date, end_date, &config, hv_config.as_ref())
+                    .await?;
 
                 println!(
                     "  {} trading days processed, {} successful observations",
@@ -124,13 +143,20 @@ impl CommandHandler for AtmIvCommand {
 
                 println!(
                     "  {}",
-                    style(format!("Saved {} observations to {:?}", result.observations.len(), output_path))
-                        .green()
+                    style(format!(
+                        "Saved {} observations to {:?}",
+                        result.observations.len(),
+                        output_path
+                    ))
+                    .green()
                 );
 
                 // Generate plots if requested
                 if self.args.plot {
-                    println!("  {}", style("Plot generation not yet implemented").yellow());
+                    println!(
+                        "  {}",
+                        style("Plot generation not yet implemented").yellow()
+                    );
                 }
             }
         } else {
@@ -140,7 +166,9 @@ impl CommandHandler for AtmIvCommand {
             for symbol in &self.args.symbols {
                 println!("{}", style(format!("Processing {}...", symbol)).bold());
 
-                let result = use_case.execute(symbol, start_date, end_date, &config).await?;
+                let result = use_case
+                    .execute(symbol, start_date, end_date, &config)
+                    .await?;
 
                 println!(
                     "  {} trading days processed, {} successful observations",
@@ -167,13 +195,20 @@ impl CommandHandler for AtmIvCommand {
 
                 println!(
                     "  {}",
-                    style(format!("Saved {} observations to {:?}", result.observations.len(), output_path))
-                        .green()
+                    style(format!(
+                        "Saved {} observations to {:?}",
+                        result.observations.len(),
+                        output_path
+                    ))
+                    .green()
                 );
 
                 // Generate plots if requested
                 if self.args.plot {
-                    println!("  {}", style("Plot generation not yet implemented").yellow());
+                    println!(
+                        "  {}",
+                        style("Plot generation not yet implemented").yellow()
+                    );
                 }
             }
         }

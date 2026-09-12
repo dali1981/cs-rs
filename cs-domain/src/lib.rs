@@ -6,64 +6,66 @@
 pub const CONTRACT_MULTIPLIER: i32 = 100;
 
 pub mod accounting;
-pub mod trading_costs;
-pub mod datetime;
-pub mod value_objects;
-pub mod entities;
-pub mod strike_selection;
-pub mod repositories;
-pub mod ports;
-pub mod timing;
-pub mod infrastructure;
-pub mod hedging;
-pub mod position;
-pub mod expiration;
-pub mod trading_period;
-pub mod roll;
-pub mod strategy;
-pub mod trade;
 pub mod campaign;
 pub mod config;
+pub mod datetime;
+pub mod entities;
+pub mod expiration;
+pub mod hedging;
+pub mod infrastructure;
 pub mod pnl;
+pub mod ports;
+pub mod position;
+pub mod repositories;
+pub mod roll;
 pub mod rules;
+pub mod strategy;
+pub mod strike_selection;
 pub mod testing;
+pub mod timing;
+pub mod trade;
+pub mod trading_costs;
+pub mod trading_period;
+pub mod value_objects;
 
 // Re-exports for convenience
-pub use datetime::{TradingDate, TradingTimestamp, MarketTime, eastern_to_utc};
-pub use value_objects::*;
+pub use datetime::{eastern_to_utc, MarketTime, TradingDate, TradingTimestamp};
 pub use entities::*;
 pub use strike_selection::{
-    OptionStrategy, StrategyError, TradeSelectionCriteria, StrikeMatchMode,
+    OptionStrategy, StrategyError, StrikeMatchMode, TradeSelectionCriteria,
 };
+pub use value_objects::*;
 
-pub use repositories::*;
-pub use ports::{TradeFactory, TradeFactoryError};
-pub use timing::*;
-pub use hedging::*;
-pub use position::{PositionGreeks, PositionSnapshot, DailyAttribution, PositionAttribution};
-pub use expiration::{ExpirationCycle, ExpirationPolicy};
-pub use trading_period::{TradingPeriod, TradingPeriodSpec, TimingError, TradingRange, TradableEvent};
-pub use roll::{RollPolicy, RollEvent};
-pub use strategy::{TradeStrategy, TradeStructureConfig, TradeFilters, TradeStructure, FailedTrade};
-pub use trade::{RollableTrade, TradeResult, TradeConstructionError, CompositeTrade, LegPosition};
+pub use accounting::{
+    margin_engine_for_config, BprInputs, BprSnapshot, BprSummary, BprTimeline, CapitalBreakdown,
+    CapitalCalculationMethod, CapitalRequirement, HasAccounting, HedgeInput, MarginCalculator,
+    MarginConfig, MarginMode, OptionLegInput, OptionRight, OptionsMarginConfig, ReturnBasis,
+    StockMarginConfig, StockMarginMode, TradeAccounting, TradeStatistics,
+};
 pub use campaign::{
-    TradingCampaign, TradingSession, SessionAction, SessionContext,
-    EarningsTimingType, SessionSchedule, PeriodPolicy
+    EarningsTimingType, PeriodPolicy, SessionAction, SessionContext, SessionSchedule,
+    TradingCampaign, TradingSession,
 };
 pub use config::{FilterCriteria, PositionSpec, PositionStructure, StrikeSelection};
-pub use accounting::{
-    TradeAccounting, TradeStatistics, CapitalRequirement, CapitalBreakdown,
-    CapitalCalculationMethod, MarginCalculator, HasAccounting, ReturnBasis,
-    BprInputs, BprSnapshot, BprSummary, BprTimeline, OptionLegInput, OptionRight, HedgeInput,
-    MarginConfig, MarginMode, StockMarginConfig, StockMarginMode, OptionsMarginConfig,
-    margin_engine_for_config,
-};
-pub use trading_costs::{
-    TradingCost, TradingCostBreakdown, TradeSide, TradingContext, LegContext,
-    TradeType, TradingCostCalculator, TradingCostConfig, CostPreset,
-    HasTradingCost, ApplyCosts,
-};
-pub use pnl::{TradePnlRecord, PnlStatistics, ToPnlRecord};
+pub use expiration::{ExpirationCycle, ExpirationPolicy};
+pub use hedging::*;
+pub use pnl::{PnlStatistics, ToPnlRecord, TradePnlRecord};
+pub use ports::{TradeFactory, TradeFactoryError};
+pub use position::{DailyAttribution, PositionAttribution, PositionGreeks, PositionSnapshot};
+pub use repositories::*;
+pub use roll::{RollEvent, RollPolicy};
 pub use rules::{
-    RulesConfig, FileRulesConfig, EventRule, MarketRule, TradeRule, RuleLevel, RuleError,
+    EventRule, FileRulesConfig, MarketRule, RuleError, RuleLevel, RulesConfig, TradeRule,
+};
+pub use strategy::{
+    FailedTrade, TradeFilters, TradeStrategy, TradeStructure, TradeStructureConfig,
+};
+pub use timing::*;
+pub use trade::{CompositeTrade, LegPosition, RollableTrade, TradeConstructionError, TradeResult};
+pub use trading_costs::{
+    ApplyCosts, CostPreset, HasTradingCost, LegContext, TradeSide, TradeType, TradingContext,
+    TradingCost, TradingCostBreakdown, TradingCostCalculator, TradingCostConfig,
+};
+pub use trading_period::{
+    TimingError, TradableEvent, TradingPeriod, TradingPeriodSpec, TradingRange,
 };

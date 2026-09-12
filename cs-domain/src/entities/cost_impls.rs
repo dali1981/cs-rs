@@ -1,12 +1,11 @@
 //! HasTradingCost and ApplyCosts trait implementations for all trade result types
 
-use rust_decimal::Decimal;
 use crate::entities::{
-    CalendarSpreadResult, IronButterflyResult, StraddleResult,
-    CalendarStraddleResult, StrangleResult, ButterflyResult,
-    CondorResult, IronCondorResult, CostSummary,
+    ButterflyResult, CalendarSpreadResult, CalendarStraddleResult, CondorResult, CostSummary,
+    IronButterflyResult, IronCondorResult, StraddleResult, StrangleResult,
 };
-use crate::trading_costs::{HasTradingCost, ApplyCosts, TradingCost};
+use crate::trading_costs::{ApplyCosts, HasTradingCost, TradingCost};
+use rust_decimal::Decimal;
 
 // ============================================================================
 // HasTradingCost implementations

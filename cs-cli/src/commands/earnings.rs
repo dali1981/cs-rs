@@ -3,8 +3,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::args::{EarningsAnalysisArgs, GlobalArgs};
 use super::CommandHandler;
+use crate::args::{EarningsAnalysisArgs, GlobalArgs};
 
 /// Earnings analysis command handler
 pub struct EarningsAnalysisCommand {

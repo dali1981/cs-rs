@@ -3,8 +3,8 @@
 //! Complete financial record for a trade including cash flows,
 //! capital requirements, and return calculations.
 
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use super::CapitalRequirement;
@@ -100,14 +100,10 @@ impl TradeAccounting {
     /// * `entry_debit` - Premium paid to enter (positive number)
     /// * `exit_credit` - Value received at exit (positive number)
     /// * `multiplier` - Contract multiplier (typically 100)
-    pub fn for_debit_trade(
-        entry_debit: Decimal,
-        exit_credit: Decimal,
-        multiplier: u32,
-    ) -> Self {
+    pub fn for_debit_trade(entry_debit: Decimal, exit_credit: Decimal, multiplier: u32) -> Self {
         let mult = Decimal::from(multiplier);
         let entry_cash_flow = -entry_debit * mult; // Paid out
-        let exit_cash_flow = exit_credit * mult;   // Received
+        let exit_cash_flow = exit_credit * mult; // Received
         let realized_pnl = exit_cash_flow + entry_cash_flow;
 
         let capital = entry_debit * mult;
@@ -143,8 +139,8 @@ impl TradeAccounting {
         multiplier: u32,
     ) -> Self {
         let mult = Decimal::from(multiplier);
-        let entry_cash_flow = entry_credit * mult;  // Received
-        let exit_cash_flow = -exit_debit * mult;    // Paid to close
+        let entry_cash_flow = entry_credit * mult; // Received
+        let exit_cash_flow = -exit_debit * mult; // Paid to close
         let realized_pnl = entry_cash_flow + exit_cash_flow;
 
         let capital = CapitalRequirement::for_credit(entry_credit * mult, max_loss * mult);
@@ -170,11 +166,7 @@ impl TradeAccounting {
     /// Create accounting from existing P&L data
     ///
     /// This is the most common case when retrofitting existing trade results.
-    pub fn from_pnl(
-        entry_cost: Decimal,
-        exit_value: Decimal,
-        pnl: Decimal,
-    ) -> Self {
+    pub fn from_pnl(entry_cost: Decimal, exit_value: Decimal, pnl: Decimal) -> Self {
         let return_on_capital = if entry_cost.is_zero() || entry_cost < Decimal::ZERO {
             // Credit trade or zero cost - use absolute value for return calc
             if entry_cost.abs() > Decimal::ZERO {
@@ -237,7 +229,8 @@ impl TradeAccounting {
         self.realized_pnl += hedge_pnl;
         // Recalculate return on capital
         if !self.capital_required.initial_requirement.is_zero() {
-            self.return_on_capital = (self.realized_pnl / self.capital_required.initial_requirement)
+            self.return_on_capital = (self.realized_pnl
+                / self.capital_required.initial_requirement)
                 .to_f64()
                 .unwrap_or(0.0);
         }
@@ -249,7 +242,8 @@ impl TradeAccounting {
         self.capital_required = self.capital_required.with_hedge(hedge_capital);
         // Recalculate return on capital with new capital base
         if !self.capital_required.initial_requirement.is_zero() {
-            self.return_on_capital = (self.realized_pnl / self.capital_required.initial_requirement)
+            self.return_on_capital = (self.realized_pnl
+                / self.capital_required.initial_requirement)
                 .to_f64()
                 .unwrap_or(0.0);
         }
@@ -262,7 +256,8 @@ impl TradeAccounting {
         self.realized_pnl += self.transaction_costs;
         // Recalculate return
         if !self.capital_required.initial_requirement.is_zero() {
-            self.return_on_capital = (self.realized_pnl / self.capital_required.initial_requirement)
+            self.return_on_capital = (self.realized_pnl
+                / self.capital_required.initial_requirement)
                 .to_f64()
                 .unwrap_or(0.0);
         }
@@ -313,14 +308,14 @@ mod tests {
     fn test_debit_trade_accounting() {
         // Buy straddle at $1.50, sell at $2.00
         let acct = TradeAccounting::for_debit_trade(
-            dec!(1.50),  // entry debit
-            dec!(2.00),  // exit credit
-            100,         // multiplier
+            dec!(1.50), // entry debit
+            dec!(2.00), // exit credit
+            100,        // multiplier
         );
 
         assert_eq!(acct.entry_cash_flow, dec!(-150)); // Paid $150
-        assert_eq!(acct.exit_cash_flow, dec!(200));   // Received $200
-        assert_eq!(acct.realized_pnl, dec!(50));      // Profit $50
+        assert_eq!(acct.exit_cash_flow, dec!(200)); // Received $200
+        assert_eq!(acct.realized_pnl, dec!(50)); // Profit $50
         assert_eq!(acct.capital_required.initial_requirement, dec!(150));
 
         // Return = $50 / $150 = 33.33%
@@ -331,15 +326,15 @@ mod tests {
     fn test_credit_trade_accounting() {
         // Sell credit spread: receive $1.50, close at $0.50, max loss $5.00
         let acct = TradeAccounting::for_credit_trade(
-            dec!(1.50),  // entry credit
-            dec!(0.50),  // exit debit (cost to close)
-            dec!(5.00),  // max loss
-            100,         // multiplier
+            dec!(1.50), // entry credit
+            dec!(0.50), // exit debit (cost to close)
+            dec!(5.00), // max loss
+            100,        // multiplier
         );
 
-        assert_eq!(acct.entry_cash_flow, dec!(150));  // Received $150
-        assert_eq!(acct.exit_cash_flow, dec!(-50));   // Paid $50 to close
-        assert_eq!(acct.realized_pnl, dec!(100));     // Profit $100
+        assert_eq!(acct.entry_cash_flow, dec!(150)); // Received $150
+        assert_eq!(acct.exit_cash_flow, dec!(-50)); // Paid $50 to close
+        assert_eq!(acct.realized_pnl, dec!(100)); // Profit $100
 
         // Margin = ($500 - $150) = $350
         assert_eq!(acct.capital_required.initial_requirement, dec!(350));
@@ -351,9 +346,9 @@ mod tests {
     #[test]
     fn test_from_pnl() {
         let acct = TradeAccounting::from_pnl(
-            dec!(150),   // entry cost
-            dec!(200),   // exit value
-            dec!(50),    // pnl
+            dec!(150), // entry cost
+            dec!(200), // exit value
+            dec!(50),  // pnl
         );
 
         assert_eq!(acct.realized_pnl, dec!(50));

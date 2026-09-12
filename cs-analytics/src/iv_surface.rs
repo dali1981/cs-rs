@@ -21,7 +21,9 @@ impl IVPoint {
         if self.underlying_price.is_zero() {
             return 1.0;
         }
-        (self.strike / self.underlying_price).try_into().unwrap_or(1.0)
+        (self.strike / self.underlying_price)
+            .try_into()
+            .unwrap_or(1.0)
     }
 
     pub fn is_atm(&self, tolerance: f64) -> bool {
@@ -45,21 +47,33 @@ impl IVSurface {
         as_of_time: DateTime<Utc>,
         spot_price: Decimal,
     ) -> Self {
-        Self { points, underlying, as_of_time, spot_price }
+        Self {
+            points,
+            underlying,
+            as_of_time,
+            spot_price,
+        }
     }
 
-    pub fn underlying(&self) -> &str { &self.underlying }
-    pub fn as_of_time(&self) -> DateTime<Utc> { self.as_of_time }
-    pub fn spot_price(&self) -> Decimal { self.spot_price }
-    pub fn points(&self) -> &[IVPoint] { &self.points }
+    pub fn underlying(&self) -> &str {
+        &self.underlying
+    }
+    pub fn as_of_time(&self) -> DateTime<Utc> {
+        self.as_of_time
+    }
+    pub fn spot_price(&self) -> Decimal {
+        self.spot_price
+    }
+    pub fn points(&self) -> &[IVPoint] {
+        &self.points
+    }
 
     /// Get unique expirations from surface points
     ///
     /// Returns sorted list of unique expiration dates.
     pub fn expirations(&self) -> Vec<NaiveDate> {
-        let exps: std::collections::BTreeSet<NaiveDate> = self.points.iter()
-            .map(|p| p.expiration)
-            .collect();
+        let exps: std::collections::BTreeSet<NaiveDate> =
+            self.points.iter().map(|p| p.expiration).collect();
         exps.into_iter().collect()
     }
 
@@ -67,21 +81,17 @@ impl IVSurface {
     ///
     /// Returns sorted list of unique strikes.
     pub fn strikes(&self) -> Vec<Decimal> {
-        let strikes: std::collections::BTreeSet<Decimal> = self.points.iter()
-            .map(|p| p.strike)
-            .collect();
+        let strikes: std::collections::BTreeSet<Decimal> =
+            self.points.iter().map(|p| p.strike).collect();
         strikes.into_iter().collect()
     }
 
     /// Interpolate IV for given strike/expiration
-    pub fn get_iv(
-        &self,
-        strike: Decimal,
-        expiration: NaiveDate,
-        is_call: bool,
-    ) -> Option<f64> {
+    pub fn get_iv(&self, strike: Decimal, expiration: NaiveDate, is_call: bool) -> Option<f64> {
         // Try to find IV for the requested option type
-        let matching: Vec<_> = self.points.iter()
+        let matching: Vec<_> = self
+            .points
+            .iter()
             .filter(|p| p.is_call == is_call)
             .collect();
 
@@ -108,7 +118,9 @@ impl IVSurface {
         // Fallback: Use put-call parity approximation
         // For European options at the same strike, put IV ≈ call IV
         // Try using the opposite type's IV if the requested type isn't available
-        let opposite_matching: Vec<_> = self.points.iter()
+        let opposite_matching: Vec<_> = self
+            .points
+            .iter()
             .filter(|p| p.is_call != is_call)
             .collect();
 
@@ -164,7 +176,9 @@ impl IVSurface {
     pub fn get_atm_term_structure(&self, is_call: bool) -> BTreeMap<NaiveDate, f64> {
         let mut result = BTreeMap::new();
 
-        let matching: Vec<_> = self.points.iter()
+        let matching: Vec<_> = self
+            .points
+            .iter()
             .filter(|p| p.is_call == is_call)
             .collect();
 
@@ -211,9 +225,12 @@ impl IVSurface {
         match (lower, upper) {
             (Some(l), Some(u)) => {
                 let range: f64 = (u.strike - l.strike).try_into().unwrap_or(1.0);
-                if range == 0.0 { return Some(l.iv); }
+                if range == 0.0 {
+                    return Some(l.iv);
+                }
                 let weight: f64 = ((target_strike - l.strike) / (u.strike - l.strike))
-                    .try_into().unwrap_or(0.5);
+                    .try_into()
+                    .unwrap_or(0.5);
                 Some(l.iv + weight * (u.iv - l.iv))
             }
             (Some(l), None) => Some(l.iv),
@@ -270,7 +287,9 @@ impl IVSurface {
                 let sqrt_target = sqrt_time(target_expiration);
 
                 let range = sqrt_upper - sqrt_lower;
-                if range == 0.0 { return Some(l_iv); }
+                if range == 0.0 {
+                    return Some(l_iv);
+                }
 
                 let weight = (sqrt_target - sqrt_lower) / range;
                 Some(l_iv + weight * (u_iv - l_iv))
@@ -371,7 +390,7 @@ mod tests {
         let iv = surface.get_iv(
             Decimal::new(100, 0),
             base_date + chrono::Duration::days(30),
-            true
+            true,
         );
 
         assert!(iv.is_some());
@@ -387,7 +406,7 @@ mod tests {
         let iv = surface.get_iv(
             Decimal::new(975, 1), // 97.5
             base_date + chrono::Duration::days(30),
-            true
+            true,
         );
 
         assert!(iv.is_some());
@@ -405,7 +424,7 @@ mod tests {
         let iv = surface.get_iv(
             Decimal::new(100, 0),
             base_date + chrono::Duration::days(45),
-            true
+            true,
         );
 
         assert!(iv.is_some());
@@ -426,17 +445,12 @@ mod tests {
     #[test]
     fn test_iv_surface_empty_points() {
         let now = Utc::now();
-        let surface = IVSurface::new(
-            vec![],
-            "TEST".to_string(),
-            now,
-            Decimal::new(100, 0)
-        );
+        let surface = IVSurface::new(vec![], "TEST".to_string(), now, Decimal::new(100, 0));
 
         let iv = surface.get_iv(
             Decimal::new(100, 0),
             now.date_naive() + chrono::Duration::days(30),
-            true
+            true,
         );
 
         assert!(iv.is_none());
@@ -451,7 +465,7 @@ mod tests {
         let iv = surface.get_iv(
             Decimal::new(90, 0),
             base_date + chrono::Duration::days(30),
-            true
+            true,
         );
 
         assert!(iv.is_some());
@@ -467,7 +481,7 @@ mod tests {
         let iv = surface.get_iv(
             Decimal::new(110, 0),
             base_date + chrono::Duration::days(30),
-            true
+            true,
         );
 
         assert!(iv.is_some());

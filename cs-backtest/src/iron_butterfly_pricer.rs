@@ -2,9 +2,9 @@ use chrono::{DateTime, Utc};
 use polars::prelude::*;
 use rust_decimal::Decimal;
 
+use crate::spread_pricer::{LegPricing, PricingError, SpreadPricer};
 use cs_analytics::IVSurface;
 use cs_domain::IronButterfly;
-use crate::spread_pricer::{SpreadPricer, LegPricing, PricingError};
 
 /// Pricing result for an iron butterfly
 #[derive(Debug, Clone)]
@@ -36,14 +36,17 @@ impl IronButterflyPricer {
         pricing_time: DateTime<Utc>,
     ) -> Result<IronButterflyPricing, PricingError> {
         // Build IV surface for fallback interpolation
-        let iv_surface = self.inner.build_iv_surface(
+        let iv_surface =
+            self.inner
+                .build_iv_surface(chain_df, spot_price, pricing_time, butterfly.symbol());
+
+        self.price_with_surface(
+            butterfly,
             chain_df,
             spot_price,
             pricing_time,
-            butterfly.symbol(),
-        );
-
-        self.price_with_surface(butterfly, chain_df, spot_price, pricing_time, iv_surface.as_ref())
+            iv_surface.as_ref(),
+        )
     }
 
     /// Price iron butterfly using a pre-built IV surface
@@ -58,7 +61,10 @@ impl IronButterflyPricer {
         iv_surface: Option<&IVSurface>,
     ) -> Result<IronButterflyPricing, PricingError> {
         // Create pricing provider
-        let pricing_provider = self.inner.pricing_model().to_provider_with_rate(self.inner.risk_free_rate());
+        let pricing_provider = self
+            .inner
+            .pricing_model()
+            .to_provider_with_rate(self.inner.risk_free_rate());
 
         // Price all 4 legs
         let short_call = self.inner.price_leg(
@@ -110,8 +116,7 @@ impl IronButterflyPricer {
         )?;
 
         // Net credit = (short call + short put) - (long call + long put)
-        let net_credit = (short_call.price + short_put.price)
-            - (long_call.price + long_put.price);
+        let net_credit = (short_call.price + short_put.price) - (long_call.price + long_put.price);
 
         Ok(IronButterflyPricing {
             short_call,

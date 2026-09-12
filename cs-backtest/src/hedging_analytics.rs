@@ -24,9 +24,7 @@ impl HedgingComparison {
         let hedge_cost = hedge_pos.total_cost;
 
         let hedge_efficiency = if hedge_cost > Decimal::ZERO {
-            (hedge_contribution / hedge_cost)
-                .try_into()
-                .unwrap_or(0.0)
+            (hedge_contribution / hedge_cost).try_into().unwrap_or(0.0)
         } else {
             0.0
         };

@@ -1,14 +1,14 @@
 //! BacktestConfig builder from CLI args
 
 use anyhow::{Context, Result};
-use std::path::PathBuf;
 use chrono::NaiveDate;
+use std::path::PathBuf;
 
-use cs_backtest::{BacktestConfig, DataSourceConfig, EarningsSourceConfig, RunBacktestCommand};
 use crate::args::{BacktestArgs, GlobalArgs};
-use crate::config::load_config;
 use crate::cli_args::CliOverrides;
+use crate::config::load_config;
 use crate::mapping::map_config_to_command;
+use cs_backtest::{BacktestConfig, DataSourceConfig, EarningsSourceConfig, RunBacktestCommand};
 
 /// Builder for BacktestConfig from CLI args
 pub struct BacktestConfigBuilder {
@@ -79,13 +79,23 @@ impl BacktestConfigBuilder {
             // Build DataSourceConfig based on --data-source flag
             match args.data_source.to_lowercase().as_str() {
                 "ib" => {
-                    let ib_data_dir = args.ib_data_dir.clone()
-                        .or_else(|| std::env::var("IB_DATA_DIR").ok().map(std::path::PathBuf::from))
-                        .ok_or_else(|| anyhow::anyhow!(
-                            "IB data directory required when using --data-source ib. \
+                    let ib_data_dir = args
+                        .ib_data_dir
+                        .clone()
+                        .or_else(|| {
+                            std::env::var("IB_DATA_DIR")
+                                .ok()
+                                .map(std::path::PathBuf::from)
+                        })
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "IB data directory required when using --data-source ib. \
                              Set --ib-data-dir or IB_DATA_DIR environment variable."
-                        ))?;
-                    config.data_source = DataSourceConfig::Ib { data_dir: ib_data_dir };
+                            )
+                        })?;
+                    config.data_source = DataSourceConfig::Ib {
+                        data_dir: ib_data_dir,
+                    };
                 }
                 "finq" | _ => {
                     // Default to Finq - use global data_dir or FINQ_DATA_DIR
@@ -93,13 +103,20 @@ impl BacktestConfigBuilder {
                         global.data_dir.clone()
                     } else {
                         None
-                    }.or_else(|| std::env::var("FINQ_DATA_DIR").ok().map(std::path::PathBuf::from))
+                    }
+                    .or_else(|| {
+                        std::env::var("FINQ_DATA_DIR")
+                            .ok()
+                            .map(std::path::PathBuf::from)
+                    })
                     .unwrap_or_else(|| {
                         dirs::home_dir()
                             .unwrap_or_else(|| std::path::PathBuf::from("."))
                             .join("polygon/data")
                     });
-                    config.data_source = DataSourceConfig::Finq { data_dir: finq_data_dir };
+                    config.data_source = DataSourceConfig::Finq {
+                        data_dir: finq_data_dir,
+                    };
                 }
             }
         }
@@ -116,7 +133,9 @@ impl BacktestConfigBuilder {
             config.earnings_source = if let Some(ref earnings_file) = args.earnings_file {
                 EarningsSourceConfig::file(earnings_file.clone())
             } else {
-                let dir = args.earnings_dir.clone()
+                let dir = args
+                    .earnings_dir
+                    .clone()
                     .or_else(|| std::env::var("EARNINGS_DATA_DIR").ok().map(PathBuf::from))
                     .unwrap_or_else(|| {
                         dirs::home_dir()
@@ -161,9 +180,13 @@ impl BacktestConfigBuilder {
         }
 
         FileRulesConfig {
-            event: None,  // CLI doesn't override event rules
-            market: if market_rules.is_empty() { None } else { Some(market_rules) },
-            trade: None,  // CLI doesn't override trade rules
+            event: None, // CLI doesn't override event rules
+            market: if market_rules.is_empty() {
+                None
+            } else {
+                Some(market_rules)
+            },
+            trade: None, // CLI doesn't override trade rules
         }
     }
 
@@ -176,7 +199,7 @@ impl BacktestConfigBuilder {
     /// Build CliOverrides from BacktestArgs and GlobalArgs
     fn build_cli_overrides(&self) -> CliOverrides {
         use crate::cli_args::{
-            CliPaths, CliTiming, CliSelection, CliStrategy, CliHedging, CliAttribution, CliMetrics,
+            CliAttribution, CliHedging, CliMetrics, CliPaths, CliSelection, CliStrategy, CliTiming,
         };
         use crate::parsing::parse_time;
 
@@ -247,7 +270,8 @@ impl BacktestConfigBuilder {
                 || timing.exit_days_before.is_some()
                 || timing.entry_offset.is_some()
                 || timing.holding_days.is_some()
-                || timing.exit_days_after.is_some() {
+                || timing.exit_days_after.is_some()
+            {
                 overrides.timing = Some(timing);
             }
 

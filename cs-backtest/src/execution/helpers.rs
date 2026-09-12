@@ -2,9 +2,9 @@
 //!
 //! Extracts common patterns across different trade implementations to reduce boilerplate.
 
-use std::future::Future;
-use cs_domain::FailureReason;
 use super::types::ExecutionError;
+use cs_domain::FailureReason;
+use std::future::Future;
 
 /// Run a batch of async operations, either in parallel or sequentially.
 ///
@@ -24,11 +24,7 @@ use super::types::ExecutionError;
 ///
 /// # Returns
 /// Vector of results in the same order as input items
-pub async fn run_batch<'a, T: 'a, F, Fut, R>(
-    items: &'a [T],
-    parallel: bool,
-    f: F,
-) -> Vec<R>
+pub async fn run_batch<'a, T: 'a, F, Fut, R>(items: &'a [T], parallel: bool, f: F) -> Vec<R>
 where
     F: Fn(&'a T) -> Fut,
     Fut: Future<Output = R> + Send,

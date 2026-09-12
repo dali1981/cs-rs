@@ -94,7 +94,7 @@ impl SVIFitter {
             params = self.project_to_valid(params);
             if !params.is_valid() {
                 return Err(SVIError::ConstraintViolation(
-                    "Could not find valid parameters".into()
+                    "Could not find valid parameters".into(),
                 ));
             }
         }
@@ -128,7 +128,8 @@ impl SVIFitter {
         grad[1] = (self.compute_cost(data, &params_b) - f0) / eps;
 
         // Partial derivative w.r.t. rho
-        let params_rho = SVIParams::new(params.a, params.b, params.rho + eps, params.m, params.sigma);
+        let params_rho =
+            SVIParams::new(params.a, params.b, params.rho + eps, params.m, params.sigma);
         grad[2] = (self.compute_cost(data, &params_rho) - f0) / eps;
 
         // Partial derivative w.r.t. m
@@ -136,7 +137,8 @@ impl SVIFitter {
         grad[3] = (self.compute_cost(data, &params_m) - f0) / eps;
 
         // Partial derivative w.r.t. sigma
-        let params_sigma = SVIParams::new(params.a, params.b, params.rho, params.m, params.sigma + eps);
+        let params_sigma =
+            SVIParams::new(params.a, params.b, params.rho, params.m, params.sigma + eps);
         grad[4] = (self.compute_cost(data, &params_sigma) - f0) / eps;
 
         grad
@@ -158,9 +160,7 @@ impl SVIFitter {
         // Find ATM variance (closest to k=0)
         let atm_var = data
             .iter()
-            .min_by(|(k1, _), (k2, _)| {
-                k1.abs().partial_cmp(&k2.abs()).unwrap()
-            })
+            .min_by(|(k1, _), (k2, _)| k1.abs().partial_cmp(&k2.abs()).unwrap())
             .map(|(_, v)| *v)
             .unwrap_or(0.04);
 
@@ -169,8 +169,10 @@ impl SVIFitter {
         let right_wing: Vec<_> = data.iter().filter(|(k, _)| *k > 0.1).collect();
 
         let b_estimate = if !left_wing.is_empty() && !right_wing.is_empty() {
-            let left_avg: f64 = left_wing.iter().map(|(_, v)| v).sum::<f64>() / left_wing.len() as f64;
-            let right_avg: f64 = right_wing.iter().map(|(_, v)| v).sum::<f64>() / right_wing.len() as f64;
+            let left_avg: f64 =
+                left_wing.iter().map(|(_, v)| v).sum::<f64>() / left_wing.len() as f64;
+            let right_avg: f64 =
+                right_wing.iter().map(|(_, v)| v).sum::<f64>() / right_wing.len() as f64;
             ((left_avg - atm_var).abs() + (right_avg - atm_var).abs()) / 4.0
         } else {
             0.05
@@ -178,8 +180,10 @@ impl SVIFitter {
 
         // Estimate skew from asymmetry
         let rho_estimate: f64 = if !left_wing.is_empty() && !right_wing.is_empty() {
-            let left_avg: f64 = left_wing.iter().map(|(_, v)| v).sum::<f64>() / left_wing.len() as f64;
-            let right_avg: f64 = right_wing.iter().map(|(_, v)| v).sum::<f64>() / right_wing.len() as f64;
+            let left_avg: f64 =
+                left_wing.iter().map(|(_, v)| v).sum::<f64>() / left_wing.len() as f64;
+            let right_avg: f64 =
+                right_wing.iter().map(|(_, v)| v).sum::<f64>() / right_wing.len() as f64;
             if left_avg > right_avg {
                 -0.4 // Typical equity skew
             } else {
@@ -228,7 +232,11 @@ mod tests {
     use super::*;
     use approx::assert_relative_eq;
 
-    fn generate_svi_data(params: &SVIParams, k_range: (f64, f64), n_points: usize) -> Vec<(f64, f64)> {
+    fn generate_svi_data(
+        params: &SVIParams,
+        k_range: (f64, f64),
+        n_points: usize,
+    ) -> Vec<(f64, f64)> {
         let step = (k_range.1 - k_range.0) / (n_points - 1) as f64;
         (0..n_points)
             .map(|i| {
@@ -284,7 +292,10 @@ mod tests {
         let fitter = SVIFitter::new();
         let fitted = fitter.fit(&data).expect("Fitting should succeed");
 
-        assert!(fitted.is_valid(), "Fitted params should satisfy constraints");
+        assert!(
+            fitted.is_valid(),
+            "Fitted params should satisfy constraints"
+        );
     }
 
     #[test]

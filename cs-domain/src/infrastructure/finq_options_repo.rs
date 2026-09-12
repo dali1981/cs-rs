@@ -1,15 +1,15 @@
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use finq_core::Timeframe;
-use finq_flatfiles::{OptionBarReader, OptionBarRepository, FlatfileConfig};
+use finq_flatfiles::{FlatfileConfig, OptionBarReader, OptionBarRepository};
 use polars::prelude::*;
 use rust_decimal::Decimal;
 use std::path::PathBuf;
 
+use super::option_bar_conversions::dataframe_to_option_bars;
 use crate::datetime::{TradingDate, TradingTimestamp};
 use crate::repositories::{OptionsDataRepository, RepositoryError};
 use crate::value_objects::{OptionBar, Strike};
-use super::option_bar_conversions::dataframe_to_option_bars;
 
 pub struct FinqOptionsRepository {
     repository: OptionBarRepository,
@@ -31,13 +31,16 @@ impl OptionsDataRepository for FinqOptionsRepository {
         underlying: &str,
         date: NaiveDate,
     ) -> Result<Vec<OptionBar>, RepositoryError> {
-        let df = self.repository
+        let df = self
+            .repository
             .get_chain_bars(underlying, date)
             .await
-            .map_err(|e| RepositoryError::NotFound(format!(
-                "Failed to load option bars for {} on {}: {}",
-                underlying, date, e
-            )))?;
+            .map_err(|e| {
+                RepositoryError::NotFound(format!(
+                    "Failed to load option bars for {} on {}: {}",
+                    underlying, date, e
+                ))
+            })?;
         dataframe_to_option_bars(&df)
     }
 
@@ -46,13 +49,16 @@ impl OptionsDataRepository for FinqOptionsRepository {
         underlying: &str,
         date: NaiveDate,
     ) -> Result<Vec<OptionBar>, RepositoryError> {
-        let df = self.repository
+        let df = self
+            .repository
             .get_bars(underlying, Timeframe::MINUTE, date, date)
             .await
-            .map_err(|e| RepositoryError::NotFound(format!(
-                "Failed to load minute option bars for {} on {}: {}",
-                underlying, date, e
-            )))?;
+            .map_err(|e| {
+                RepositoryError::NotFound(format!(
+                    "Failed to load minute option bars for {} on {}: {}",
+                    underlying, date, e
+                ))
+            })?;
         dataframe_to_option_bars(&df)
     }
 
@@ -63,13 +69,16 @@ impl OptionsDataRepository for FinqOptionsRepository {
     ) -> Result<Vec<OptionBar>, RepositoryError> {
         let date = target_time.date_naive();
 
-        let df = self.repository
+        let df = self
+            .repository
             .get_bars(underlying, Timeframe::MINUTE, date, date)
             .await
-            .map_err(|e| RepositoryError::NotFound(format!(
-                "Failed to load minute option bars for {} on {}: {}",
-                underlying, date, e
-            )))?;
+            .map_err(|e| {
+                RepositoryError::NotFound(format!(
+                    "Failed to load minute option bars for {} on {}: {}",
+                    underlying, date, e
+                ))
+            })?;
 
         if df.is_empty() {
             return Err(RepositoryError::NotFound(format!(
@@ -86,7 +95,7 @@ impl OptionsDataRepository for FinqOptionsRepository {
             .sort(
                 ["strike", "expiration", "option_type", "timestamp"],
                 SortMultipleOptions::default()
-                    .with_order_descending_multi(vec![false, false, false, true])
+                    .with_order_descending_multi(vec![false, false, false, true]),
             )
             .group_by([col("strike"), col("expiration"), col("option_type")])
             .agg([
@@ -114,13 +123,16 @@ impl OptionsDataRepository for FinqOptionsRepository {
     ) -> Result<(Vec<OptionBar>, DateTime<Utc>), RepositoryError> {
         let date = target_time.date_naive();
 
-        let df = self.repository
+        let df = self
+            .repository
             .get_bars(underlying, Timeframe::MINUTE, date, date)
             .await
-            .map_err(|e| RepositoryError::NotFound(format!(
-                "Failed to load minute option bars for {} on {}: {}",
-                underlying, date, e
-            )))?;
+            .map_err(|e| {
+                RepositoryError::NotFound(format!(
+                    "Failed to load minute option bars for {} on {}: {}",
+                    underlying, date, e
+                ))
+            })?;
 
         if df.is_empty() {
             return Err(RepositoryError::NotFound(format!(
@@ -138,7 +150,7 @@ impl OptionsDataRepository for FinqOptionsRepository {
             .sort(
                 ["strike", "expiration", "option_type", "timestamp"],
                 SortMultipleOptions::default()
-                    .with_order_descending_multi(vec![false, false, false, true])
+                    .with_order_descending_multi(vec![false, false, false, true]),
             )
             .group_by([col("strike"), col("expiration"), col("option_type")])
             .agg([
@@ -158,13 +170,14 @@ impl OptionsDataRepository for FinqOptionsRepository {
         let forward = df
             .lazy()
             .filter(
-                col("timestamp").gt(lit(target_nanos))
-                    .and(col("timestamp").lt_eq(lit(max_forward_nanos)))
+                col("timestamp")
+                    .gt(lit(target_nanos))
+                    .and(col("timestamp").lt_eq(lit(max_forward_nanos))),
             )
             .sort(
                 ["strike", "expiration", "option_type", "timestamp"],
                 SortMultipleOptions::default()
-                    .with_order_descending_multi(vec![false, false, false, false])
+                    .with_order_descending_multi(vec![false, false, false, false]),
             )
             .group_by([col("strike"), col("expiration"), col("option_type")])
             .agg([
@@ -202,7 +215,8 @@ impl OptionsDataRepository for FinqOptionsRepository {
         as_of_date: NaiveDate,
     ) -> Result<Vec<NaiveDate>, RepositoryError> {
         let bars = self.get_option_bars(underlying, as_of_date).await?;
-        let mut result: Vec<NaiveDate> = bars.iter()
+        let mut result: Vec<NaiveDate> = bars
+            .iter()
             .map(|b| b.expiration)
             .filter(|&exp| exp > as_of_date)
             .collect::<std::collections::HashSet<_>>()
@@ -219,10 +233,13 @@ impl OptionsDataRepository for FinqOptionsRepository {
         as_of_date: NaiveDate,
     ) -> Result<Vec<Strike>, RepositoryError> {
         let bars = self.get_option_bars(underlying, as_of_date).await?;
-        let mut result: Vec<Strike> = bars.iter()
+        let mut result: Vec<Strike> = bars
+            .iter()
             .filter(|b| b.expiration == expiration)
             .filter_map(|b| {
-                Decimal::try_from(b.strike).ok().and_then(|d| Strike::new(d).ok())
+                Decimal::try_from(b.strike)
+                    .ok()
+                    .and_then(|d| Strike::new(d).ok())
             })
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
@@ -240,7 +257,7 @@ mod tests {
     #[ignore] // Requires actual finq data
     async fn test_finq_options_repository_get_bars() {
         let repo = FinqOptionsRepository::new(PathBuf::from(
-            std::env::var("FINQ_DATA_DIR").unwrap_or_else(|_| "~/finq_data".to_string())
+            std::env::var("FINQ_DATA_DIR").unwrap_or_else(|_| "~/finq_data".to_string()),
         ));
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 2).unwrap();
@@ -256,7 +273,7 @@ mod tests {
     #[ignore] // Requires actual finq data
     async fn test_finq_options_repository_get_expirations() {
         let repo = FinqOptionsRepository::new(PathBuf::from(
-            std::env::var("FINQ_DATA_DIR").unwrap_or_else(|_| "~/finq_data".to_string())
+            std::env::var("FINQ_DATA_DIR").unwrap_or_else(|_| "~/finq_data".to_string()),
         ));
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 2).unwrap();

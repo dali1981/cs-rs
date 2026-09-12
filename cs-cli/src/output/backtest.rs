@@ -1,13 +1,15 @@
 //! Backtest output handling (display and save results)
 
 use anyhow::Result;
-use std::path::PathBuf;
 use console::style;
+use std::path::PathBuf;
 use tabled::{Table, Tabled};
 
-use cs_backtest::{BacktestResult, TradeResultMethods, UnifiedBacktestResult};
 use cs_backtest::bpr::{build_portfolio_bpr_timeline, HasBprTimeline};
-use cs_domain::{TradeResult as TradeResultTrait, HasAccounting, HasTradingCost, ToPnlRecord, ReturnBasis};
+use cs_backtest::{BacktestResult, TradeResultMethods, UnifiedBacktestResult};
+use cs_domain::{
+    HasAccounting, HasTradingCost, ReturnBasis, ToPnlRecord, TradeResult as TradeResultTrait,
+};
 use rust_decimal::Decimal;
 
 use crate::display::ResultRow;
@@ -64,12 +66,30 @@ impl BacktestOutputHandler {
 
         let has_hedging = result.has_hedging();
         let mut rows = vec![
-            ResultRow { metric: "Sessions Processed".into(), value: result.sessions_processed.to_string() },
-            ResultRow { metric: "Total Opportunities".into(), value: result.total_opportunities.to_string() },
-            ResultRow { metric: "Trades Entered".into(), value: result.total_entries.to_string() },
-            ResultRow { metric: "Trades Dropped".into(), value: result.dropped_events.len().to_string() },
-            ResultRow { metric: "".into(), value: "".into() },
-            ResultRow { metric: "Win Rate".into(), value: format!("{:.2}%", win_rate) },
+            ResultRow {
+                metric: "Sessions Processed".into(),
+                value: result.sessions_processed.to_string(),
+            },
+            ResultRow {
+                metric: "Total Opportunities".into(),
+                value: result.total_opportunities.to_string(),
+            },
+            ResultRow {
+                metric: "Trades Entered".into(),
+                value: result.total_entries.to_string(),
+            },
+            ResultRow {
+                metric: "Trades Dropped".into(),
+                value: result.dropped_events.len().to_string(),
+            },
+            ResultRow {
+                metric: "".into(),
+                value: "".into(),
+            },
+            ResultRow {
+                metric: "Win Rate".into(),
+                value: format!("{:.2}%", win_rate),
+            },
         ];
 
         // Add P&L rows - show both option-only and hedged if hedging is enabled
@@ -77,40 +97,80 @@ impl BacktestOutputHandler {
             let hedge_pnl = result.total_hedge_pnl();
             let total_with_hedge = result.total_pnl_with_hedge();
             rows.extend(vec![
-                ResultRow { metric: "Option P&L".into(), value: format!("${:.2}", total_pnl) },
-                ResultRow { metric: "Hedge P&L".into(), value: format!("${:.2}", hedge_pnl) },
-                ResultRow { metric: "Total P&L (with hedge)".into(), value: format!("${:.2}", total_with_hedge) },
+                ResultRow {
+                    metric: "Option P&L".into(),
+                    value: format!("${:.2}", total_pnl),
+                },
+                ResultRow {
+                    metric: "Hedge P&L".into(),
+                    value: format!("${:.2}", hedge_pnl),
+                },
+                ResultRow {
+                    metric: "Total P&L (with hedge)".into(),
+                    value: format!("${:.2}", total_with_hedge),
+                },
                 ResultRow {
                     metric: "Avg P&L per Trade".into(),
                     value: if result.successful_trades() > 0 {
-                        format!("${:.2}", total_with_hedge / rust_decimal::Decimal::from(result.successful_trades()))
+                        format!(
+                            "${:.2}",
+                            total_with_hedge
+                                / rust_decimal::Decimal::from(result.successful_trades())
+                        )
                     } else {
                         "$0.00".into()
-                    }
+                    },
                 },
             ]);
         } else {
             rows.extend(vec![
-                ResultRow { metric: "Total P&L".into(), value: format!("${:.2}", total_pnl) },
+                ResultRow {
+                    metric: "Total P&L".into(),
+                    value: format!("${:.2}", total_pnl),
+                },
                 ResultRow {
                     metric: "Avg P&L per Trade".into(),
                     value: if result.successful_trades() > 0 {
-                        format!("${:.2}", total_pnl / rust_decimal::Decimal::from(result.successful_trades()))
+                        format!(
+                            "${:.2}",
+                            total_pnl / rust_decimal::Decimal::from(result.successful_trades())
+                        )
                     } else {
                         "$0.00".into()
-                    }
+                    },
                 },
             ]);
         }
 
         rows.extend(vec![
-            ResultRow { metric: "".into(), value: "".into() },
-            ResultRow { metric: "Mean Return (simple)".into(), value: format!("{:.2}%", mean_return) },
-            ResultRow { metric: "Std Dev".into(), value: format!("{:.2}%", std_return) },
-            ResultRow { metric: "Sharpe Ratio (simple)".into(), value: format!("{:.2}", sharpe) },
-            ResultRow { metric: "".into(), value: "".into() },
-            ResultRow { metric: "Avg Winner".into(), value: format!("${:.2} ({:.2}%)", avg_winner, avg_winner_pct) },
-            ResultRow { metric: "Avg Loser".into(), value: format!("${:.2} ({:.2}%)", avg_loser, avg_loser_pct) },
+            ResultRow {
+                metric: "".into(),
+                value: "".into(),
+            },
+            ResultRow {
+                metric: "Mean Return (simple)".into(),
+                value: format!("{:.2}%", mean_return),
+            },
+            ResultRow {
+                metric: "Std Dev".into(),
+                value: format!("{:.2}%", std_return),
+            },
+            ResultRow {
+                metric: "Sharpe Ratio (simple)".into(),
+                value: format!("{:.2}", sharpe),
+            },
+            ResultRow {
+                metric: "".into(),
+                value: "".into(),
+            },
+            ResultRow {
+                metric: "Avg Winner".into(),
+                value: format!("${:.2} ({:.2}%)", avg_winner, avg_winner_pct),
+            },
+            ResultRow {
+                metric: "Avg Loser".into(),
+                value: format!("${:.2} ({:.2}%)", avg_loser, avg_loser_pct),
+            },
         ]);
 
         let table = Table::new(rows);
@@ -123,7 +183,6 @@ impl BacktestOutputHandler {
     where
         R: TradeResultTrait + TradeResultMethods + HasAccounting + HasBprTimeline,
     {
-
         println!("{}", style("Basis Metrics:").bold().cyan());
 
         let profit_factor = result.profit_factor();
@@ -246,7 +305,11 @@ impl BacktestOutputHandler {
 
         // Warning for hedge cost problems
         if stats.has_hedge_cost_problem() {
-            println!("{}", style("⚠️  Warning: High hedge costs may be destroying edge (>30% of premium)").yellow());
+            println!(
+                "{}",
+                style("⚠️  Warning: High hedge costs may be destroying edge (>30% of premium)")
+                    .yellow()
+            );
         }
 
         println!();
@@ -325,7 +388,8 @@ impl BacktestOutputHandler {
         if !result.results.is_empty() {
             println!("{}", style("Sample Trades:").bold());
             for (i, trade) in result.results.iter().take(5).enumerate() {
-                println!("  {}. {} | P&L: ${:.2} ({:.2}%)",
+                println!(
+                    "  {}. {} | P&L: ${:.2} ({:.2}%)",
                     i + 1,
                     TradeResultTrait::symbol(trade),
                     TradeResultMethods::pnl(trade),
@@ -352,12 +416,21 @@ impl BacktestOutputHandler {
         let use_maintenance = result.margin_config.use_maintenance;
         let basis_label = if use_maintenance { "maint" } else { "initial" };
         let (portfolio_max, portfolio_avg) = if use_maintenance {
-            (portfolio.summary.max_total_maint, portfolio.summary.avg_total_maint)
+            (
+                portfolio.summary.max_total_maint,
+                portfolio.summary.avg_total_maint,
+            )
         } else {
-            (portfolio.summary.max_total_initial, portfolio.summary.avg_total_initial)
+            (
+                portfolio.summary.max_total_initial,
+                portfolio.summary.avg_total_initial,
+            )
         };
         let (max_option_bpr, max_hedge_bpr) = if use_maintenance {
-            (portfolio.summary.max_option_maint, portfolio.summary.max_hedge_maint)
+            (
+                portfolio.summary.max_option_maint,
+                portfolio.summary.max_hedge_maint,
+            )
         } else {
             let mut max_option = Decimal::ZERO;
             let mut max_hedge = Decimal::ZERO;
@@ -375,7 +448,9 @@ impl BacktestOutputHandler {
         let mut trade_rocs = Vec::new();
         let mut covered = 0usize;
         for trade in &result.results {
-            let Some(timeline) = trade.bpr_timeline() else { continue };
+            let Some(timeline) = trade.bpr_timeline() else {
+                continue;
+            };
             covered += 1;
             let denom = if use_maintenance {
                 timeline.summary.max_total_maint
@@ -405,7 +480,11 @@ impl BacktestOutputHandler {
             .sum::<f64>()
             / trade_rocs.len() as f64;
         let std_roc = variance.sqrt();
-        let sharpe = if std_roc > 0.0 { mean_roc / std_roc } else { 0.0 };
+        let sharpe = if std_roc > 0.0 {
+            mean_roc / std_roc
+        } else {
+            0.0
+        };
 
         let total_pnl = if result.has_hedging() {
             result.total_pnl_with_hedge()
@@ -418,7 +497,10 @@ impl BacktestOutputHandler {
             (total_pnl / portfolio_max).to_f64().unwrap_or(0.0)
         };
 
-        println!("{}", style("Margin & Buying Power (IBKR-like):").bold().magenta());
+        println!(
+            "{}",
+            style("Margin & Buying Power (IBKR-like):").bold().magenta()
+        );
 
         let rows = vec![
             ResultRow {
@@ -477,9 +559,13 @@ impl BacktestOutputHandler {
             println!("{}", style("Dropped Events:").bold().yellow());
 
             // Group by reason for summary
-            let mut reason_groups: std::collections::HashMap<String, Vec<_>> = std::collections::HashMap::new();
+            let mut reason_groups: std::collections::HashMap<String, Vec<_>> =
+                std::collections::HashMap::new();
             for event in &result.dropped_events {
-                reason_groups.entry(event.reason.clone()).or_insert_with(Vec::new).push(event);
+                reason_groups
+                    .entry(event.reason.clone())
+                    .or_insert_with(Vec::new)
+                    .push(event);
             }
 
             for (reason, events) in reason_groups.iter() {
@@ -498,12 +584,12 @@ impl BacktestOutputHandler {
 
         // Create parent directory if needed
         if let Some(parent) = output.parent() {
-            std::fs::create_dir_all(parent)
-                .context("Failed to create output directory")?;
+            std::fs::create_dir_all(parent).context("Failed to create output directory")?;
         }
 
         // Detect output format based on extension
-        let is_json = output.extension()
+        let is_json = output
+            .extension()
             .and_then(|ext| ext.to_str())
             .map(|ext| ext.eq_ignore_ascii_case("json"))
             .unwrap_or(false);
@@ -511,9 +597,15 @@ impl BacktestOutputHandler {
         let bpr_portfolio = build_portfolio_bpr_timeline(&result.results).map(|timeline| {
             let use_maintenance = result.margin_config.use_maintenance;
             let (max_basis, avg_basis) = if use_maintenance {
-                (timeline.summary.max_total_maint, timeline.summary.avg_total_maint)
+                (
+                    timeline.summary.max_total_maint,
+                    timeline.summary.avg_total_maint,
+                )
             } else {
-                (timeline.summary.max_total_initial, timeline.summary.avg_total_initial)
+                (
+                    timeline.summary.max_total_initial,
+                    timeline.summary.avg_total_initial,
+                )
             };
             BprPortfolioOutput {
                 summary: timeline.summary,
@@ -532,16 +624,20 @@ impl BacktestOutputHandler {
             // Save results as JSON
             let json_content = serde_json::to_string_pretty(&payload)
                 .context("Failed to serialize results to JSON")?;
-            std::fs::write(output, json_content)
-                .context("Failed to write JSON file")?;
-            println!("{}", style(format!("Results saved to {:?}", output)).green());
+            std::fs::write(output, json_content).context("Failed to write JSON file")?;
+            println!(
+                "{}",
+                style(format!("Results saved to {:?}", output)).green()
+            );
         } else {
             // Default to JSON if no extension
             let json_content = serde_json::to_string_pretty(&payload)
                 .context("Failed to serialize results to JSON")?;
-            std::fs::write(output, json_content)
-                .context("Failed to write JSON file")?;
-            println!("{}", style(format!("Results saved to {:?} (JSON format)", output)).green());
+            std::fs::write(output, json_content).context("Failed to write JSON file")?;
+            println!(
+                "{}",
+                style(format!("Results saved to {:?} (JSON format)", output)).green()
+            );
         }
 
         Ok(())
@@ -652,7 +748,9 @@ where
     };
 
     let weighted_return = {
-        let weighted_sum: f64 = result.results.iter()
+        let weighted_sum: f64 = result
+            .results
+            .iter()
             .filter_map(|trade| {
                 let basis_value = basis_value_for_trade(trade)?;
                 if basis_value.is_zero() {
@@ -686,9 +784,11 @@ where
     let std_return = if returns.len() < 2 {
         0.0
     } else {
-        let variance = returns.iter()
+        let variance = returns
+            .iter()
             .map(|r| (r - mean_return).powi(2))
-            .sum::<f64>() / (returns.len() - 1) as f64;
+            .sum::<f64>()
+            / (returns.len() - 1) as f64;
         variance.sqrt()
     };
 

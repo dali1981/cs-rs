@@ -182,9 +182,7 @@ impl DeltaVolSurface {
     pub fn term_structure(&self, delta: f64) -> Vec<(NaiveDate, f64)> {
         self.slices
             .iter()
-            .filter_map(|(exp, slice)| {
-                slice.get_iv(delta).map(|iv| (*exp, iv))
-            })
+            .filter_map(|(exp, slice)| slice.get_iv(delta).map(|iv| (*exp, iv)))
             .collect()
     }
 
@@ -197,12 +195,7 @@ impl DeltaVolSurface {
     }
 
     /// Map delta to strike at given expiration
-    pub fn delta_to_strike(
-        &self,
-        delta: f64,
-        expiration: NaiveDate,
-        is_call: bool,
-    ) -> Option<f64> {
+    pub fn delta_to_strike(&self, delta: f64, expiration: NaiveDate, is_call: bool) -> Option<f64> {
         // Get IV at this delta
         let iv = self.get_iv(delta, expiration)?;
         let tte = self.tte(expiration)?;
@@ -261,12 +254,11 @@ mod tests {
         let exp1 = base_date + chrono::Duration::days(30);
         let tte1 = 30.0 / 365.0;
         let slice1 = VolSlice::from_delta_iv_pairs(
-            vec![
-                (0.25, 0.35),
-                (0.50, 0.30),
-                (0.75, 0.28),
-            ],
-            spot, tte1, rfr, exp1,
+            vec![(0.25, 0.35), (0.50, 0.30), (0.75, 0.28)],
+            spot,
+            tte1,
+            rfr,
+            exp1,
         );
         surface.add_slice(slice1);
 
@@ -274,12 +266,11 @@ mod tests {
         let exp2 = base_date + chrono::Duration::days(60);
         let tte2 = 60.0 / 365.0;
         let slice2 = VolSlice::from_delta_iv_pairs(
-            vec![
-                (0.25, 0.32),
-                (0.50, 0.28),
-                (0.75, 0.26),
-            ],
-            spot, tte2, rfr, exp2,
+            vec![(0.25, 0.32), (0.50, 0.28), (0.75, 0.26)],
+            spot,
+            tte2,
+            rfr,
+            exp2,
         );
         surface.add_slice(slice2);
 
@@ -312,12 +303,7 @@ mod tests {
             },
         ];
 
-        let iv_surface = IVSurface::new(
-            points,
-            "TEST".to_string(),
-            now,
-            Decimal::new(100, 0),
-        );
+        let iv_surface = IVSurface::new(points, "TEST".to_string(), now, Decimal::new(100, 0));
 
         let delta_surface = DeltaVolSurface::from_iv_surface(&iv_surface, 0.05);
 
@@ -353,7 +339,11 @@ mod tests {
 
         // Should be between 30-day IV (0.30) and 60-day IV (0.28)
         let iv = iv.unwrap();
-        assert!(iv > 0.28 && iv < 0.30, "IV {} should be between 0.28 and 0.30", iv);
+        assert!(
+            iv > 0.28 && iv < 0.30,
+            "IV {} should be between 0.28 and 0.30",
+            iv
+        );
     }
 
     #[test]
@@ -390,8 +380,11 @@ mod tests {
 
         // 50 delta strike should be near spot
         let strike = strike.unwrap();
-        assert!((strike - 100.0).abs() < 10.0,
-                "50 delta strike {} should be near spot 100.0", strike);
+        assert!(
+            (strike - 100.0).abs() < 10.0,
+            "50 delta strike {} should be near spot 100.0",
+            strike
+        );
     }
 
     #[test]
@@ -405,7 +398,10 @@ mod tests {
         assert!(fwd_var.is_some());
 
         // Forward variance should be positive (no calendar arbitrage in test data)
-        assert!(fwd_var.unwrap() >= 0.0, "Forward variance should be non-negative");
+        assert!(
+            fwd_var.unwrap() >= 0.0,
+            "Forward variance should be non-negative"
+        );
     }
 
     #[test]

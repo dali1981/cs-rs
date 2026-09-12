@@ -32,10 +32,10 @@ pub struct MarginCalculator {
 impl Default for MarginCalculator {
     fn default() -> Self {
         Self {
-            stock_margin_long: dec!(0.50),   // 50% for Reg-T long
-            stock_margin_short: dec!(1.50),  // 150% for Reg-T short
+            stock_margin_long: dec!(0.50),  // 50% for Reg-T long
+            stock_margin_short: dec!(1.50), // 150% for Reg-T short
             use_portfolio_margin: false,
-            min_option_margin: dec!(50),     // $50 minimum per contract
+            min_option_margin: dec!(50), // $50 minimum per contract
         }
     }
 }
@@ -44,8 +44,8 @@ impl MarginCalculator {
     /// Create a calculator with full cash (no margin)
     pub fn cash() -> Self {
         Self {
-            stock_margin_long: dec!(1.0),    // 100% for cash
-            stock_margin_short: dec!(1.0),   // Not allowed, but 100% if it were
+            stock_margin_long: dec!(1.0),  // 100% for cash
+            stock_margin_short: dec!(1.0), // Not allowed, but 100% if it were
             use_portfolio_margin: false,
             min_option_margin: dec!(50),
         }
@@ -59,8 +59,8 @@ impl MarginCalculator {
     /// Create a calculator with portfolio margin
     pub fn portfolio_margin() -> Self {
         Self {
-            stock_margin_long: dec!(0.15),   // ~15% for PM
-            stock_margin_short: dec!(0.30),  // ~30% for PM
+            stock_margin_long: dec!(0.15),  // ~15% for PM
+            stock_margin_short: dec!(0.30), // ~30% for PM
             use_portfolio_margin: true,
             min_option_margin: dec!(25),
         }
@@ -167,18 +167,10 @@ impl MarginCalculator {
         underlying_price: Decimal,
         strike: Decimal,
     ) -> Decimal {
-        let call_margin = self.naked_short_equity_margin(
-            call_premium,
-            underlying_price,
-            strike,
-            true,
-        );
-        let put_margin = self.naked_short_equity_margin(
-            put_premium,
-            underlying_price,
-            strike,
-            false,
-        );
+        let call_margin =
+            self.naked_short_equity_margin(call_premium, underlying_price, strike, true);
+        let put_margin =
+            self.naked_short_equity_margin(put_premium, underlying_price, strike, false);
 
         // Greater of (call margin + put premium) or (put margin + call premium)
         (call_margin + put_premium).max(put_margin + call_premium)
@@ -188,11 +180,7 @@ impl MarginCalculator {
     ///
     /// Requirement: Width of the wider wing - net credit
     /// Iron butterfly is a defined-risk strategy
-    pub fn iron_butterfly_margin(
-        &self,
-        net_credit: Decimal,
-        wing_width: Decimal,
-    ) -> Decimal {
+    pub fn iron_butterfly_margin(&self, net_credit: Decimal, wing_width: Decimal) -> Decimal {
         // Max loss = wing width - credit
         (wing_width - net_credit).max(Decimal::ZERO)
     }
@@ -263,23 +251,13 @@ mod tests {
         // Standard = $5 + (0.20 * $100) - $0 = $25
         // Minimum = (0.10 * $100) + $5 = $15
         // Result = max($25, $15) = $25
-        let margin = calc.naked_short_equity_margin(
-            dec!(5),
-            dec!(100),
-            dec!(100),
-            true,
-        );
+        let margin = calc.naked_short_equity_margin(dec!(5), dec!(100), dec!(100), true);
         assert_eq!(margin, dec!(25));
 
         // OTM call: $2 premium, $100 stock, $110 strike (10 OTM)
         // Standard = $2 + $20 - $10 = $12
         // Minimum = $10 + $2 = $12
-        let margin = calc.naked_short_equity_margin(
-            dec!(2),
-            dec!(100),
-            dec!(110),
-            true,
-        );
+        let margin = calc.naked_short_equity_margin(dec!(2), dec!(100), dec!(110), true);
         assert_eq!(margin, dec!(12));
     }
 
@@ -292,7 +270,10 @@ mod tests {
 
         // Credit spread: receive $1.50, max loss $5.00
         // Margin = $5.00 - $1.50 = $3.50
-        assert_eq!(calc.credit_spread_margin(dec!(1.50), dec!(5.00)), dec!(3.50));
+        assert_eq!(
+            calc.credit_spread_margin(dec!(1.50), dec!(5.00)),
+            dec!(3.50)
+        );
     }
 
     #[test]
@@ -301,7 +282,10 @@ mod tests {
 
         // Iron butterfly: $2.00 credit, $5.00 wing width
         // Margin = $5.00 - $2.00 = $3.00
-        assert_eq!(calc.iron_butterfly_margin(dec!(2.00), dec!(5.00)), dec!(3.00));
+        assert_eq!(
+            calc.iron_butterfly_margin(dec!(2.00), dec!(5.00)),
+            dec!(3.00)
+        );
     }
 
     #[test]

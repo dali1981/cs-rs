@@ -3,14 +3,14 @@
 //! Recomputes HV at each rehedge from recent underlying price history,
 //! then uses that HV to compute delta via Black-Scholes.
 
+use super::common::compute_position_delta_uniform_vol;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use std::sync::Arc;
 use cs_analytics::realized_volatility;
 use cs_domain::hedging::DeltaProvider;
 use cs_domain::repositories::EquityDataRepository;
 use cs_domain::trade::CompositeTrade;
-use super::common::compute_position_delta_uniform_vol;
+use std::sync::Arc;
 
 /// Recompute HV at each rehedge from recent underlying prices
 ///
@@ -56,7 +56,8 @@ impl<T: CompositeTrade> CurrentHVProvider<T> {
     async fn compute_hv(&self, at_time: DateTime<Utc>) -> Result<f64, String> {
         let end_date = at_time.date_naive();
 
-        let bars = self.equity_repo
+        let bars = self
+            .equity_repo
             .get_bars(&self.symbol, end_date)
             .await
             .map_err(|e| format!("Failed to get bars: {}", e))?;

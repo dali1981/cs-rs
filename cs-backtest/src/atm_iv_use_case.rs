@@ -6,10 +6,7 @@ use chrono::NaiveDate;
 use polars::prelude::*;
 use std::path::PathBuf;
 
-use cs_analytics::{
-    AtmIvComputer, AtmMethod, BSConfig, OptionPoint,
-    ConstantMaturityInterpolator,
-};
+use cs_analytics::{AtmIvComputer, AtmMethod, BSConfig, ConstantMaturityInterpolator, OptionPoint};
 use cs_domain::{
     repositories::{EquityDataRepository, OptionsDataRepository},
     value_objects::{AtmIvConfig, AtmIvObservation, CallPut, IvInterpolationMethod, OptionBar},
@@ -106,12 +103,12 @@ where
             }
 
             // Move to next day
-            current_date = current_date
-                .succ_opt()
-                .ok_or_else(|| IvTimeSeriesError::IoError(std::io::Error::new(
+            current_date = current_date.succ_opt().ok_or_else(|| {
+                IvTimeSeriesError::IoError(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "Date overflow",
-                )))?;
+                ))
+            })?;
         }
 
         Ok(IvTimeSeriesResult {
@@ -213,7 +210,14 @@ where
         }
 
         // Compute nearest expiration IV (always rolling)
-        self.compute_nearest_iv(&mut obs, &options, spot_price.to_f64(), pricing_time, atm_method, config)?;
+        self.compute_nearest_iv(
+            &mut obs,
+            &options,
+            spot_price.to_f64(),
+            pricing_time,
+            atm_method,
+            config,
+        )?;
 
         // Calculate all spreads
         obs.calculate_spreads();
@@ -339,7 +343,10 @@ where
     }
 
     /// Convert option chain slice to vector of OptionPoints
-    fn option_bars_to_points(&self, chain: &[OptionBar]) -> Result<Vec<OptionPoint>, IvTimeSeriesError> {
+    fn option_bars_to_points(
+        &self,
+        chain: &[OptionBar],
+    ) -> Result<Vec<OptionPoint>, IvTimeSeriesError> {
         let options: Vec<OptionPoint> = chain
             .iter()
             .filter_map(|bar| {
@@ -366,27 +373,48 @@ where
         output_path: &PathBuf,
     ) -> Result<(), IvTimeSeriesError> {
         // Build DataFrame from observations
-        let symbols: Vec<String> = result.observations.iter().map(|o| o.symbol.clone()).collect();
+        let symbols: Vec<String> = result
+            .observations
+            .iter()
+            .map(|o| o.symbol.clone())
+            .collect();
         let dates: Vec<i32> = result
             .observations
             .iter()
             .map(|o| {
                 // Convert NaiveDate to days since Unix epoch
-                o.date.signed_duration_since(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()).num_days() as i32
+                o.date
+                    .signed_duration_since(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
+                    .num_days() as i32
             })
             .collect();
-        let spots: Vec<f64> = result.observations.iter().map(|o| o.spot.to_string().parse::<f64>().unwrap_or(0.0)).collect();
+        let spots: Vec<f64> = result
+            .observations
+            .iter()
+            .map(|o| o.spot.to_string().parse::<f64>().unwrap_or(0.0))
+            .collect();
 
         // Rolling TTE fields (existing)
-        let iv_nearest: Vec<Option<f64>> = result.observations.iter().map(|o| o.atm_iv_nearest).collect();
-        let nearest_dte: Vec<Option<i64>> = result.observations.iter().map(|o| o.nearest_dte).collect();
+        let iv_nearest: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.atm_iv_nearest)
+            .collect();
+        let nearest_dte: Vec<Option<i64>> =
+            result.observations.iter().map(|o| o.nearest_dte).collect();
         let iv_30d: Vec<Option<f64>> = result.observations.iter().map(|o| o.atm_iv_30d).collect();
         let iv_60d: Vec<Option<f64>> = result.observations.iter().map(|o| o.atm_iv_60d).collect();
         let iv_90d: Vec<Option<f64>> = result.observations.iter().map(|o| o.atm_iv_90d).collect();
-        let spread_30_60: Vec<Option<f64>> =
-            result.observations.iter().map(|o| o.term_spread_30_60).collect();
-        let spread_30_90: Vec<Option<f64>> =
-            result.observations.iter().map(|o| o.term_spread_30_90).collect();
+        let spread_30_60: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.term_spread_30_60)
+            .collect();
+        let spread_30_90: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.term_spread_30_90)
+            .collect();
 
         // Constant-Maturity fields (new)
         let cm_iv_7d: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_iv_7d).collect();
@@ -395,11 +423,31 @@ where
         let cm_iv_30d: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_iv_30d).collect();
         let cm_iv_60d: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_iv_60d).collect();
         let cm_iv_90d: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_iv_90d).collect();
-        let cm_interpolated: Vec<Option<bool>> = result.observations.iter().map(|o| o.cm_interpolated).collect();
-        let cm_num_expirations: Vec<Option<u32>> = result.observations.iter().map(|o| o.cm_num_expirations.map(|n| n as u32)).collect();
-        let cm_spread_7_30: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_spread_7_30).collect();
-        let cm_spread_30_60: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_spread_30_60).collect();
-        let cm_spread_30_90: Vec<Option<f64>> = result.observations.iter().map(|o| o.cm_spread_30_90).collect();
+        let cm_interpolated: Vec<Option<bool>> = result
+            .observations
+            .iter()
+            .map(|o| o.cm_interpolated)
+            .collect();
+        let cm_num_expirations: Vec<Option<u32>> = result
+            .observations
+            .iter()
+            .map(|o| o.cm_num_expirations.map(|n| n as u32))
+            .collect();
+        let cm_spread_7_30: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.cm_spread_7_30)
+            .collect();
+        let cm_spread_30_60: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.cm_spread_30_60)
+            .collect();
+        let cm_spread_30_90: Vec<Option<f64>> = result
+            .observations
+            .iter()
+            .map(|o| o.cm_spread_30_90)
+            .collect();
 
         let df = DataFrame::new(vec![
             Series::new("symbol", symbols),
@@ -497,7 +545,8 @@ mod tests {
             _symbol: &str,
             _time: chrono::DateTime<chrono::Utc>,
             _max_forward_minutes: u32,
-        ) -> Result<(Vec<cs_domain::OptionBar>, chrono::DateTime<chrono::Utc>), RepositoryError> {
+        ) -> Result<(Vec<cs_domain::OptionBar>, chrono::DateTime<chrono::Utc>), RepositoryError>
+        {
             Err(RepositoryError::NotFound("mock".to_string()))
         }
 

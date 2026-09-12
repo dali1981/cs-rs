@@ -1,4 +1,4 @@
-use chrono::{NaiveDate, Weekday, Datelike};
+use chrono::{Datelike, NaiveDate, Weekday};
 
 /// Trading calendar utilities
 pub struct TradingCalendar;
@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn test_trading_days_between_same_week() {
         let start = NaiveDate::from_ymd_opt(2025, 6, 2).unwrap(); // Monday
-        let end = NaiveDate::from_ymd_opt(2025, 6, 6).unwrap();   // Friday
+        let end = NaiveDate::from_ymd_opt(2025, 6, 6).unwrap(); // Friday
 
         let days: Vec<_> = TradingCalendar::trading_days_between(start, end).collect();
         assert_eq!(days.len(), 5); // Mon, Tue, Wed, Thu, Fri
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn test_trading_days_between_with_weekend() {
         let start = NaiveDate::from_ymd_opt(2025, 6, 6).unwrap(); // Friday
-        let end = NaiveDate::from_ymd_opt(2025, 6, 10).unwrap();  // Tuesday
+        let end = NaiveDate::from_ymd_opt(2025, 6, 10).unwrap(); // Tuesday
 
         let days: Vec<_> = TradingCalendar::trading_days_between(start, end).collect();
         assert_eq!(days.len(), 3); // Fri, Mon, Tue (skip Sat, Sun)
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn test_trading_days_between_starting_on_weekend() {
         let start = NaiveDate::from_ymd_opt(2025, 6, 7).unwrap(); // Saturday
-        let end = NaiveDate::from_ymd_opt(2025, 6, 10).unwrap();  // Tuesday
+        let end = NaiveDate::from_ymd_opt(2025, 6, 10).unwrap(); // Tuesday
 
         let days: Vec<_> = TradingCalendar::trading_days_between(start, end).collect();
         assert_eq!(days.len(), 2); // Mon, Tue (skip Sat, Sun)
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn test_trading_days_between_weekend_only() {
         let start = NaiveDate::from_ymd_opt(2025, 6, 7).unwrap(); // Saturday
-        let end = NaiveDate::from_ymd_opt(2025, 6, 8).unwrap();   // Sunday
+        let end = NaiveDate::from_ymd_opt(2025, 6, 8).unwrap(); // Sunday
 
         let days: Vec<_> = TradingCalendar::trading_days_between(start, end).collect();
         assert_eq!(days.len(), 0); // No trading days on weekend

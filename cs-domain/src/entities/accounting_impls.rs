@@ -167,9 +167,9 @@ mod tests {
 
     // Helper to create minimal test results
     fn make_straddle_result(entry_debit: Decimal, pnl: Decimal) -> StraddleResult {
-        use chrono::{TimeZone, Utc};
-        use crate::value_objects::{EarningsTime, Strike};
         use crate::entities::PricingSource;
+        use crate::value_objects::{EarningsTime, Strike};
+        use chrono::{TimeZone, Utc};
 
         StraddleResult {
             symbol: "TEST".to_string(),

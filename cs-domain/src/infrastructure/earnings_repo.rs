@@ -1,12 +1,12 @@
 use async_trait::async_trait;
-use chrono::{NaiveDate, Datelike};
-use std::path::PathBuf;
+use chrono::{Datelike, NaiveDate};
 use polars::prelude::*;
+use std::path::PathBuf;
 
 use crate::datetime::TradingDate;
 use crate::entities::EarningsEvent;
-use crate::repositories::{EarningsRepository, RepositoryError};
 use crate::infrastructure::mappers::earnings::parse_earnings_time;
+use crate::repositories::{EarningsRepository, RepositoryError};
 
 /// Stub implementation of EarningsRepository
 ///
@@ -93,7 +93,7 @@ impl EarningsRepository for ParquetEarningsRepository {
                 .filter(
                     col("earnings_date")
                         .gt_eq(lit(start_polars))
-                        .and(col("earnings_date").lt_eq(lit(end_polars)))
+                        .and(col("earnings_date").lt_eq(lit(end_polars))),
                 )
                 .collect()
                 .map_err(|e| RepositoryError::Polars(e.to_string()))?;
@@ -103,29 +103,39 @@ impl EarningsRepository for ParquetEarningsRepository {
             }
 
             // Convert DataFrame to EarningsEvents
-            let symbols_col = df.column("symbol")
+            let symbols_col = df
+                .column("symbol")
                 .map_err(|e| RepositoryError::Parse(format!("Missing symbol column: {}", e)))?
                 .str()
                 .map_err(|e| RepositoryError::Parse(format!("Invalid symbol type: {}", e)))?;
 
-            let dates_col = df.column("earnings_date")
-                .map_err(|e| RepositoryError::Parse(format!("Missing earnings_date column: {}", e)))?
+            let dates_col = df
+                .column("earnings_date")
+                .map_err(|e| {
+                    RepositoryError::Parse(format!("Missing earnings_date column: {}", e))
+                })?
                 .date()
-                .map_err(|e| RepositoryError::Parse(format!("Invalid earnings_date type: {}", e)))?;
+                .map_err(|e| {
+                    RepositoryError::Parse(format!("Invalid earnings_date type: {}", e))
+                })?;
 
-            let times_col = df.column("earnings_time")
-                .map_err(|e| RepositoryError::Parse(format!("Missing earnings_time column: {}", e)))?
+            let times_col = df
+                .column("earnings_time")
+                .map_err(|e| {
+                    RepositoryError::Parse(format!("Missing earnings_time column: {}", e))
+                })?
                 .str()
-                .map_err(|e| RepositoryError::Parse(format!("Invalid earnings_time type: {}", e)))?;
+                .map_err(|e| {
+                    RepositoryError::Parse(format!("Invalid earnings_time type: {}", e))
+                })?;
 
-            let company_col = df.column("company_name").ok()
-                .and_then(|c| c.str().ok());
+            let company_col = df.column("company_name").ok().and_then(|c| c.str().ok());
 
-            let market_cap_col = df.column("market_cap").ok()
-                .and_then(|c| c.u64().ok());
+            let market_cap_col = df.column("market_cap").ok().and_then(|c| c.u64().ok());
 
             for i in 0..df.height() {
-                let symbol = symbols_col.get(i)
+                let symbol = symbols_col
+                    .get(i)
                     .ok_or_else(|| RepositoryError::Parse("Missing symbol value".into()))?
                     .to_string();
 
@@ -136,11 +146,13 @@ impl EarningsRepository for ParquetEarningsRepository {
                     }
                 }
 
-                let earnings_date = dates_col.get(i)
+                let earnings_date = dates_col
+                    .get(i)
                     .map(|days| TradingDate::from_polars_date(days).to_naive_date())
                     .ok_or_else(|| RepositoryError::Parse("Invalid earnings date".into()))?;
 
-                let earnings_time_str = times_col.get(i)
+                let earnings_time_str = times_col
+                    .get(i)
                     .ok_or_else(|| RepositoryError::Parse("Missing earnings_time value".into()))?;
                 let earnings_time = parse_earnings_time(earnings_time_str);
 
@@ -183,7 +195,7 @@ mod tests {
     #[ignore] // Requires actual earnings data
     async fn test_parquet_earnings_repository() {
         let data_dir = PathBuf::from(
-            std::env::var("EARNINGS_DATA_DIR").unwrap_or_else(|_| "~/earnings_data".to_string())
+            std::env::var("EARNINGS_DATA_DIR").unwrap_or_else(|_| "~/earnings_data".to_string()),
         );
         let repo = ParquetEarningsRepository::new(data_dir);
 

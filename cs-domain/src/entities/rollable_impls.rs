@@ -5,8 +5,8 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
 use crate::entities::*;
-use crate::trade::{RollableTrade, TradeResult, TradeConstructionError, CompositeIV};
 use crate::ports::TradeFactory;
+use crate::trade::{CompositeIV, RollableTrade, TradeConstructionError, TradeResult};
 
 // ============================================================================
 // LongStraddle
@@ -143,9 +143,9 @@ impl RollableTrade for CalendarSpread {
             .create_calendar_spread(
                 symbol,
                 dt,
-                0,      // min_short_dte
-                45,     // max_short_dte
-                45,     // min_long_dte (must be >= max_short_dte)
+                0,                           // min_short_dte
+                45,                          // max_short_dte
+                45,                          // min_long_dte (must be >= max_short_dte)
                 finq_core::OptionType::Call, // Default to Call; can be parameterized
             )
             .await
@@ -153,7 +153,7 @@ impl RollableTrade for CalendarSpread {
     }
 
     fn expiration(&self) -> NaiveDate {
-        self.short_leg.expiration  // Roll based on short leg
+        self.short_leg.expiration // Roll based on short leg
     }
 
     fn strike(&self) -> Decimal {
@@ -465,12 +465,7 @@ impl RollableTrade for Strangle {
         // Use 25-delta strangle configuration
         let config = crate::value_objects::MultiLegStrategyConfig::strangle_delta(0.25);
         factory
-            .create_strangle(
-                symbol,
-                dt,
-                min_expiration,
-                &config,
-            )
+            .create_strangle(symbol, dt, min_expiration, &config)
             .await
             .map_err(|e| TradeConstructionError::FactoryError(e.to_string()))
     }
@@ -506,12 +501,7 @@ impl RollableTrade for Butterfly {
         // Use 25-delta butterfly configuration
         let config = crate::value_objects::MultiLegStrategyConfig::butterfly_delta(0.25);
         factory
-            .create_butterfly(
-                symbol,
-                dt,
-                min_expiration,
-                &config,
-            )
+            .create_butterfly(symbol, dt, min_expiration, &config)
             .await
             .map_err(|e| TradeConstructionError::FactoryError(e.to_string()))
     }
@@ -546,12 +536,7 @@ impl RollableTrade for Condor {
         // Use 10/20-delta condor configuration
         let config = crate::value_objects::MultiLegStrategyConfig::condor_delta(0.10, 0.20);
         factory
-            .create_condor(
-                symbol,
-                dt,
-                min_expiration,
-                &config,
-            )
+            .create_condor(symbol, dt, min_expiration, &config)
             .await
             .map_err(|e| TradeConstructionError::FactoryError(e.to_string()))
     }
@@ -586,12 +571,7 @@ impl RollableTrade for IronCondor {
         // Use 10/20-delta iron condor configuration
         let config = crate::value_objects::MultiLegStrategyConfig::iron_condor_delta(0.10, 0.20);
         factory
-            .create_iron_condor(
-                symbol,
-                dt,
-                min_expiration,
-                &config,
-            )
+            .create_iron_condor(symbol, dt, min_expiration, &config)
             .await
             .map_err(|e| TradeConstructionError::FactoryError(e.to_string()))
     }

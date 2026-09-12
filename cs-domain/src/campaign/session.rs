@@ -1,7 +1,10 @@
 // cs-domain/src/campaign/session.rs
 
+use crate::{
+    value_objects::{IronButterflyConfig, MultiLegStrategyConfig, TradeDirection},
+    EarningsEvent, OptionStrategy,
+};
 use chrono::{DateTime, NaiveDate, Utc};
-use crate::{EarningsEvent, OptionStrategy, value_objects::{IronButterflyConfig, TradeDirection, MultiLegStrategyConfig}};
 
 /// A session is the atomic unit of trading
 ///

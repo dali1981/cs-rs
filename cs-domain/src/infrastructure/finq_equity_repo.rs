@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
-use finq_flatfiles::{StockBarReader, StockBarRepository, FlatfileConfig};
 use finq_core::Timeframe;
+use finq_flatfiles::{FlatfileConfig, StockBarReader, StockBarRepository};
 use rust_decimal::Decimal;
 use std::path::PathBuf;
 
+use super::option_bar_conversions::dataframe_to_equity_bars;
 use crate::repositories::{EquityDataRepository, RepositoryError};
 use crate::value_objects::{EquityBar, SpotPrice};
-use super::option_bar_conversions::dataframe_to_equity_bars;
 
 pub struct FinqEquityRepository {
     repository: StockBarRepository,
@@ -39,13 +39,16 @@ impl EquityDataRepository for FinqEquityRepository {
             )));
         }
 
-        let bar = bars.iter()
+        let bar = bars
+            .iter()
             .filter(|b| b.timestamp <= target_time)
             .max_by_key(|b| b.timestamp)
-            .ok_or_else(|| RepositoryError::NotFound(format!(
-                "No spot price for {} at {} (no bars before this time)",
-                symbol, target_time
-            )))?;
+            .ok_or_else(|| {
+                RepositoryError::NotFound(format!(
+                    "No spot price for {} at {} (no bars before this time)",
+                    symbol, target_time
+                ))
+            })?;
 
         Ok(SpotPrice {
             value: Decimal::try_from(bar.close)
@@ -59,13 +62,16 @@ impl EquityDataRepository for FinqEquityRepository {
         symbol: &str,
         date: NaiveDate,
     ) -> Result<Vec<EquityBar>, RepositoryError> {
-        let df = self.repository
+        let df = self
+            .repository
             .get_bars_dataframe(symbol, Timeframe::MINUTE, date, date)
             .await
-            .map_err(|e| RepositoryError::NotFound(format!(
-                "Failed to load equity bars for {} on {}: {}",
-                symbol, date, e
-            )))?;
+            .map_err(|e| {
+                RepositoryError::NotFound(format!(
+                    "Failed to load equity bars for {} on {}: {}",
+                    symbol, date, e
+                ))
+            })?;
         dataframe_to_equity_bars(&df)
     }
 }
@@ -78,7 +84,7 @@ mod tests {
     #[ignore] // Requires actual finq data
     async fn test_finq_equity_repository_get_bars() {
         let repo = FinqEquityRepository::new(PathBuf::from(
-            std::env::var("FINQ_DATA_DIR").unwrap_or_else(|_| "~/finq_data".to_string())
+            std::env::var("FINQ_DATA_DIR").unwrap_or_else(|_| "~/finq_data".to_string()),
         ));
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 2).unwrap();
@@ -94,7 +100,7 @@ mod tests {
     #[ignore] // Requires actual finq data
     async fn test_finq_equity_repository_get_spot_price() {
         let repo = FinqEquityRepository::new(PathBuf::from(
-            std::env::var("FINQ_DATA_DIR").unwrap_or_else(|_| "~/finq_data".to_string())
+            std::env::var("FINQ_DATA_DIR").unwrap_or_else(|_| "~/finq_data".to_string()),
         ));
 
         let date = NaiveDate::from_ymd_opt(2024, 1, 2).unwrap();

@@ -17,14 +17,13 @@ mod crbg_tests {
     use cs_backtest::TradeExecutor;
     use cs_domain::{
         infrastructure::{FinqEquityRepository, FinqOptionsRepository},
-        CalendarSpread, Strike, OptionLeg,
-        EquityDataRepository, OptionsDataRepository,
         testing::EarningsEventBuilder,
+        CalendarSpread, EquityDataRepository, OptionLeg, OptionsDataRepository, Strike,
     };
     use finq_core::OptionType;
+    use rust_decimal::Decimal;
     use std::path::PathBuf;
     use std::sync::Arc;
-    use rust_decimal::Decimal;
 
     #[tokio::test]
     async fn test_crbg_calendar_spread_execution() {
@@ -33,10 +32,7 @@ mod crbg_tests {
         let options_repo = Arc::new(FinqOptionsRepository::new(data_dir.clone()));
         let equity_repo = Arc::new(FinqEquityRepository::new(data_dir));
 
-        let executor = TradeExecutor::new(
-            options_repo.clone(),
-            equity_repo.clone(),
-        );
+        let executor = TradeExecutor::new(options_repo.clone(), equity_repo.clone());
 
         // Trade parameters from failed backtest
         let symbol = "CRBG";
@@ -79,25 +75,28 @@ mod crbg_tests {
 
         // Step 2: Check option chain at entry
         println!("Step 2: Checking option chain at entry...");
-        match options_repo.get_option_bars_at_time(symbol, entry_time).await {
+        match options_repo
+            .get_option_bars_at_time(symbol, entry_time)
+            .await
+        {
             Ok(chain) => {
                 println!("  ✓ Entry chain loaded: {} bars", chain.len());
 
-                let call_bars: Vec<_> = chain.iter()
+                let call_bars: Vec<_> = chain
+                    .iter()
                     .filter(|b| matches!(b.option_type, OptionType::Call))
                     .collect();
                 println!("  Call bars: {}", call_bars.len());
 
                 // Show available strikes
                 if !call_bars.is_empty() {
-                    let mut unique_strikes: Vec<f64> = call_bars.iter()
-                        .map(|b| b.strike)
-                        .collect();
+                    let mut unique_strikes: Vec<f64> = call_bars.iter().map(|b| b.strike).collect();
                     unique_strikes.sort_by(|a, b| a.partial_cmp(b).unwrap());
                     unique_strikes.dedup();
                     println!("  Available call strikes: {:?}", unique_strikes);
 
-                    let strike_31_calls: Vec<_> = call_bars.iter()
+                    let strike_31_calls: Vec<_> = call_bars
+                        .iter()
                         .filter(|b| (b.strike - 31.0).abs() < 0.001)
                         .collect();
 
@@ -120,7 +119,10 @@ mod crbg_tests {
 
         // Step 3: Build IV surface with detailed diagnostics
         println!("Step 3: Building IV surface at entry...");
-        match options_repo.get_option_bars_at_time(symbol, entry_time).await {
+        match options_repo
+            .get_option_bars_at_time(symbol, entry_time)
+            .await
+        {
             Ok(chain) => {
                 println!("  Chain has {} total bars", chain.len());
 
@@ -130,9 +132,15 @@ mod crbg_tests {
                     if let (Some(close), Some(ts)) = (bar.close, bar.timestamp) {
                         match equity_repo.get_spot_price(symbol, ts).await {
                             Ok(spot) => {
-                                println!("    Bar {}: strike={} {:?} close=${:.2} ts={} spot=${:.2} ✓",
-                                    i, bar.strike, bar.option_type, close,
-                                    ts.format("%H:%M"), spot.to_f64());
+                                println!(
+                                    "    Bar {}: strike={} {:?} close=${:.2} ts={} spot=${:.2} ✓",
+                                    i,
+                                    bar.strike,
+                                    bar.option_type,
+                                    close,
+                                    ts.format("%H:%M"),
+                                    spot.to_f64()
+                                );
                                 successful_iv_count += 1;
                             }
                             Err(e) => {
@@ -144,14 +152,19 @@ mod crbg_tests {
                     }
                 }
 
-                println!("  Bars with successful spot lookup: {}/{}", successful_iv_count, chain.len());
+                println!(
+                    "  Bars with successful spot lookup: {}/{}",
+                    successful_iv_count,
+                    chain.len()
+                );
                 println!();
 
                 let surface = cs_backtest::build_iv_surface_minute_aligned(
                     &chain,
                     equity_repo.as_ref(),
                     symbol,
-                ).await;
+                )
+                .await;
 
                 match surface {
                     Some(surf) => {
@@ -159,12 +172,19 @@ mod crbg_tests {
                         println!("  All IV points:");
                         for p in surf.points() {
                             let is_call_str = if p.is_call { "call" } else { "put" };
-                            println!("    Strike {} {} exp={} IV={:.1}%",
-                                p.strike, is_call_str, p.expiration, p.iv * 100.0);
+                            println!(
+                                "    Strike {} {} exp={} IV={:.1}%",
+                                p.strike,
+                                is_call_str,
+                                p.expiration,
+                                p.iv * 100.0
+                            );
                         }
                     }
                     None => {
-                        println!("  ✗ IV surface build returned None - all bars were filtered out!");
+                        println!(
+                            "  ✗ IV surface build returned None - all bars were filtered out!"
+                        );
                     }
                 }
             }
@@ -196,12 +216,9 @@ mod crbg_tests {
             .company_name("CRBG")
             .build();
 
-        let result = executor.execute_trade(
-            &spread,
-            &earnings_event,
-            entry_time,
-            exit_time,
-        ).await;
+        let result = executor
+            .execute_trade(&spread, &earnings_event, entry_time, exit_time)
+            .await;
 
         println!();
         println!("=== TRADE RESULT ===");

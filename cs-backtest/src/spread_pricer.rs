@@ -1,15 +1,15 @@
 use chrono::{DateTime, NaiveDate, Utc};
+use finq_core::OptionType;
 use polars::prelude::*;
 use rust_decimal::Decimal;
-use finq_core::OptionType;
 use tracing::{debug, warn};
 
-use cs_analytics::{
-    bs_price, bs_greeks, bs_implied_volatility, BSConfig, Greeks, IVSurface, IVPoint,
-    PricingModel, PricingIVProvider,
-};
-use cs_domain::{CalendarSpread, Strike, TradingDate, TradingTimestamp, MarketTime};
 use crate::execution::TradePricer;
+use cs_analytics::{
+    bs_greeks, bs_implied_volatility, bs_price, BSConfig, Greeks, IVPoint, IVSurface,
+    PricingIVProvider, PricingModel,
+};
+use cs_domain::{CalendarSpread, MarketTime, Strike, TradingDate, TradingTimestamp};
 
 /// Error type for pricing operations
 #[derive(Debug, thiserror::Error)]
@@ -38,7 +38,7 @@ pub struct LegPricing {
     pub price: Decimal,
     pub iv: Option<f64>,
     pub greeks: Option<Greeks>,
-    pub expiration: NaiveDate,  // Needed for calendar detection in composite pricing
+    pub expiration: NaiveDate, // Needed for calendar detection in composite pricing
 }
 
 /// Pricing result for a calendar spread
@@ -46,7 +46,7 @@ pub struct LegPricing {
 pub struct SpreadPricing {
     pub short_leg: LegPricing,
     pub long_leg: LegPricing,
-    pub net_cost: Decimal,  // Long - Short (for calendar spread)
+    pub net_cost: Decimal, // Long - Short (for calendar spread)
 }
 
 /// Service for pricing options using Black-Scholes
@@ -61,7 +61,7 @@ impl SpreadPricer {
         Self {
             bs_config: BSConfig::default(),
             market_close: MarketTime::new(16, 0), // Default 4 PM
-            pricing_model: PricingModel::default(),         // Sticky moneyness
+            pricing_model: PricingModel::default(), // Sticky moneyness
         }
     }
 
@@ -99,14 +99,15 @@ impl SpreadPricer {
         pricing_time: DateTime<Utc>,
     ) -> Result<SpreadPricing, PricingError> {
         // Build IV surface for fallback interpolation
-        let iv_surface = self.build_iv_surface(
+        let iv_surface = self.build_iv_surface(chain_df, spot_price, pricing_time, spread.symbol());
+
+        self.price_spread_with_surface(
+            spread,
             chain_df,
             spot_price,
             pricing_time,
-            spread.symbol(),
-        );
-
-        self.price_spread_with_surface(spread, chain_df, spot_price, pricing_time, iv_surface.as_ref())
+            iv_surface.as_ref(),
+        )
     }
 
     /// Price a calendar spread using a pre-built IV surface
@@ -121,7 +122,9 @@ impl SpreadPricer {
         iv_surface: Option<&IVSurface>,
     ) -> Result<SpreadPricing, PricingError> {
         // Create pricing provider based on configured pricing model
-        let pricing_provider = self.pricing_model.to_provider_with_rate(self.bs_config.risk_free_rate);
+        let pricing_provider = self
+            .pricing_model
+            .to_provider_with_rate(self.bs_config.risk_free_rate);
 
         let short_pricing = self.price_leg(
             spread.symbol(),
@@ -186,9 +189,10 @@ impl SpreadPricer {
             .clone()
             .lazy()
             .filter(
-                col("strike").eq(lit(strike_f64))
+                col("strike")
+                    .eq(lit(strike_f64))
                     .and(col("expiration").eq(lit(expiration_polars)))
-                    .and(col("option_type").eq(lit(opt_type_str)))
+                    .and(col("option_type").eq(lit(opt_type_str))),
             )
             .collect()
             .map_err(|e| PricingError::Polars(e.to_string()))?;
@@ -300,13 +304,15 @@ impl SpreadPricer {
         }
 
         // Use mid price from market data
-        let close_col = filtered.column("close")
+        let close_col = filtered
+            .column("close")
             .map_err(|_| PricingError::MissingColumn("close".to_string()))?
             .f64()
             .map_err(|e| PricingError::Polars(e.to_string()))?;
 
-        let market_price = close_col.get(0)
-            .ok_or_else(|| PricingError::NoPriceFound(format!("{} {} {}", strike_f64, expiration, opt_type_str)))?;
+        let market_price = close_col.get(0).ok_or_else(|| {
+            PricingError::NoPriceFound(format!("{} {} {}", strike_f64, expiration, opt_type_str))
+        })?;
 
         // Calculate IV from market price (using ttm from validation)
         let iv = bs_implied_volatility(
@@ -354,7 +360,7 @@ impl SpreadPricer {
 
         Ok(LegPricing {
             price: Decimal::try_from(market_price).unwrap_or_default(),
-            iv, // Keep original IV (may be None)
+            iv,                   // Keep original IV (may be None)
             greeks: Some(greeks), // Always provide Greeks
             expiration,
         })
@@ -386,9 +392,10 @@ impl SpreadPricer {
             .clone()
             .lazy()
             .filter(
-                col("strike").eq(lit(strike))
+                col("strike")
+                    .eq(lit(strike))
                     .and(col("expiration").eq(lit(expiration_polars)))
-                    .and(col("option_type").eq(lit(opposite_type)))
+                    .and(col("option_type").eq(lit(opposite_type))),
             )
             .collect()
             .ok()?;
@@ -398,12 +405,7 @@ impl SpreadPricer {
         }
 
         // Get the opposite option's market price
-        let opposite_price = filtered
-            .column("close")
-            .ok()?
-            .f64()
-            .ok()?
-            .get(0)?;
+        let opposite_price = filtered.column("close").ok()?.f64().ok()?.get(0)?;
 
         if opposite_price <= 0.0 {
             return None;
@@ -572,7 +574,8 @@ impl SpreadPricer {
                 timestamp: pricing_time,
                 underlying_price: spot_decimal,
                 is_call,
-                contract_ticker: format!("{}{}{}{}",
+                contract_ticker: format!(
+                    "{}{}{}{}",
                     symbol,
                     expiration.format("%y%m%d"),
                     if is_call { "C" } else { "P" },
@@ -630,12 +633,10 @@ mod tests {
 
     #[test]
     fn test_spread_pricer_with_pricing_model() {
-        let pricer = SpreadPricer::new()
-            .with_pricing_model(PricingModel::StickyDelta);
+        let pricer = SpreadPricer::new().with_pricing_model(PricingModel::StickyDelta);
         assert_eq!(pricer.pricing_model(), PricingModel::StickyDelta);
 
-        let pricer = SpreadPricer::new()
-            .with_pricing_model(PricingModel::StickyMoneyness);
+        let pricer = SpreadPricer::new().with_pricing_model(PricingModel::StickyMoneyness);
         assert_eq!(pricer.pricing_model(), PricingModel::StickyMoneyness);
     }
 
@@ -652,8 +653,10 @@ mod tests {
     fn test_spread_pricer_calculate_ttm() {
         let pricer = SpreadPricer::new();
 
-        let from = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()
-            .and_hms_opt(9, 30, 0).unwrap()
+        let from = NaiveDate::from_ymd_opt(2025, 1, 1)
+            .unwrap()
+            .and_hms_opt(9, 30, 0)
+            .unwrap()
             .and_utc();
         let to = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
@@ -675,15 +678,20 @@ mod tests {
         // At market close (16:00), there's still a small positive TTM
         // This represents the time until end of trading day
         assert!(ttm > 0.0, "TTM should be positive at market close");
-        assert!(ttm < 0.001, "TTM should be very small at market close (< 0.001 years ≈ 8.76 hours)");
+        assert!(
+            ttm < 0.001,
+            "TTM should be very small at market close (< 0.001 years ≈ 8.76 hours)"
+        );
     }
 
     #[test]
     fn test_validate_not_expired_errors_on_expired_option() {
         let pricer = SpreadPricer::new();
         let expiration = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
-        let pricing_time = NaiveDate::from_ymd_opt(2025, 1, 20).unwrap()
-            .and_hms_opt(14, 30, 0).unwrap()
+        let pricing_time = NaiveDate::from_ymd_opt(2025, 1, 20)
+            .unwrap()
+            .and_hms_opt(14, 30, 0)
+            .unwrap()
             .and_utc();
 
         // Expiration is 5 days BEFORE pricing time
@@ -702,14 +710,19 @@ mod tests {
     fn test_validate_not_expired_passes_for_valid_option() {
         let pricer = SpreadPricer::new();
         let expiration = NaiveDate::from_ymd_opt(2025, 1, 20).unwrap();
-        let pricing_time = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap()
-            .and_hms_opt(14, 30, 0).unwrap()
+        let pricing_time = NaiveDate::from_ymd_opt(2025, 1, 15)
+            .unwrap()
+            .and_hms_opt(14, 30, 0)
+            .unwrap()
             .and_utc();
 
         // Expiration is 5 days AFTER pricing time
         let result = pricer.validate_not_expired(expiration, pricing_time);
 
-        assert!(result.is_ok(), "Expected validation to pass for valid option");
+        assert!(
+            result.is_ok(),
+            "Expected validation to pass for valid option"
+        );
         let ttm = result.unwrap();
         assert!(ttm > 0.0, "TTM should be positive for valid option");
     }
@@ -719,14 +732,19 @@ mod tests {
         let pricer = SpreadPricer::new();
         let expiration = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
         // Price the day after expiration
-        let pricing_time = NaiveDate::from_ymd_opt(2025, 1, 16).unwrap()
-            .and_hms_opt(9, 30, 0).unwrap()
+        let pricing_time = NaiveDate::from_ymd_opt(2025, 1, 16)
+            .unwrap()
+            .and_hms_opt(9, 30, 0)
+            .unwrap()
             .and_utc();
 
         // Pricing after expiration should error
         let result = pricer.validate_not_expired(expiration, pricing_time);
 
-        assert!(result.is_err(), "Expected validation to fail after expiration");
+        assert!(
+            result.is_err(),
+            "Expected validation to fail after expiration"
+        );
         match result.unwrap_err() {
             PricingError::OptionExpired { ttm, .. } => {
                 assert!(ttm < 0.0, "TTM should be negative for expired option");
@@ -744,7 +762,10 @@ mod tests {
         // Pricing at market close should still be valid (TTM is still slightly positive)
         let result = pricer.validate_not_expired(date, pricing_time);
 
-        assert!(result.is_ok(), "Expected validation to pass at market close");
+        assert!(
+            result.is_ok(),
+            "Expected validation to pass at market close"
+        );
         let ttm = result.unwrap();
         assert!(ttm > 0.0, "TTM should be positive at market close");
     }

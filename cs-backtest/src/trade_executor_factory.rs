@@ -1,16 +1,17 @@
-use std::sync::Arc;
-use cs_domain::{
-    EquityDataRepository, OptionsDataRepository, TradeFactory,
-    HedgeConfig, RollPolicy, RollableTrade,
-    CalendarSpread, LongStraddle, IronButterfly,
-};
 use cs_analytics::PricingModel;
+use cs_domain::{
+    CalendarSpread, EquityDataRepository, HedgeConfig, IronButterfly, LongStraddle,
+    OptionsDataRepository, RollPolicy, RollableTrade, TradeFactory,
+};
+use std::sync::Arc;
 
+use crate::composite_pricer::{
+    CalendarSpreadPricer, CompositePricer, IronButterflyCompositePricer,
+};
 use crate::execution::{ExecutableTrade, ExecutionConfig};
-use crate::trade_executor::TradeExecutor;
 use crate::spread_pricer::SpreadPricer;
-use crate::composite_pricer::{CompositePricer, CalendarSpreadPricer, IronButterflyCompositePricer};
 use crate::timing_strategy::TimingStrategy;
+use crate::trade_executor::TradeExecutor;
 
 /// Factory for creating type-specific TradeExecutors
 ///
@@ -65,21 +66,21 @@ impl TradeExecutorFactory {
 
     pub fn create_straddle_executor(&self) -> TradeExecutor<LongStraddle> {
         let pricer = CompositePricer::new(
-            SpreadPricer::new().with_pricing_model(self.pricing_model.clone())
+            SpreadPricer::new().with_pricing_model(self.pricing_model.clone()),
         );
         self.build_executor(pricer)
     }
 
     pub fn create_calendar_spread_executor(&self) -> TradeExecutor<CalendarSpread> {
         let pricer = CalendarSpreadPricer(CompositePricer::new(
-            SpreadPricer::new().with_pricing_model(self.pricing_model.clone())
+            SpreadPricer::new().with_pricing_model(self.pricing_model.clone()),
         ));
         self.build_executor(pricer)
     }
 
     pub fn create_iron_butterfly_executor(&self) -> TradeExecutor<IronButterfly> {
         let pricer = IronButterflyCompositePricer(CompositePricer::new(
-            SpreadPricer::new().with_pricing_model(self.pricing_model.clone())
+            SpreadPricer::new().with_pricing_model(self.pricing_model.clone()),
         ));
         self.build_executor(pricer)
     }

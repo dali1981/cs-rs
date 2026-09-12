@@ -17,13 +17,13 @@
 //! See ADR-0001 (bounded contexts) and ADR-0003 (CLI/config are DTOs).
 
 use chrono::NaiveDate;
-use cs_analytics::{PricingModel, InterpolationMode};
+use cs_analytics::{InterpolationMode, PricingModel};
 use cs_domain::{
-    TimingConfig, TradeSelectionCriteria, StrikeMatchMode, HedgeConfig, AttributionConfig,
-    TradingCostConfig, FileRulesConfig, ReturnBasis, MarginConfig,
+    AttributionConfig, FileRulesConfig, HedgeConfig, MarginConfig, ReturnBasis, StrikeMatchMode,
+    TimingConfig, TradeSelectionCriteria, TradingCostConfig,
 };
 
-use crate::config::{SpreadType, SelectionType};
+use crate::config::{SelectionType, SpreadType};
 
 // ── Sub-structures ────────────────────────────────────────────────────────────
 

@@ -39,12 +39,12 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 
 use cs_domain::{
-    CompositeTrade, EquityDataRepository, OptionsDataRepository,
-    HedgeConfig, HedgePosition, DeltaComputation, GenericHedgeState,
+    CompositeTrade, DeltaComputation, EquityDataRepository, GenericHedgeState, HedgeConfig,
+    HedgePosition, OptionsDataRepository,
 };
 
-use crate::delta_providers::{GammaApproximationProvider, EntryVolatilityProvider};
-use crate::execution::{ExecutableTrade, TradePricer, ExecutionError};
+use crate::delta_providers::{EntryVolatilityProvider, GammaApproximationProvider};
+use crate::execution::{ExecutableTrade, ExecutionError, TradePricer};
 use crate::iv_surface_builder::build_iv_surface_minute_aligned;
 use crate::timing_strategy::TimingStrategy;
 
@@ -153,9 +153,7 @@ where
     // =========================================================================
 
     // Get spot at entry
-    let entry_spot = equity_repo
-        .get_spot_price(symbol, entry_time)
-        .await?;
+    let entry_spot = equity_repo.get_spot_price(symbol, entry_time).await?;
     let entry_spot_f64 = entry_spot.to_f64();
 
     // Get option chain at entry
@@ -164,11 +162,7 @@ where
         .await?;
 
     // Build IV surface
-    let entry_surface = build_iv_surface_minute_aligned(
-        &entry_chain,
-        equity_repo,
-        symbol,
-    ).await;
+    let entry_surface = build_iv_surface_minute_aligned(&entry_chain, equity_repo, symbol).await;
     let entry_surface_time = entry_surface.as_ref().map(|s| s.as_of_time());
 
     // Price at entry
@@ -195,7 +189,8 @@ where
         hedge_config,
         timing,
         entry_context,
-    ).await
+    )
+    .await
 }
 
 /// Simulate with precomputed entry pricing (skips entry pricing pass).
@@ -245,11 +240,8 @@ where
             // Create delta provider based on mode
             let hedge_result = match &config.delta_computation {
                 DeltaComputation::GammaApproximation => {
-                    let provider = GammaApproximationProvider::new(
-                        entry_delta,
-                        entry_gamma,
-                        entry_spot_f64,
-                    );
+                    let provider =
+                        GammaApproximationProvider::new(entry_delta, entry_gamma, entry_spot_f64);
                     run_hedge_loop(
                         config,
                         provider,
@@ -260,7 +252,8 @@ where
                         entry_spot_f64,
                         timing,
                         entry_iv,
-                    ).await
+                    )
+                    .await
                 }
 
                 DeltaComputation::EntryIV { .. } => {
@@ -280,23 +273,18 @@ where
                         entry_spot_f64,
                         timing,
                         entry_iv,
-                    ).await
+                    )
+                    .await
                 }
 
                 DeltaComputation::EntryHV { window } => {
                     // Compute HV at entry
-                    let entry_hv = compute_hv_at_time(
-                        equity_repo,
-                        symbol,
-                        entry_time,
-                        *window,
-                    ).await.unwrap_or(0.25); // Default 25% if computation fails
+                    let entry_hv = compute_hv_at_time(equity_repo, symbol, entry_time, *window)
+                        .await
+                        .unwrap_or(0.25); // Default 25% if computation fails
 
-                    let provider = EntryVolatilityProvider::new_entry_hv(
-                        trade.clone(),
-                        entry_hv,
-                        0.05,
-                    );
+                    let provider =
+                        EntryVolatilityProvider::new_entry_hv(trade.clone(), entry_hv, 0.05);
                     run_hedge_loop(
                         config,
                         provider,
@@ -307,7 +295,8 @@ where
                         entry_spot_f64,
                         timing,
                         entry_iv,
-                    ).await
+                    )
+                    .await
                 }
 
                 // CurrentHV, CurrentMarketIV, HistoricalAverageIV - fall back to gamma approx
@@ -317,11 +306,8 @@ where
                         mode = ?config.delta_computation,
                         "Delta mode requires Arc repos, falling back to GammaApproximation"
                     );
-                    let provider = GammaApproximationProvider::new(
-                        entry_delta,
-                        entry_gamma,
-                        entry_spot_f64,
-                    );
+                    let provider =
+                        GammaApproximationProvider::new(entry_delta, entry_gamma, entry_spot_f64);
                     run_hedge_loop(
                         config,
                         provider,
@@ -332,7 +318,8 @@ where
                         entry_spot_f64,
                         timing,
                         entry_iv,
-                    ).await
+                    )
+                    .await
                 }
             };
 
@@ -374,9 +361,7 @@ where
     }
 
     // Get spot at exit
-    let exit_spot = equity_repo
-        .get_spot_price(symbol, exit_time)
-        .await?;
+    let exit_spot = equity_repo.get_spot_price(symbol, exit_time).await?;
     let exit_spot_f64 = exit_spot.to_f64();
 
     // Get option chain at exit (with tolerance for timing)
@@ -385,11 +370,7 @@ where
         .await?;
 
     // Build exit IV surface
-    let exit_surface = build_iv_surface_minute_aligned(
-        &exit_chain,
-        equity_repo,
-        symbol,
-    ).await;
+    let exit_surface = build_iv_surface_minute_aligned(&exit_chain, equity_repo, symbol).await;
 
     // Price at exit
     let exit_pricing = pricer.price_with_surface(
@@ -565,8 +546,8 @@ pub trait HasIV {
 }
 
 // Implement for common pricing types
-use crate::straddle_pricer::StraddlePricing;
 use crate::composite_pricer::CompositePricing;
+use crate::straddle_pricer::StraddlePricing;
 
 impl HasDelta for StraddlePricing {
     fn net_delta(&self) -> f64 {
@@ -600,7 +581,8 @@ impl HasDelta for CompositePricing {
     fn net_delta(&self) -> f64 {
         // CompositePricing.legs is Vec<(LegPricing, LegPosition)>
         // leg.0 = LegPricing, leg.1 = LegPosition
-        self.legs.iter()
+        self.legs
+            .iter()
             .map(|(pricing, position)| {
                 let delta = pricing.greeks.as_ref().map(|g| g.delta).unwrap_or(0.0);
                 match position {
@@ -614,7 +596,8 @@ impl HasDelta for CompositePricing {
 
 impl HasGamma for CompositePricing {
     fn net_gamma(&self) -> f64 {
-        self.legs.iter()
+        self.legs
+            .iter()
             .map(|(pricing, position)| {
                 let gamma = pricing.greeks.as_ref().map(|g| g.gamma).unwrap_or(0.0);
                 match position {
@@ -630,7 +613,9 @@ impl HasIV for CompositePricing {
     fn primary_iv(&self) -> Option<f64> {
         // Average IV across all legs
         // LegPricing.iv is Option<f64>
-        let ivs: Vec<f64> = self.legs.iter()
+        let ivs: Vec<f64> = self
+            .legs
+            .iter()
             .filter_map(|(pricing, _)| pricing.iv)
             .filter(|iv| *iv > 0.0)
             .collect();

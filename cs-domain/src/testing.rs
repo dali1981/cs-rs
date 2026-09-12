@@ -24,11 +24,13 @@
 
 use chrono::NaiveDate;
 
+use crate::campaign::{PeriodPolicy, TradingCampaign};
 use crate::entities::EarningsEvent;
-use crate::value_objects::{EarningsTime, TradeDirection, IronButterflyConfig, MultiLegStrategyConfig};
-use crate::strike_selection::OptionStrategy;
 use crate::expiration::ExpirationPolicy;
-use crate::campaign::{TradingCampaign, PeriodPolicy};
+use crate::strike_selection::OptionStrategy;
+use crate::value_objects::{
+    EarningsTime, IronButterflyConfig, MultiLegStrategyConfig, TradeDirection,
+};
 
 // ── EarningsEventBuilder ──────────────────────────────────────────────────────
 
@@ -102,7 +104,10 @@ impl EarningsEventBuilder {
     /// # Panics
     /// Panics if `symbol` is empty.
     pub fn build(self) -> EarningsEvent {
-        assert!(!self.symbol.is_empty(), "EarningsEventBuilder: symbol must not be empty");
+        assert!(
+            !self.symbol.is_empty(),
+            "EarningsEventBuilder: symbol must not be empty"
+        );
         EarningsEvent {
             symbol: self.symbol,
             earnings_date: self.earnings_date,
@@ -216,11 +221,15 @@ impl TradingCampaignBuilder {
     /// # Panics
     /// Panics if `symbol` is empty or `end_date` < `start_date`.
     pub fn build(self) -> TradingCampaign {
-        assert!(!self.symbol.is_empty(), "TradingCampaignBuilder: symbol must not be empty");
+        assert!(
+            !self.symbol.is_empty(),
+            "TradingCampaignBuilder: symbol must not be empty"
+        );
         assert!(
             self.end_date >= self.start_date,
             "TradingCampaignBuilder: end_date ({}) must be >= start_date ({})",
-            self.end_date, self.start_date,
+            self.end_date,
+            self.start_date,
         );
         TradingCampaign {
             symbol: self.symbol,

@@ -1,6 +1,6 @@
-use chrono::{NaiveDate, NaiveTime, DateTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use rust_decimal::Decimal;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -31,7 +31,9 @@ impl Strike {
         Ok(Self(value))
     }
 
-    pub fn value(&self) -> Decimal { self.0 }
+    pub fn value(&self) -> Decimal {
+        self.0
+    }
 }
 
 impl From<Strike> for f64 {
@@ -44,8 +46,8 @@ impl TryFrom<f64> for Strike {
     type Error = ValidationError;
 
     fn try_from(value: f64) -> Result<Self, Self::Error> {
-        let decimal = Decimal::try_from(value)
-            .map_err(|_| ValidationError::InvalidStrike(Decimal::ZERO))?;
+        let decimal =
+            Decimal::try_from(value).map_err(|_| ValidationError::InvalidStrike(Decimal::ZERO))?;
         Strike::new(decimal)
     }
 }
@@ -654,8 +656,14 @@ impl EarningsSummaryStats {
             iv_crushes.iter().sum::<f64>() / iv_crushes.len() as f64
         };
 
-        let up_moves = outcomes.iter().filter(|o| o.actual_direction == MoveDirection::Up).count();
-        let down_moves = outcomes.iter().filter(|o| o.actual_direction == MoveDirection::Down).count();
+        let up_moves = outcomes
+            .iter()
+            .filter(|o| o.actual_direction == MoveDirection::Up)
+            .count();
+        let down_moves = outcomes
+            .iter()
+            .filter(|o| o.actual_direction == MoveDirection::Down)
+            .count();
 
         Self {
             total_events: total,
@@ -717,22 +725,33 @@ impl WingSelectionMode {
         let parts: Vec<&str> = arg.split(':').collect();
         match parts.as_slice() {
             ["delta", val] => {
-                let wing_delta = val.parse::<f64>()
+                let wing_delta = val
+                    .parse::<f64>()
                     .map_err(|_| format!("Invalid delta value: {}", val))?;
                 if !(0.0..=1.0).contains(&wing_delta) {
-                    return Err(format!("Delta must be between 0.0 and 1.0, got {}", wing_delta));
+                    return Err(format!(
+                        "Delta must be between 0.0 and 1.0, got {}",
+                        wing_delta
+                    ));
                 }
                 Ok(WingSelectionMode::Delta { wing_delta })
             }
             ["moneyness", val] => {
-                let wing_percent = val.parse::<f64>()
+                let wing_percent = val
+                    .parse::<f64>()
                     .map_err(|_| format!("Invalid moneyness value: {}", val))?;
                 if !(0.0..=1.0).contains(&wing_percent) {
-                    return Err(format!("Moneyness percent must be between 0.0 and 1.0, got {}", wing_percent));
+                    return Err(format!(
+                        "Moneyness percent must be between 0.0 and 1.0, got {}",
+                        wing_percent
+                    ));
                 }
                 Ok(WingSelectionMode::Moneyness { wing_percent })
             }
-            _ => Err(format!("Invalid wing mode format: '{}'. Use 'delta:0.25' or 'moneyness:0.10'", arg)),
+            _ => Err(format!(
+                "Invalid wing mode format: '{}'. Use 'delta:0.25' or 'moneyness:0.10'",
+                arg
+            )),
         }
     }
 
@@ -752,7 +771,9 @@ impl std::fmt::Display for WingSelectionMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             WingSelectionMode::Delta { wing_delta } => write!(f, "delta:{}", wing_delta),
-            WingSelectionMode::Moneyness { wing_percent } => write!(f, "moneyness:{}", wing_percent),
+            WingSelectionMode::Moneyness { wing_percent } => {
+                write!(f, "moneyness:{}", wing_percent)
+            }
         }
     }
 }
@@ -769,7 +790,10 @@ pub struct IronButterflyConfig {
 impl IronButterflyConfig {
     /// Create a new iron butterfly configuration
     pub fn new(wing_mode: WingSelectionMode, symmetric: bool) -> Self {
-        Self { wing_mode, symmetric }
+        Self {
+            wing_mode,
+            symmetric,
+        }
     }
 
     /// Create default configuration (25-delta symmetric)
@@ -785,7 +809,7 @@ impl IronButterflyConfig {
         let wing_mode = WingSelectionMode::from_cli_arg(arg)?;
         Ok(Self {
             wing_mode,
-            symmetric: true,  // Always symmetric for now
+            symmetric: true, // Always symmetric for now
         })
     }
 
@@ -825,7 +849,8 @@ impl DistanceSpec {
         let parts: Vec<&str> = arg.split(':').collect();
         match parts.as_slice() {
             ["delta", val] => {
-                let delta = val.parse::<f64>()
+                let delta = val
+                    .parse::<f64>()
                     .map_err(|_| format!("Invalid delta value: {}", val))?;
                 if !(0.0..=1.0).contains(&delta) {
                     return Err(format!("Delta must be between 0.0 and 1.0, got {}", delta));
@@ -833,14 +858,21 @@ impl DistanceSpec {
                 Ok(DistanceSpec::Delta(delta))
             }
             ["moneyness", val] => {
-                let percent = val.parse::<f64>()
+                let percent = val
+                    .parse::<f64>()
                     .map_err(|_| format!("Invalid moneyness value: {}", val))?;
                 if !(0.0..=1.0).contains(&percent) {
-                    return Err(format!("Moneyness percent must be between 0.0 and 1.0, got {}", percent));
+                    return Err(format!(
+                        "Moneyness percent must be between 0.0 and 1.0, got {}",
+                        percent
+                    ));
                 }
                 Ok(DistanceSpec::Moneyness(percent))
             }
-            _ => Err(format!("Invalid distance spec format: '{}'. Use 'delta:0.25' or 'moneyness:0.10'", arg)),
+            _ => Err(format!(
+                "Invalid distance spec format: '{}'. Use 'delta:0.25' or 'moneyness:0.10'",
+                arg
+            )),
         }
     }
 }
@@ -874,8 +906,14 @@ impl SpreadType {
         let parts: Vec<&str> = arg.split(':').collect();
         match parts.as_slice() {
             ["simple", _] => {
-                let distance = DistanceSpec::from_cli_arg(&format!("{}:{}", parts[1], parts.get(2).unwrap_or(&"")))?;
-                Ok(SpreadType::Simple { distance_from_center: distance })
+                let distance = DistanceSpec::from_cli_arg(&format!(
+                    "{}:{}",
+                    parts[1],
+                    parts.get(2).unwrap_or(&"")
+                ))?;
+                Ok(SpreadType::Simple {
+                    distance_from_center: distance,
+                })
             }
             ["double", _] => {
                 let distances: Vec<&str> = parts.get(2).unwrap_or(&"").split(',').collect();
@@ -884,7 +922,10 @@ impl SpreadType {
                 }
                 let near = DistanceSpec::from_cli_arg(&format!("{}:{}", parts[1], distances[0]))?;
                 let far = DistanceSpec::from_cli_arg(&format!("{}:{}", parts[1], distances[1]))?;
-                Ok(SpreadType::Double { near_distance: near, far_distance: far })
+                Ok(SpreadType::Double {
+                    near_distance: near,
+                    far_distance: far,
+                })
             }
             _ => Err(format!("Invalid spread type format: '{}'", arg)),
         }
@@ -902,7 +943,10 @@ pub struct CenterConfig {
 
 impl CenterConfig {
     pub fn new(multiplicity: u32, is_straddle: bool) -> Self {
-        Self { multiplicity, is_straddle }
+        Self {
+            multiplicity,
+            is_straddle,
+        }
     }
 }
 
@@ -952,7 +996,10 @@ pub struct SymmetricWingConfig {
 
 impl SymmetricWingConfig {
     pub fn new(spread_type: SpreadType, symmetric: bool) -> Self {
-        Self { spread_type, symmetric }
+        Self {
+            spread_type,
+            symmetric,
+        }
     }
 }
 
@@ -972,7 +1019,12 @@ impl MultiLegStrategyConfig {
         wings: SymmetricWingConfig,
         direction: TradeDirection,
     ) -> Self {
-        Self { strategy_type, center, wings, direction }
+        Self {
+            strategy_type,
+            center,
+            wings,
+            direction,
+        }
     }
 
     /// Create a Strangle configuration (25-delta, short direction)
@@ -981,7 +1033,9 @@ impl MultiLegStrategyConfig {
             strategy_type: MultiLegStrategyType::Strangle,
             center: CenterConfig::new(1, false),
             wings: SymmetricWingConfig::new(
-                SpreadType::Simple { distance_from_center: DistanceSpec::Delta(wing_delta) },
+                SpreadType::Simple {
+                    distance_from_center: DistanceSpec::Delta(wing_delta),
+                },
                 true,
             ),
             direction: TradeDirection::Short,
@@ -994,7 +1048,9 @@ impl MultiLegStrategyConfig {
             strategy_type: MultiLegStrategyType::Butterfly,
             center: CenterConfig::new(2, true),
             wings: SymmetricWingConfig::new(
-                SpreadType::Simple { distance_from_center: DistanceSpec::Delta(wing_delta) },
+                SpreadType::Simple {
+                    distance_from_center: DistanceSpec::Delta(wing_delta),
+                },
                 true,
             ),
             direction: TradeDirection::Short,
@@ -1039,7 +1095,9 @@ impl MultiLegStrategyConfig {
             strategy_type: MultiLegStrategyType::IronButterfly,
             center: CenterConfig::new(1, true),
             wings: SymmetricWingConfig::new(
-                SpreadType::Simple { distance_from_center: DistanceSpec::Delta(wing_delta) },
+                SpreadType::Simple {
+                    distance_from_center: DistanceSpec::Delta(wing_delta),
+                },
                 true,
             ),
             direction: TradeDirection::Short,
@@ -1152,12 +1210,30 @@ mod tests {
 
     #[test]
     fn test_earnings_time_from_str() {
-        assert_eq!(EarningsTime::from_str("bmo"), EarningsTime::BeforeMarketOpen);
-        assert_eq!(EarningsTime::from_str("BMO"), EarningsTime::BeforeMarketOpen);
-        assert_eq!(EarningsTime::from_str("before_market_open"), EarningsTime::BeforeMarketOpen);
-        assert_eq!(EarningsTime::from_str("amc"), EarningsTime::AfterMarketClose);
-        assert_eq!(EarningsTime::from_str("AMC"), EarningsTime::AfterMarketClose);
-        assert_eq!(EarningsTime::from_str("after_market_close"), EarningsTime::AfterMarketClose);
+        assert_eq!(
+            EarningsTime::from_str("bmo"),
+            EarningsTime::BeforeMarketOpen
+        );
+        assert_eq!(
+            EarningsTime::from_str("BMO"),
+            EarningsTime::BeforeMarketOpen
+        );
+        assert_eq!(
+            EarningsTime::from_str("before_market_open"),
+            EarningsTime::BeforeMarketOpen
+        );
+        assert_eq!(
+            EarningsTime::from_str("amc"),
+            EarningsTime::AfterMarketClose
+        );
+        assert_eq!(
+            EarningsTime::from_str("AMC"),
+            EarningsTime::AfterMarketClose
+        );
+        assert_eq!(
+            EarningsTime::from_str("after_market_close"),
+            EarningsTime::AfterMarketClose
+        );
         assert_eq!(EarningsTime::from_str("unknown"), EarningsTime::Unknown);
     }
 

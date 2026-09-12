@@ -1,9 +1,9 @@
 // cs-domain/src/campaign/schedule.rs
 
-use std::collections::BTreeMap;
-use chrono::NaiveDate;
-use crate::EarningsEvent;
 use super::{TradingCampaign, TradingSession};
+use crate::EarningsEvent;
+use chrono::NaiveDate;
+use std::collections::BTreeMap;
 
 /// A schedule of trading sessions organized by date
 ///
@@ -61,12 +61,18 @@ impl SessionSchedule {
 
     /// Get sessions that ENTER on a given date
     pub fn entries_on(&self, date: NaiveDate) -> &[TradingSession] {
-        self.by_entry_date.get(&date).map(Vec::as_slice).unwrap_or(&[])
+        self.by_entry_date
+            .get(&date)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     /// Get sessions that EXIT on a given date
     pub fn exits_on(&self, date: NaiveDate) -> &[TradingSession] {
-        self.by_exit_date.get(&date).map(Vec::as_slice).unwrap_or(&[])
+        self.by_exit_date
+            .get(&date)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     /// Iterate over all entry dates in order
@@ -76,7 +82,8 @@ impl SessionSchedule {
 
     /// Get all unique symbols in the schedule
     pub fn symbols(&self) -> Vec<String> {
-        let mut symbols: Vec<String> = self.by_entry_date
+        let mut symbols: Vec<String> = self
+            .by_entry_date
             .values()
             .flat_map(|sessions| sessions.iter().map(|s| s.symbol.clone()))
             .collect();

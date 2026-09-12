@@ -252,7 +252,9 @@ pub struct RegTOptionEngine {
 
 impl Default for RegTOptionEngine {
     fn default() -> Self {
-        Self { calc: MarginCalculator::default() }
+        Self {
+            calc: MarginCalculator::default(),
+        }
     }
 }
 
@@ -279,16 +281,15 @@ impl OptionMarginEngine for RegTOptionEngine {
         }
 
         for leg in &inputs.option_legs {
-            let dte = (leg.expiry - inputs.ts.date_naive())
-                .num_days()
-                .max(0) as u32;
+            let dte = (leg.expiry - inputs.ts.date_naive()).num_days().max(0) as u32;
 
             let premium = leg.mark_premium.abs();
             let per_share_margin = if leg.qty >= 0 {
                 self.calc.long_option_margin(premium, dte)
             } else {
                 let is_call = matches!(leg.right, OptionRight::Call);
-                self.calc.naked_short_equity_margin(premium, spot, leg.strike, is_call)
+                self.calc
+                    .naked_short_equity_margin(premium, spot, leg.strike, is_call)
             };
 
             let qty = Decimal::from(leg.qty.abs() as u32);
@@ -329,7 +330,8 @@ impl RegTOptionEngine {
         let per_share = if call_sign > 0 {
             self.calc.long_straddle_margin(call_premium, put_premium)
         } else {
-            self.calc.short_straddle_margin(call_premium, put_premium, spot, call.strike)
+            self.calc
+                .short_straddle_margin(call_premium, put_premium, spot, call.strike)
         };
 
         Some(per_share * Decimal::from(CONTRACT_MULTIPLIER) * qty)
@@ -345,8 +347,14 @@ impl RegTOptionEngine {
             return None;
         }
 
-        let calls: Vec<&OptionLegInput> = legs.iter().filter(|l| matches!(l.right, OptionRight::Call)).collect();
-        let puts: Vec<&OptionLegInput> = legs.iter().filter(|l| matches!(l.right, OptionRight::Put)).collect();
+        let calls: Vec<&OptionLegInput> = legs
+            .iter()
+            .filter(|l| matches!(l.right, OptionRight::Call))
+            .collect();
+        let puts: Vec<&OptionLegInput> = legs
+            .iter()
+            .filter(|l| matches!(l.right, OptionRight::Put))
+            .collect();
         if calls.len() != 2 || puts.len() != 2 {
             return None;
         }
@@ -354,7 +362,10 @@ impl RegTOptionEngine {
         let mut center_call = None;
         let mut center_put = None;
         for call in &calls {
-            if let Some(put) = puts.iter().find(|p| p.strike == call.strike && p.qty.signum() == call.qty.signum()) {
+            if let Some(put) = puts
+                .iter()
+                .find(|p| p.strike == call.strike && p.qty.signum() == call.qty.signum())
+            {
                 center_call = Some(*call);
                 center_put = Some(*put);
                 break;
@@ -403,7 +414,10 @@ impl RegTOptionEngine {
         if left.right != right.right || left.expiry == right.expiry {
             return None;
         }
-        if left.qty.signum() == 0 || right.qty.signum() == 0 || left.qty.signum() == right.qty.signum() {
+        if left.qty.signum() == 0
+            || right.qty.signum() == 0
+            || left.qty.signum() == right.qty.signum()
+        {
             return None;
         }
         if left.qty.abs() != right.qty.abs() {
@@ -447,12 +461,7 @@ impl StockMarginEngine for RegTStockEngine {
         let notional = Decimal::from(hedge.shares.abs() as u32) * hedge.spot;
 
         let (long_rate_i, short_rate_i, long_rate_m, short_rate_m) = match cfg.stock_margin_mode {
-            StockMarginMode::Cash => (
-                Decimal::ONE,
-                Decimal::ONE,
-                Decimal::ONE,
-                Decimal::ONE,
-            ),
+            StockMarginMode::Cash => (Decimal::ONE, Decimal::ONE, Decimal::ONE, Decimal::ONE),
             StockMarginMode::RegT => (
                 cfg.long_initial_rate,
                 cfg.short_initial_rate,
@@ -475,7 +484,9 @@ pub fn margin_engine_for_config(cfg: &MarginConfig) -> Option<Box<dyn MarginEngi
         MarginMode::RegT | MarginMode::Cash | MarginMode::PortfolioMargin => {
             let opt: Box<dyn OptionMarginEngine> = match cfg.mode {
                 MarginMode::Off => Box::new(OffOptionEngine),
-                MarginMode::RegT | MarginMode::Cash | MarginMode::PortfolioMargin => Box::new(RegTOptionEngine::default()),
+                MarginMode::RegT | MarginMode::Cash | MarginMode::PortfolioMargin => {
+                    Box::new(RegTOptionEngine::default())
+                }
             };
             let stock: Box<dyn StockMarginEngine> = Box::new(RegTStockEngine);
             Some(Box::new(CompositeMarginEngine::new(opt, stock)))

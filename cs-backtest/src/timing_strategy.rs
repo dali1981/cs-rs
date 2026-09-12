@@ -1,5 +1,8 @@
 use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
-use cs_domain::{EarningsEvent, EarningsTradeTiming, StraddleTradeTiming, PostEarningsStraddleTiming, HedgeStrategy, TradingCalendar};
+use cs_domain::{
+    EarningsEvent, EarningsTradeTiming, HedgeStrategy, PostEarningsStraddleTiming,
+    StraddleTradeTiming, TradingCalendar,
+};
 
 /// Timing strategy enum that wraps all timing implementations
 ///
@@ -34,7 +37,11 @@ impl TimingStrategy {
     ///
     /// Entry: N trading days before earnings
     /// Exit: M trading days before earnings (or on earnings day if M=0)
-    pub fn for_straddle(config: cs_domain::TimingConfig, entry_days: usize, exit_days: usize) -> Self {
+    pub fn for_straddle(
+        config: cs_domain::TimingConfig,
+        entry_days: usize,
+        exit_days: usize,
+    ) -> Self {
         let timing = StraddleTradeTiming::new(config)
             .with_entry_days(entry_days)
             .with_exit_days(exit_days);
@@ -46,8 +53,7 @@ impl TimingStrategy {
     /// Entry: Day after earnings announcement
     /// Exit: N trading days after entry
     pub fn for_post_earnings(config: cs_domain::TimingConfig, holding_days: usize) -> Self {
-        let timing = PostEarningsStraddleTiming::new(config)
-            .with_holding_days(holding_days);
+        let timing = PostEarningsStraddleTiming::new(config).with_holding_days(holding_days);
         TimingStrategy::PostEarnings(timing)
     }
 }
@@ -179,14 +185,13 @@ impl TimingStrategy {
         }
         times
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cs_domain::value_objects::{EarningsTime, TimingConfig};
     use chrono::NaiveDate;
+    use cs_domain::value_objects::{EarningsTime, TimingConfig};
 
     #[test]
     fn test_earnings_timing_lookahead() {

@@ -2,10 +2,8 @@
 //!
 //! Combines multiple cost calculators (slippage + commission + market impact).
 
-use crate::trading_costs::{
-    TradingCostCalculator, TradingContext, TradingCost,
-};
-use super::{HalfSpreadSlippage, CommissionModel};
+use super::{CommissionModel, HalfSpreadSlippage};
+use crate::trading_costs::{TradingContext, TradingCost, TradingCostCalculator};
 
 /// Combines multiple cost calculators
 ///
@@ -29,7 +27,9 @@ pub struct CompositeCostCalculator {
 impl CompositeCostCalculator {
     /// Create an empty composite calculator
     pub fn new() -> Self {
-        Self { calculators: Vec::new() }
+        Self {
+            calculators: Vec::new(),
+        }
     }
 
     /// Add a calculator
@@ -55,8 +55,7 @@ impl CompositeCostCalculator {
 
     /// Slippage only (no commission)
     pub fn slippage_only() -> Self {
-        Self::new()
-            .with(HalfSpreadSlippage::normal())
+        Self::new().with(HalfSpreadSlippage::normal())
     }
 
     /// IBKR-like costs (slippage + commission)
@@ -100,13 +99,15 @@ impl CompositeCostCalculator {
 
 impl TradingCostCalculator for CompositeCostCalculator {
     fn entry_cost(&self, context: &TradingContext) -> TradingCost {
-        self.calculators.iter()
+        self.calculators
+            .iter()
             .map(|c| c.entry_cost(context))
             .fold(TradingCost::default(), |acc, cost| acc + cost)
     }
 
     fn exit_cost(&self, context: &TradingContext) -> TradingCost {
-        self.calculators.iter()
+        self.calculators
+            .iter()
             .map(|c| c.exit_cost(context))
             .fold(TradingCost::default(), |acc, cost| acc + cost)
     }
@@ -138,7 +139,7 @@ impl std::fmt::Debug for CompositeCostCalculator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trading_costs::{LegContext, TradeType, TradeSide};
+    use crate::trading_costs::{LegContext, TradeSide, TradeType};
     use chrono::Utc;
     use rust_decimal_macros::dec;
 

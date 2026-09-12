@@ -12,14 +12,14 @@
 //! - `HistoricalAverageIVProvider`: Use averaged IV over lookback period
 
 mod common;
-mod gamma_approximation;
-mod entry_volatility;
 mod current_hv;
 mod current_market_iv;
+mod entry_volatility;
+mod gamma_approximation;
 mod historical_average_iv;
 
-pub use gamma_approximation::GammaApproximationProvider;
-pub use entry_volatility::EntryVolatilityProvider;
 pub use current_hv::CurrentHVProvider;
 pub use current_market_iv::CurrentMarketIVProvider;
+pub use entry_volatility::EntryVolatilityProvider;
+pub use gamma_approximation::GammaApproximationProvider;
 pub use historical_average_iv::HistoricalAverageIVProvider;

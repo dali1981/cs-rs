@@ -3,8 +3,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::args::{AnalyzeArgs, GlobalArgs};
 use super::CommandHandler;
+use crate::args::{AnalyzeArgs, GlobalArgs};
 
 /// Analyze command handler
 pub struct AnalyzeCommand {
@@ -24,7 +24,10 @@ impl AnalyzeCommand {
 impl CommandHandler for AnalyzeCommand {
     async fn execute(&self) -> Result<()> {
         // TODO: Implement analyze command execution
-        println!("Running analyze command for directory: {:?}", self.args.run_dir);
+        println!(
+            "Running analyze command for directory: {:?}",
+            self.args.run_dir
+        );
         Ok(())
     }
 }

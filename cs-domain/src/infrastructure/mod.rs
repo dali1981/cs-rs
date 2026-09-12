@@ -6,34 +6,34 @@ pub use mappers::IntoNormalized;
 
 // Finq-based repositories (requires finq-flatfiles)
 #[cfg(feature = "finq-flatfiles")]
-pub mod finq_options_repo;
-#[cfg(feature = "finq-flatfiles")]
 pub mod finq_equity_repo;
-pub mod ib_options_repo;
+#[cfg(feature = "finq-flatfiles")]
+pub mod finq_options_repo;
 pub mod ib_equity_repo;
+pub mod ib_options_repo;
 
 // Earnings repositories
-pub mod earnings_repo;
+pub mod custom_file_earnings;
 #[cfg(feature = "earnings-rs")]
 pub mod earnings_reader_adapter;
-pub mod custom_file_earnings;
+pub mod earnings_repo;
 pub mod parquet_results_repo;
 
 // Demo repositories (always available, used when demo feature is on)
 pub mod demo_repos;
 
 // Re-exports
-#[cfg(feature = "finq-flatfiles")]
-pub use finq_options_repo::FinqOptionsRepository;
-#[cfg(feature = "finq-flatfiles")]
-pub use finq_equity_repo::FinqEquityRepository;
-pub use ib_options_repo::IbOptionsRepository;
-pub use ib_equity_repo::IbEquityRepository;
-pub use earnings_repo::{StubEarningsRepository, ParquetEarningsRepository};
+pub use custom_file_earnings::CustomFileEarningsReader;
 #[cfg(feature = "earnings-rs")]
 pub use earnings_reader_adapter::EarningsReaderAdapter;
-pub use custom_file_earnings::CustomFileEarningsReader;
+pub use earnings_repo::{ParquetEarningsRepository, StubEarningsRepository};
+#[cfg(feature = "finq-flatfiles")]
+pub use finq_equity_repo::FinqEquityRepository;
+#[cfg(feature = "finq-flatfiles")]
+pub use finq_options_repo::FinqOptionsRepository;
+pub use ib_equity_repo::IbEquityRepository;
+pub use ib_options_repo::IbOptionsRepository;
 pub use parquet_results_repo::ParquetResultsRepository;
 
 // Demo re-exports
-pub use demo_repos::{DemoOptionsRepository, DemoEquityRepository, DemoEarningsRepository};
+pub use demo_repos::{DemoEarningsRepository, DemoEquityRepository, DemoOptionsRepository};

@@ -3,14 +3,14 @@
 //! Builds a fresh IV surface at each rehedge from the option chain,
 //! providing the most accurate delta computation at the cost of performance.
 
+use super::common::compute_position_delta_with_vol_lookup;
+use crate::iv_surface_builder::build_iv_surface;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use std::sync::Arc;
 use cs_domain::hedging::DeltaProvider;
 use cs_domain::repositories::{EquityDataRepository, OptionsDataRepository};
 use cs_domain::trade::CompositeTrade;
-use super::common::compute_position_delta_with_vol_lookup;
-use crate::iv_surface_builder::build_iv_surface;
+use std::sync::Arc;
 
 /// Build fresh IV surface at each rehedge from current market data
 ///
@@ -58,7 +58,8 @@ impl<T: CompositeTrade> CurrentMarketIVProvider<T> {
 impl<T: CompositeTrade + Send + Sync> DeltaProvider for CurrentMarketIVProvider<T> {
     async fn compute_delta(&mut self, spot: f64, timestamp: DateTime<Utc>) -> Result<f64, String> {
         // Build IV surface at current time
-        let chain_df = self.options_repo
+        let chain_df = self
+            .options_repo
             .get_option_bars(&self.symbol, timestamp.date_naive())
             .await
             .map_err(|e| format!("Failed to get option chain at {}: {}", timestamp, e))?;
@@ -74,7 +75,11 @@ impl<T: CompositeTrade + Send + Sync> DeltaProvider for CurrentMarketIVProvider<
             |leg, _spot| {
                 // Get IV from surface for this specific leg
                 iv_surface
-                    .get_iv(leg.strike.value(), leg.expiration, leg.option_type == finq_core::OptionType::Call)
+                    .get_iv(
+                        leg.strike.value(),
+                        leg.expiration,
+                        leg.option_type == finq_core::OptionType::Call,
+                    )
                     .unwrap_or(0.30) // Fallback to 30% if not found
             },
             self.risk_free_rate,

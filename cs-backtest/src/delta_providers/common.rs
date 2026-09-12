@@ -4,10 +4,10 @@
 //! to avoid repetition across multiple delta provider implementations.
 
 use chrono::{DateTime, Utc};
-use rust_decimal::prelude::ToPrimitive;
 use cs_analytics::bs_delta;
 use cs_domain::trade::CompositeTrade;
 use finq_core::OptionType;
+use rust_decimal::prelude::ToPrimitive;
 
 /// Compute position delta from all legs using a uniform volatility
 ///
@@ -30,7 +30,8 @@ pub fn compute_position_delta_uniform_vol<T: CompositeTrade>(
     volatility: f64,
     risk_free_rate: f64,
 ) -> f64 {
-    trade.legs()
+    trade
+        .legs()
         .iter()
         .map(|(leg, position)| {
             let tte = (leg.expiration - timestamp.date_naive()).num_days() as f64 / 365.0;
@@ -74,7 +75,8 @@ pub fn compute_position_delta_with_vol_lookup<T: CompositeTrade>(
     mut vol_lookup: impl FnMut(&cs_domain::entities::OptionLeg, f64) -> f64,
     risk_free_rate: f64,
 ) -> f64 {
-    trade.legs()
+    trade
+        .legs()
         .iter()
         .map(|(leg, position)| {
             let tte = (leg.expiration - timestamp.date_naive()).num_days() as f64 / 365.0;

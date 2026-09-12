@@ -6,8 +6,8 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::prelude::ToPrimitive;
 
-use cs_domain::{CompositeTrade, PositionGreeks};
 use cs_analytics::{bs_greeks, Greeks, IVSurface, PricingIVProvider};
+use cs_domain::{CompositeTrade, PositionGreeks};
 use finq_core::OptionType;
 
 /// Computes position-level Greeks for attribution
@@ -58,14 +58,7 @@ impl<'a, T: CompositeTrade> GreeksComputer<'a, T> {
             let is_call = leg.option_type == OptionType::Call;
             let strike = leg.strike.value().to_f64().unwrap_or(0.0);
 
-            let leg_greeks = bs_greeks(
-                spot,
-                strike,
-                tte,
-                volatility,
-                is_call,
-                self.risk_free_rate,
-            );
+            let leg_greeks = bs_greeks(spot, strike, tte, volatility, is_call, self.risk_free_rate);
 
             // Apply position sign (long = +1, short = -1)
             let sign = position.sign();
@@ -76,7 +69,13 @@ impl<'a, T: CompositeTrade> GreeksComputer<'a, T> {
         }
 
         // Scale to position level
-        PositionGreeks::from_per_share(total.delta, total.gamma, total.theta, total.vega, self.contract_multiplier)
+        PositionGreeks::from_per_share(
+            total.delta,
+            total.gamma,
+            total.theta,
+            total.vega,
+            self.contract_multiplier,
+        )
     }
 
     /// Compute position Greeks from IV surface (per-leg IV)
@@ -115,14 +114,7 @@ impl<'a, T: CompositeTrade> GreeksComputer<'a, T> {
                 .get_iv(surface, strike, leg.expiration, is_call)
                 .unwrap_or(0.30); // Fallback
 
-            let leg_greeks = bs_greeks(
-                spot,
-                strike_f64,
-                tte,
-                iv,
-                is_call,
-                self.risk_free_rate,
-            );
+            let leg_greeks = bs_greeks(spot, strike_f64, tte, iv, is_call, self.risk_free_rate);
 
             let sign = position.sign();
             total.delta += leg_greeks.delta * sign;
@@ -131,7 +123,13 @@ impl<'a, T: CompositeTrade> GreeksComputer<'a, T> {
             total.vega += leg_greeks.vega * sign;
         }
 
-        PositionGreeks::from_per_share(total.delta, total.gamma, total.theta, total.vega, self.contract_multiplier)
+        PositionGreeks::from_per_share(
+            total.delta,
+            total.gamma,
+            total.theta,
+            total.vega,
+            self.contract_multiplier,
+        )
     }
 
     /// Compute average IV across position legs from surface
@@ -239,10 +237,7 @@ mod tests {
         };
 
         let trade = MockTrade {
-            legs: vec![
-                (call, PositionType::Long),
-                (put, PositionType::Long),
-            ],
+            legs: vec![(call, PositionType::Long), (put, PositionType::Long)],
         };
 
         let computer = GreeksComputer::new(&trade, 100, 0.05);

@@ -1,8 +1,8 @@
-use chrono::{DateTime, NaiveDate, Utc};
+use super::{TradeTiming, TradingCalendar};
 use crate::datetime::eastern_to_utc;
 use crate::entities::EarningsEvent;
 use crate::value_objects::{EarningsTime, TimingConfig};
-use super::{TradeTiming, TradingCalendar};
+use chrono::{DateTime, NaiveDate, Utc};
 
 /// Calculates entry/exit timing for post-earnings straddle trades
 ///
@@ -12,7 +12,7 @@ use super::{TradeTiming, TradingCalendar};
 #[derive(Clone, Copy)]
 pub struct PostEarningsStraddleTiming {
     config: TimingConfig,
-    holding_days: usize,  // Default: 5 (one trading week)
+    holding_days: usize, // Default: 5 (one trading week)
 }
 
 impl PostEarningsStraddleTiming {
@@ -99,15 +99,21 @@ mod tests {
         let timing = default_timing().with_holding_days(5);
         let event = EarningsEvent::new(
             "AAPL".into(),
-            NaiveDate::from_ymd_opt(2025, 1, 30).unwrap(),  // Thursday AMC
+            NaiveDate::from_ymd_opt(2025, 1, 30).unwrap(), // Thursday AMC
             EarningsTime::AfterMarketClose,
         );
 
         // Entry: Next day (Friday Jan 31)
-        assert_eq!(timing.entry_date(&event), NaiveDate::from_ymd_opt(2025, 1, 31).unwrap());
+        assert_eq!(
+            timing.entry_date(&event),
+            NaiveDate::from_ymd_opt(2025, 1, 31).unwrap()
+        );
 
         // Exit: 5 trading days later = Friday Feb 7
-        assert_eq!(timing.exit_date(&event), NaiveDate::from_ymd_opt(2025, 2, 7).unwrap());
+        assert_eq!(
+            timing.exit_date(&event),
+            NaiveDate::from_ymd_opt(2025, 2, 7).unwrap()
+        );
 
         assert_eq!(timing.holding_period(), 5);
     }
@@ -117,15 +123,21 @@ mod tests {
         let timing = default_timing().with_holding_days(5);
         let event = EarningsEvent::new(
             "AAPL".into(),
-            NaiveDate::from_ymd_opt(2025, 2, 3).unwrap(),  // Monday BMO
+            NaiveDate::from_ymd_opt(2025, 2, 3).unwrap(), // Monday BMO
             EarningsTime::BeforeMarketOpen,
         );
 
         // Entry: Same day (Monday Feb 3)
-        assert_eq!(timing.entry_date(&event), NaiveDate::from_ymd_opt(2025, 2, 3).unwrap());
+        assert_eq!(
+            timing.entry_date(&event),
+            NaiveDate::from_ymd_opt(2025, 2, 3).unwrap()
+        );
 
         // Exit: 5 trading days later = Monday Feb 10
-        assert_eq!(timing.exit_date(&event), NaiveDate::from_ymd_opt(2025, 2, 10).unwrap());
+        assert_eq!(
+            timing.exit_date(&event),
+            NaiveDate::from_ymd_opt(2025, 2, 10).unwrap()
+        );
     }
 
     #[test]
@@ -133,15 +145,21 @@ mod tests {
         let timing = default_timing().with_holding_days(5);
         let event = EarningsEvent::new(
             "TEST".into(),
-            NaiveDate::from_ymd_opt(2025, 11, 7).unwrap(),  // Friday AMC
+            NaiveDate::from_ymd_opt(2025, 11, 7).unwrap(), // Friday AMC
             EarningsTime::AfterMarketClose,
         );
 
         // Entry: Monday Nov 10 (skip weekend)
-        assert_eq!(timing.entry_date(&event), NaiveDate::from_ymd_opt(2025, 11, 10).unwrap());
+        assert_eq!(
+            timing.entry_date(&event),
+            NaiveDate::from_ymd_opt(2025, 11, 10).unwrap()
+        );
 
         // Exit: Monday Nov 17 (5 trading days: Nov 11, 12, 13, 14, 17)
-        assert_eq!(timing.exit_date(&event), NaiveDate::from_ymd_opt(2025, 11, 17).unwrap());
+        assert_eq!(
+            timing.exit_date(&event),
+            NaiveDate::from_ymd_opt(2025, 11, 17).unwrap()
+        );
     }
 
     #[test]
@@ -154,6 +172,9 @@ mod tests {
         );
 
         // Should behave like AMC: entry next day
-        assert_eq!(timing.entry_date(&event), NaiveDate::from_ymd_opt(2025, 11, 4).unwrap());
+        assert_eq!(
+            timing.entry_date(&event),
+            NaiveDate::from_ymd_opt(2025, 11, 4).unwrap()
+        );
     }
 }

@@ -140,7 +140,11 @@ mod tests {
         let json = r#"{"type": "min_iv_ratio", "threshold": 1.2}"#;
         let rule: MarketRule = serde_json::from_str(json).unwrap();
         match rule {
-            MarketRule::MinIvRatio { short_dte, long_dte, threshold } => {
+            MarketRule::MinIvRatio {
+                short_dte,
+                long_dte,
+                threshold,
+            } => {
                 assert_eq!(short_dte, 7);
                 assert_eq!(long_dte, 30);
                 assert_eq!(threshold, 1.2);

@@ -4,11 +4,11 @@
 //! Sessions are the atomic execution units generated from campaigns.
 
 mod campaign;
-mod session;
-mod schedule;
 mod period_policy;
+mod schedule;
+mod session;
 
 pub use campaign::TradingCampaign;
-pub use session::{TradingSession, SessionAction, SessionContext, EarningsTimingType};
-pub use schedule::SessionSchedule;
 pub use period_policy::PeriodPolicy;
+pub use schedule::SessionSchedule;
+pub use session::{EarningsTimingType, SessionAction, SessionContext, TradingSession};

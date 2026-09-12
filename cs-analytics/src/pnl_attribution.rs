@@ -1,5 +1,5 @@
-use rust_decimal::Decimal;
 use crate::Greeks;
+use rust_decimal::Decimal;
 
 /// P&L attribution breakdown
 #[derive(Debug, Clone, Default)]
@@ -30,7 +30,8 @@ pub fn calculate_pnl_attribution(
     total_pnl: Decimal,
 ) -> PnLAttribution {
     let delta_pnl = Decimal::try_from(entry_greeks.delta * spot_change).unwrap_or_default();
-    let gamma_pnl = Decimal::try_from(0.5 * entry_greeks.gamma * spot_change.powi(2)).unwrap_or_default();
+    let gamma_pnl =
+        Decimal::try_from(0.5 * entry_greeks.gamma * spot_change.powi(2)).unwrap_or_default();
     let theta_pnl = Decimal::try_from(entry_greeks.theta * days_held).unwrap_or_default();
     let vega_pnl = Decimal::try_from(entry_greeks.vega * iv_change * 100.0).unwrap_or_default();
 
@@ -80,8 +81,10 @@ pub fn calculate_spread_pnl_attribution(
     // Vega P&L calculated per-leg with correct signs
     // Short leg: we are SHORT, so IV increase hurts us (negative vega exposure)
     // Long leg: we are LONG, so IV increase helps us (positive vega exposure)
-    let short_vega_pnl = Decimal::try_from(-short_greeks.vega * short_iv_change * 100.0).unwrap_or_default();
-    let long_vega_pnl = Decimal::try_from(long_greeks.vega * long_iv_change * 100.0).unwrap_or_default();
+    let short_vega_pnl =
+        Decimal::try_from(-short_greeks.vega * short_iv_change * 100.0).unwrap_or_default();
+    let long_vega_pnl =
+        Decimal::try_from(long_greeks.vega * long_iv_change * 100.0).unwrap_or_default();
     let vega_pnl = short_vega_pnl + long_vega_pnl;
 
     let explained = delta_pnl + gamma_pnl + theta_pnl + vega_pnl;
@@ -172,10 +175,10 @@ mod tests {
 
         let attr = calculate_pnl_attribution(
             &greeks,
-            2.0,  // $2 spot increase
-            0.0,  // No IV change
-            0.0,  // No time passed
-            Decimal::new(1, 0),  // $1 total P&L
+            2.0,                // $2 spot increase
+            0.0,                // No IV change
+            0.0,                // No time passed
+            Decimal::new(1, 0), // $1 total P&L
         );
 
         assert_eq!(attr.delta, Decimal::new(1, 0)); // 0.5 * 2.0 = 1.0
@@ -197,7 +200,7 @@ mod tests {
 
         let attr = calculate_pnl_attribution(
             &greeks,
-            10.0,  // $10 spot change
+            10.0, // $10 spot change
             0.0,
             0.0,
             Decimal::new(5, 0),
@@ -212,7 +215,7 @@ mod tests {
         let greeks = Greeks {
             delta: 0.0,
             gamma: 0.0,
-            theta: -0.05,  // -$0.05 per day
+            theta: -0.05, // -$0.05 per day
             vega: 0.0,
             rho: 0.0,
         };
@@ -221,8 +224,8 @@ mod tests {
             &greeks,
             0.0,
             0.0,
-            1.0,  // 1 day
-            Decimal::new(-5, 2),  // -$0.05
+            1.0,                 // 1 day
+            Decimal::new(-5, 2), // -$0.05
         );
 
         assert_eq!(attr.theta, Decimal::new(-5, 2));
@@ -235,14 +238,14 @@ mod tests {
             delta: 0.0,
             gamma: 0.0,
             theta: 0.0,
-            vega: 0.2,  // $0.20 per 1% IV change
+            vega: 0.2, // $0.20 per 1% IV change
             rho: 0.0,
         };
 
         let attr = calculate_pnl_attribution(
             &greeks,
             0.0,
-            0.05,  // 5% IV increase (0.30 -> 0.35)
+            0.05, // 5% IV increase (0.30 -> 0.35)
             0.0,
             Decimal::new(1, 0),
         );
@@ -263,10 +266,10 @@ mod tests {
 
         let attr = calculate_pnl_attribution(
             &greeks,
-            5.0,   // $5 spot increase
-            0.02,  // 2% IV increase
-            1.0,   // 1 day
-            Decimal::new(35, 1),  // $3.50
+            5.0,                 // $5 spot increase
+            0.02,                // 2% IV increase
+            1.0,                 // 1 day
+            Decimal::new(35, 1), // $3.50
         );
 
         // Delta: 0.5 * 5 = 2.5
@@ -291,7 +294,7 @@ mod tests {
             0.0,
             0.0,
             0.0,
-            Decimal::new(100, 0),  // $100 P&L but no Greeks explanation
+            Decimal::new(100, 0), // $100 P&L but no Greeks explanation
         );
 
         assert_eq!(attr.unexplained, Decimal::new(100, 0));
@@ -317,9 +320,9 @@ mod tests {
             rho: 0.0,
         };
 
-        let spot_change = 108.7276 - 116.81;  // -8.08
-        let short_iv_change = 0.8103 - 0.5906;  // +0.2197 (IV exploded)
-        let long_iv_change = 0.2797 - 0.3025;  // -0.0228 (IV decreased)
+        let spot_change = 108.7276 - 116.81; // -8.08
+        let short_iv_change = 0.8103 - 0.5906; // +0.2197 (IV exploded)
+        let long_iv_change = 0.2797 - 0.3025; // -0.0228 (IV decreased)
         let days_held = 1.433;
         let actual_pnl = Decimal::try_from(-0.586357098815967).unwrap();
 
@@ -328,7 +331,7 @@ mod tests {
         let buggy_attr = calculate_pnl_attribution(
             &spread_greeks,
             spot_change,
-            short_iv_change,  // Only using short leg IV change!
+            short_iv_change, // Only using short leg IV change!
             days_held,
             actual_pnl,
         );
@@ -352,8 +355,8 @@ mod tests {
         // Vega should be VERY different
         // Buggy: +1.27 (positive, thinks we benefited from IV increase)
         // Correct: -1.17 (negative, we lost money from IV changes)
-        assert!(buggy_attr.vega > Decimal::ZERO);  // Buggy shows positive
-        assert!(correct_attr.vega < Decimal::ZERO);  // Correct shows negative
+        assert!(buggy_attr.vega > Decimal::ZERO); // Buggy shows positive
+        assert!(correct_attr.vega < Decimal::ZERO); // Correct shows negative
 
         // The difference should be about $2.44
         let vega_diff = buggy_attr.vega - correct_attr.vega;
@@ -371,7 +374,7 @@ mod tests {
             delta: 0.5,
             gamma: 0.05,
             theta: -0.3,
-            vega: 0.1,  // Short vega
+            vega: 0.1, // Short vega
             rho: 0.0,
         };
 
@@ -379,13 +382,13 @@ mod tests {
             delta: 0.52,
             gamma: 0.04,
             theta: -0.05,
-            vega: 0.25,  // Long vega (higher)
+            vega: 0.25, // Long vega (higher)
             rho: 0.0,
         };
 
-        let spot_change = 0.0;  // No spot move
-        let short_iv_change = 0.30;  // Short IV up 30 pts
-        let long_iv_change = 0.10;   // Long IV up 10 pts
+        let spot_change = 0.0; // No spot move
+        let short_iv_change = 0.30; // Short IV up 30 pts
+        let long_iv_change = 0.10; // Long IV up 10 pts
         let days_held = 1.0;
 
         // Expected vega P&L:
@@ -438,8 +441,8 @@ mod tests {
         };
 
         let spot_change = 0.0;
-        let short_iv_change = -0.50;  // Short IV down 50 pts (big crush)
-        let long_iv_change = -0.20;   // Long IV down 20 pts (smaller crush)
+        let short_iv_change = -0.50; // Short IV down 50 pts (big crush)
+        let long_iv_change = -0.20; // Long IV down 20 pts (smaller crush)
         let days_held = 1.0;
 
         // Expected vega P&L:

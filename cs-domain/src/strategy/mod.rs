@@ -7,6 +7,6 @@ mod config;
 mod presets;
 mod types;
 
-pub use config::{TradeStrategy, TradeStructureConfig, TradeFilters};
+pub use config::{TradeFilters, TradeStrategy, TradeStructureConfig};
 pub use presets::*;
-pub use types::{TradeStructure, FailedTrade};
+pub use types::{FailedTrade, TradeStructure};

@@ -1,11 +1,11 @@
 //! Pre-configured strategy presets for common use cases
 
-use super::{TradeStrategy, TradeStructureConfig, TradeFilters};
-use crate::expiration::ExpirationPolicy;
-use crate::trading_period::TradingPeriodSpec;
-use crate::roll::RollPolicy;
-use crate::hedging::{HedgeConfig, HedgeStrategy};
+use super::{TradeFilters, TradeStrategy, TradeStructureConfig};
 use crate::datetime::MarketTime;
+use crate::expiration::ExpirationPolicy;
+use crate::hedging::{HedgeConfig, HedgeStrategy};
+use crate::roll::RollPolicy;
+use crate::trading_period::TradingPeriodSpec;
 use crate::CONTRACT_MULTIPLIER;
 use chrono::NaiveDate;
 use finq_core::OptionType;

@@ -92,16 +92,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|(_, iv)| *iv)
         .collect();
 
-    let min_iv = all_ivs
-        .iter()
-        .cloned()
-        .fold(f64::INFINITY, f64::min)
-        * 0.95;
-    let max_iv = all_ivs
-        .iter()
-        .cloned()
-        .fold(f64::NEG_INFINITY, f64::max)
-        * 1.05;
+    let min_iv = all_ivs.iter().cloned().fold(f64::INFINITY, f64::min) * 0.95;
+    let max_iv = all_ivs.iter().cloned().fold(f64::NEG_INFINITY, f64::max) * 1.05;
 
     let mut chart = ChartBuilder::on(&root)
         .caption(
@@ -140,7 +132,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Plot 90d IV
     if !data_90d.is_empty() {
         chart
-            .draw_series(LineSeries::new(data_90d.clone(), MAGENTA.mix(0.7).stroke_width(2)))?
+            .draw_series(LineSeries::new(
+                data_90d.clone(),
+                MAGENTA.mix(0.7).stroke_width(2),
+            ))?
             .label("90d IV")
             .legend(|(x, y)| {
                 PathElement::new(vec![(x, y), (x + 20, y)], MAGENTA.mix(0.7).stroke_width(2))
@@ -150,9 +145,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Mark IV crushes
     if !crush_points.is_empty() {
         chart
-            .draw_series(crush_points.iter().map(|(date, iv)| {
-                Circle::new((*date, *iv), 6, RED.filled())
-            }))?
+            .draw_series(
+                crush_points
+                    .iter()
+                    .map(|(date, iv)| Circle::new((*date, *iv), 6, RED.filled())),
+            )?
             .label("IV Crush")
             .legend(|(x, y)| Circle::new((x + 10, y), 5, RED.filled()));
     }
@@ -160,9 +157,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Mark IV spikes
     if !spike_points.is_empty() {
         chart
-            .draw_series(spike_points.iter().map(|(date, iv)| {
-                Circle::new((*date, *iv), 6, YELLOW.mix(0.7).filled())
-            }))?
+            .draw_series(
+                spike_points
+                    .iter()
+                    .map(|(date, iv)| Circle::new((*date, *iv), 6, YELLOW.mix(0.7).filled())),
+            )?
             .label("IV Spike")
             .legend(|(x, y)| Circle::new((x + 10, y), 5, YELLOW.mix(0.7).filled()));
     }

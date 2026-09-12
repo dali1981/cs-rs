@@ -1,8 +1,8 @@
-use chrono::{DateTime, NaiveDate, Utc};
+use super::{TradeTiming, TradingCalendar};
 use crate::datetime::eastern_to_utc;
 use crate::entities::EarningsEvent;
 use crate::value_objects::TimingConfig;
-use super::{TradeTiming, TradingCalendar};
+use chrono::{DateTime, NaiveDate, Utc};
 
 /// Calculates entry/exit timing for straddle trades around earnings
 ///
@@ -12,8 +12,8 @@ use super::{TradeTiming, TradingCalendar};
 #[derive(Clone, Copy)]
 pub struct StraddleTradeTiming {
     config: TimingConfig,
-    entry_days_before: usize,  // Default: 5 (one week before)
-    exit_days_before: usize,   // Default: 1 (day before earnings)
+    entry_days_before: usize, // Default: 5 (one week before)
+    exit_days_before: usize,  // Default: 1 (day before earnings)
 }
 
 impl StraddleTradeTiming {
@@ -37,18 +37,12 @@ impl StraddleTradeTiming {
 
     /// Entry date: N trading days before earnings
     pub fn entry_date(&self, event: &EarningsEvent) -> NaiveDate {
-        TradingCalendar::n_trading_days_before(
-            event.earnings_date,
-            self.entry_days_before
-        )
+        TradingCalendar::n_trading_days_before(event.earnings_date, self.entry_days_before)
     }
 
     /// Exit date: M trading days before earnings (default: 1)
     pub fn exit_date(&self, event: &EarningsEvent) -> NaiveDate {
-        TradingCalendar::n_trading_days_before(
-            event.earnings_date,
-            self.exit_days_before
-        )
+        TradingCalendar::n_trading_days_before(event.earnings_date, self.exit_days_before)
     }
 
     pub fn entry_datetime(&self, event: &EarningsEvent) -> DateTime<Utc> {
@@ -107,13 +101,11 @@ mod tests {
 
     #[test]
     fn test_straddle_timing_entry_exit() {
-        let timing = default_timing()
-            .with_entry_days(5)
-            .with_exit_days(1);
+        let timing = default_timing().with_entry_days(5).with_exit_days(1);
 
         let event = EarningsEvent::new(
             "AAPL".into(),
-            NaiveDate::from_ymd_opt(2025, 1, 30).unwrap(),  // Thursday earnings
+            NaiveDate::from_ymd_opt(2025, 1, 30).unwrap(), // Thursday earnings
             EarningsTime::AfterMarketClose,
         );
 
@@ -131,13 +123,11 @@ mod tests {
 
     #[test]
     fn test_straddle_timing_with_weekend() {
-        let timing = default_timing()
-            .with_entry_days(5)
-            .with_exit_days(1);
+        let timing = default_timing().with_entry_days(5).with_exit_days(1);
 
         let event = EarningsEvent::new(
             "AAPL".into(),
-            NaiveDate::from_ymd_opt(2025, 2, 3).unwrap(),  // Monday earnings
+            NaiveDate::from_ymd_opt(2025, 2, 3).unwrap(), // Monday earnings
             EarningsTime::BeforeMarketOpen,
         );
 
@@ -155,7 +145,7 @@ mod tests {
         let timing = default_timing();
         let event = EarningsEvent::new(
             "TEST".into(),
-            NaiveDate::from_ymd_opt(2025, 11, 3).unwrap(),  // Nov 3 earnings
+            NaiveDate::from_ymd_opt(2025, 11, 3).unwrap(), // Nov 3 earnings
             EarningsTime::AfterMarketClose,
         );
 

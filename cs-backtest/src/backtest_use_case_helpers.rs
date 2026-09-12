@@ -8,12 +8,14 @@
 //! The simulator is agnostic of business context (earnings events, hedging).
 //! It returns raw simulation data that the caller enriches as needed.
 
-use chrono::{DateTime, Utc};
-use cs_domain::*;
-use cs_analytics::IVSurface;
-use tracing::warn;
-use crate::execution::{ExecutionConfig, ExecutableTrade, TradePricer, SimulationOutput, ExecutionError};
+use crate::execution::{
+    ExecutableTrade, ExecutionConfig, ExecutionError, SimulationOutput, TradePricer,
+};
 use crate::iv_surface_builder::build_iv_surface_minute_aligned;
+use chrono::{DateTime, Utc};
+use cs_analytics::IVSurface;
+use cs_domain::*;
+use tracing::warn;
 
 /// Prepared market data for trade selection
 pub struct PreparedData {
@@ -79,14 +81,17 @@ impl<'a> TradeSimulator<'a> {
     /// This is the common setup needed by all trade types.
     pub async fn prepare(&self) -> Option<PreparedData> {
         // Get option chain at entry time
-        let entry_chain = match self.options_repo
+        let entry_chain = match self
+            .options_repo
             .get_option_bars_at_time(self.symbol, self.entry_time)
             .await
         {
             Ok(chain) => chain,
             Err(e) => {
-                warn!("Skipping {}: No option chain data at {} - {}",
-                    self.symbol, self.entry_time, e);
+                warn!(
+                    "Skipping {}: No option chain data at {} - {}",
+                    self.symbol, self.entry_time, e
+                );
                 return None;
             }
         };
@@ -96,29 +101,40 @@ impl<'a> TradeSimulator<'a> {
             &entry_chain,
             self.equity_repo,
             self.symbol,
-        ).await {
+        )
+        .await
+        {
             Some(surf) => surf,
             None => {
-                warn!("Skipping {}: Failed to build IV surface at {}",
-                    self.symbol, self.entry_time);
+                warn!(
+                    "Skipping {}: Failed to build IV surface at {}",
+                    self.symbol, self.entry_time
+                );
                 return None;
             }
         };
 
         // Get spot price at entry time
-        let spot = match self.equity_repo
+        let spot = match self
+            .equity_repo
             .get_spot_price(self.symbol, self.entry_time)
             .await
         {
             Ok(price) => price,
             Err(e) => {
-                warn!("Skipping {}: No equity/spot data at {} - {}",
-                    self.symbol, self.entry_time, e);
+                warn!(
+                    "Skipping {}: No equity/spot data at {} - {}",
+                    self.symbol, self.entry_time, e
+                );
                 return None;
             }
         };
 
-        Some(PreparedData { spot, surface, entry_chain })
+        Some(PreparedData {
+            spot,
+            surface,
+            entry_chain,
+        })
     }
 
     /// Run simulation and return raw data
@@ -138,36 +154,32 @@ impl<'a> TradeSimulator<'a> {
         T: ExecutableTrade,
     {
         // 1. Get spot prices
-        let entry_spot = self.equity_repo
+        let entry_spot = self
+            .equity_repo
             .get_spot_price(trade.symbol(), self.entry_time)
             .await?;
-        let exit_spot = self.equity_repo
+        let exit_spot = self
+            .equity_repo
             .get_spot_price(trade.symbol(), self.exit_time)
             .await?;
 
         // 2. Get option chains
-        let entry_chain = self.options_repo
+        let entry_chain = self
+            .options_repo
             .get_option_bars_at_time(trade.symbol(), self.entry_time)
             .await?;
-        let (exit_chain, exit_surface_time) = self.options_repo
+        let (exit_chain, exit_surface_time) = self
+            .options_repo
             .get_option_bars_at_or_after_time(trade.symbol(), self.exit_time, 30)
             .await?;
 
         // 3. Build IV surfaces with per-option spot prices (minute-aligned)
-        let entry_surface = build_iv_surface_minute_aligned(
-            &entry_chain,
-            self.equity_repo,
-            trade.symbol(),
-        )
-        .await;
+        let entry_surface =
+            build_iv_surface_minute_aligned(&entry_chain, self.equity_repo, trade.symbol()).await;
         let entry_surface_time = entry_surface.as_ref().map(|s| s.as_of_time());
 
-        let exit_surface = build_iv_surface_minute_aligned(
-            &exit_chain,
-            self.equity_repo,
-            trade.symbol(),
-        )
-        .await;
+        let exit_surface =
+            build_iv_surface_minute_aligned(&exit_chain, self.equity_repo, trade.symbol()).await;
 
         // 4. Price at entry
         tracing::debug!(
@@ -176,22 +188,24 @@ impl<'a> TradeSimulator<'a> {
             phase = "entry",
             "Pricing trade at entry"
         );
-        let entry_pricing = pricer.price_with_surface(
-            trade,
-            &entry_chain,
-            entry_spot.to_f64(),
-            self.entry_time,
-            entry_surface.as_ref(),
-        ).map_err(|e| {
-            tracing::warn!(
-                symbol = self.symbol,
-                time = %self.entry_time,
-                phase = "entry",
-                error = %e,
-                "Failed to price trade at entry"
-            );
-            e
-        })?;
+        let entry_pricing = pricer
+            .price_with_surface(
+                trade,
+                &entry_chain,
+                entry_spot.to_f64(),
+                self.entry_time,
+                entry_surface.as_ref(),
+            )
+            .map_err(|e| {
+                tracing::warn!(
+                    symbol = self.symbol,
+                    time = %self.entry_time,
+                    phase = "entry",
+                    error = %e,
+                    "Failed to price trade at entry"
+                );
+                e
+            })?;
 
         // 5. Validate entry
         T::validate_entry(&entry_pricing, self.config)?;
@@ -203,22 +217,24 @@ impl<'a> TradeSimulator<'a> {
             phase = "exit",
             "Pricing trade at exit"
         );
-        let exit_pricing = pricer.price_with_surface(
-            trade,
-            &exit_chain,
-            exit_spot.to_f64(),
-            self.exit_time,
-            exit_surface.as_ref(),
-        ).map_err(|e| {
-            tracing::warn!(
-                symbol = self.symbol,
-                time = %self.exit_time,
-                phase = "exit",
-                error = %e,
-                "Failed to price trade at exit"
-            );
-            e
-        })?;
+        let exit_pricing = pricer
+            .price_with_surface(
+                trade,
+                &exit_chain,
+                exit_spot.to_f64(),
+                self.exit_time,
+                exit_surface.as_ref(),
+            )
+            .map_err(|e| {
+                tracing::warn!(
+                    symbol = self.symbol,
+                    time = %self.exit_time,
+                    phase = "exit",
+                    error = %e,
+                    "Failed to price trade at exit"
+                );
+                e
+            })?;
 
         // 7. Return raw simulation output
         let output = SimulationOutput::new(

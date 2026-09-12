@@ -1,13 +1,13 @@
 // cs-domain/src/campaign/campaign.rs
 
-use chrono::{NaiveDate, NaiveTime};
-use crate::{
-    EarningsEvent, OptionStrategy, ExpirationPolicy,
-    TradingCalendar, TradingPeriodSpec, RollPolicy,
-    value_objects::{IronButterflyConfig, TradeDirection, MultiLegStrategyConfig},
-};
+use super::{EarningsTimingType, PeriodPolicy, SessionAction, SessionContext, TradingSession};
 use crate::datetime::eastern_to_utc;
-use super::{TradingSession, SessionAction, SessionContext, EarningsTimingType, PeriodPolicy};
+use crate::{
+    value_objects::{IronButterflyConfig, MultiLegStrategyConfig, TradeDirection},
+    EarningsEvent, ExpirationPolicy, OptionStrategy, RollPolicy, TradingCalendar,
+    TradingPeriodSpec,
+};
+use chrono::{NaiveDate, NaiveTime};
 
 /// A campaign defines trading intent for one symbol over a date range
 ///
@@ -68,14 +68,12 @@ impl TradingCampaign {
                 entry_days_after_earnings,
                 exit_days_before_earnings,
                 roll_policy,
-            } => {
-                self.generate_inter_earnings_sessions(
-                    &symbol_earnings,
-                    *entry_days_after_earnings,
-                    *exit_days_before_earnings,
-                    roll_policy,
-                )
-            }
+            } => self.generate_inter_earnings_sessions(
+                &symbol_earnings,
+                *entry_days_after_earnings,
+                *exit_days_before_earnings,
+                roll_policy,
+            ),
 
             PeriodPolicy::Continuous {
                 earnings_timing,
@@ -89,8 +87,8 @@ impl TradingCampaign {
                 // Inter-earnings sessions
                 sessions.extend(self.generate_inter_earnings_sessions(
                     &symbol_earnings,
-                    2,  // Start 2 days after earnings by default
-                    3,  // End 3 days before next earnings
+                    2, // Start 2 days after earnings by default
+                    3, // End 3 days before next earnings
                     inter_period_roll,
                 ));
 
@@ -119,7 +117,7 @@ impl TradingCampaign {
                     TradingPeriodSpec::PreEarnings { .. } => EarningsTimingType::PreEarnings,
                     TradingPeriodSpec::PostEarnings { .. } => EarningsTimingType::PostEarnings,
                     TradingPeriodSpec::CrossEarnings { .. } => EarningsTimingType::CrossEarnings,
-                    _ => EarningsTimingType::CrossEarnings,  // Default
+                    _ => EarningsTimingType::CrossEarnings, // Default
                 };
 
                 sessions.push(TradingSession {
@@ -158,17 +156,13 @@ impl TradingCampaign {
             let next_earnings = window[1].earnings_date;
 
             // Calculate inter-period boundaries
-            let period_start = TradingCalendar::n_trading_days_after(
-                prev_earnings,
-                entry_days_after as usize,
-            );
-            let period_end = TradingCalendar::n_trading_days_before(
-                next_earnings,
-                exit_days_before as usize,
-            );
+            let period_start =
+                TradingCalendar::n_trading_days_after(prev_earnings, entry_days_after as usize);
+            let period_end =
+                TradingCalendar::n_trading_days_before(next_earnings, exit_days_before as usize);
 
             if period_end <= period_start {
-                continue;  // Period too short
+                continue; // Period too short
             }
 
             // Generate rolling sessions within this inter-period
@@ -205,7 +199,8 @@ impl TradingCampaign {
 
         while current_date < end {
             // Determine exit date based on roll policy
-            let next_roll = roll_policy.next_roll_date(current_date)
+            let next_roll = roll_policy
+                .next_roll_date(current_date)
                 .unwrap_or(end)
                 .min(end);
 
@@ -256,7 +251,8 @@ impl TradingCampaign {
         let exit_time = NaiveTime::from_hms_opt(15, 55, 0).unwrap();
 
         while current_date < self.end_date {
-            let next_roll = roll_policy.next_roll_date(current_date)
+            let next_roll = roll_policy
+                .next_roll_date(current_date)
                 .unwrap_or(self.end_date)
                 .min(self.end_date);
 
@@ -294,9 +290,9 @@ impl TradingCampaign {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EarningsEvent, EarningsTime, SessionSchedule};
     use crate::testing::TradingCampaignBuilder;
-    use chrono::{Weekday, Datelike};
+    use crate::{EarningsEvent, EarningsTime, SessionSchedule};
+    use chrono::{Datelike, Weekday};
 
     fn sample_earnings() -> Vec<EarningsEvent> {
         vec![
@@ -342,8 +338,14 @@ mod tests {
         assert_eq!(sessions.len(), 4);
 
         // Verify first session is around Q1 earnings
-        assert_eq!(sessions[0].entry_date(), NaiveDate::from_ymd_opt(2025, 1, 7).unwrap());
-        assert_eq!(sessions[0].exit_date(), NaiveDate::from_ymd_opt(2025, 1, 9).unwrap());
+        assert_eq!(
+            sessions[0].entry_date(),
+            NaiveDate::from_ymd_opt(2025, 1, 7).unwrap()
+        );
+        assert_eq!(
+            sessions[0].exit_date(),
+            NaiveDate::from_ymd_opt(2025, 1, 9).unwrap()
+        );
         assert_eq!(sessions[0].action, SessionAction::OpenNew);
         assert!(sessions[0].is_earnings_session());
     }
@@ -468,7 +470,9 @@ mod tests {
 
     #[test]
     fn test_monthly_roll_policy() {
-        let policy = RollPolicy::Monthly { roll_week_offset: 0 };
+        let policy = RollPolicy::Monthly {
+            roll_week_offset: 0,
+        };
 
         // Test next_roll_date for a date in January
         let start = NaiveDate::from_ymd_opt(2025, 1, 10).unwrap();

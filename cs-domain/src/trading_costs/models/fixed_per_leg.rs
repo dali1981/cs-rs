@@ -5,10 +5,10 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use crate::trading_costs::{
-    TradingCostCalculator, TradingContext, TradingCost, TradingCostBreakdown, TradeSide,
-};
 use super::CONTRACT_MULTIPLIER;
+use crate::trading_costs::{
+    TradeSide, TradingContext, TradingCost, TradingCostBreakdown, TradingCostCalculator,
+};
 
 /// Fixed cost per leg
 ///
