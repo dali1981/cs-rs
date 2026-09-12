@@ -208,18 +208,19 @@ impl OptionsDataRepository for FinqOptionsRepository {
             )));
         }
 
-        let timestamps = forward
-            .column("timestamp")
-            .map_err(|e| RepositoryError::Polars(e.to_string()))?
-            .i64()
-            .map_err(|e| RepositoryError::Polars(e.to_string()))?;
+        // Read the snapshot time off the converted bars rather than off the raw column:
+        // `dataframe_to_option_bars` is the one place that knows how to interpret this
+        // column's unit. Reading it a second time here is what made the previous version
+        // wrong -- it called `.i64()` on a `datetime[ms]` column (a dtype error, so every
+        // forward fill failed) and then read the physical value as nanoseconds.
+        let bars = dataframe_to_option_bars(&forward)?;
 
-        let max_ts = timestamps
+        let actual_snapshot_time = bars
+            .iter()
+            .filter_map(|bar| bar.timestamp)
             .max()
             .ok_or_else(|| RepositoryError::NotFound("No timestamp in forward data".to_string()))?;
 
-        let actual_snapshot_time = TradingTimestamp::from_nanos(max_ts).to_datetime_utc();
-        let bars = dataframe_to_option_bars(&forward)?;
         Ok((bars, actual_snapshot_time))
     }
 
