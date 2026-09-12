@@ -11,6 +11,20 @@ use crate::datetime::{TradingDate, TradingTimestamp};
 use crate::repositories::{OptionsDataRepository, RepositoryError};
 use crate::value_objects::{OptionBar, Strike};
 
+/// The `timestamp` column of the flatfile bars is `Datetime(Milliseconds, UTC)`,
+/// while `TradingTimestamp::to_nanos()` is nanoseconds since epoch. Comparing the
+/// two directly makes every as-of filter a no-op -- a millisecond value is ~10^6
+/// times smaller than the nanosecond bound, so `timestamp <= target` is true for
+/// every row of the day, and the `.first()` after a descending sort then returns
+/// the LAST bar of the session instead of the last bar at or before the target.
+///
+/// The effect was silent look-ahead: a backtest entering at 09:35 was priced on
+/// the 15:5x trade of the same day. Always compare through this helper, which
+/// converts the column to nanoseconds first, rather than against a bare integer.
+fn ts_nanos() -> Expr {
+    col("timestamp").dt().timestamp(TimeUnit::Nanoseconds)
+}
+
 pub struct FinqOptionsRepository {
     repository: OptionBarRepository,
 }
@@ -91,7 +105,7 @@ impl OptionsDataRepository for FinqOptionsRepository {
 
         let filtered = df
             .lazy()
-            .filter(col("timestamp").lt_eq(lit(target_nanos)))
+            .filter(ts_nanos().lt_eq(lit(target_nanos)))
             .sort(
                 ["strike", "expiration", "option_type", "timestamp"],
                 SortMultipleOptions::default()
@@ -146,7 +160,7 @@ impl OptionsDataRepository for FinqOptionsRepository {
         let backward = df
             .clone()
             .lazy()
-            .filter(col("timestamp").lt_eq(lit(target_nanos)))
+            .filter(ts_nanos().lt_eq(lit(target_nanos)))
             .sort(
                 ["strike", "expiration", "option_type", "timestamp"],
                 SortMultipleOptions::default()
@@ -170,9 +184,9 @@ impl OptionsDataRepository for FinqOptionsRepository {
         let forward = df
             .lazy()
             .filter(
-                col("timestamp")
+                ts_nanos()
                     .gt(lit(target_nanos))
-                    .and(col("timestamp").lt_eq(lit(max_forward_nanos))),
+                    .and(ts_nanos().lt_eq(lit(max_forward_nanos))),
             )
             .sort(
                 ["strike", "expiration", "option_type", "timestamp"],
