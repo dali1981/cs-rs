@@ -378,6 +378,14 @@ impl BacktestConfigBuilder {
                     overrides.symbols = Some(symbols.clone());
                 }
             }
+            // --min-market-cap parses into SelectionArgs but is a FilterSet field,
+            // so it is not carried by the CliSelection block above. Without this
+            // the flag is accepted, logged as "Market cap filter: NOT CONFIGURED"
+            // and silently ignored. Threshold is in DOLLARS (cs-domain
+            // rules/event.rs:15), not millions.
+            if let Some(min_cap) = args.selection.min_market_cap {
+                overrides.min_market_cap = Some(min_cap);
+            }
             if args.no_parallel {
                 overrides.parallel = Some(false);
             }
