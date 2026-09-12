@@ -4,11 +4,11 @@
 //! This provider is shared by both EntryHV and EntryIV modes - they differ only
 //! in where the volatility value comes from (historical vol vs implied vol).
 
+use super::common::compute_position_delta_uniform_vol;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use cs_domain::hedging::DeltaProvider;
 use cs_domain::trade::CompositeTrade;
-use super::common::compute_position_delta_uniform_vol;
 
 /// Recompute delta from Black-Scholes using fixed volatility
 ///
@@ -19,9 +19,9 @@ use super::common::compute_position_delta_uniform_vol;
 /// Returns per-share delta (e.g., 0.5 for ATM call, NOT 50)
 pub struct EntryVolatilityProvider<T: CompositeTrade> {
     trade: T,
-    entry_volatility: f64,      // Fixed vol (HV or IV at entry)
+    entry_volatility: f64, // Fixed vol (HV or IV at entry)
     risk_free_rate: f64,
-    vol_source_name: &'static str,  // "entry_hv" or "entry_iv"
+    vol_source_name: &'static str, // "entry_hv" or "entry_iv"
 }
 
 impl<T: CompositeTrade> EntryVolatilityProvider<T> {
@@ -67,10 +67,10 @@ impl<T: CompositeTrade + Send + Sync> DeltaProvider for EntryVolatilityProvider<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::NaiveDate;
     use cs_domain::entities::OptionLeg;
     use cs_domain::trade::LegPosition;
     use cs_domain::value_objects::Strike;
-    use chrono::NaiveDate;
     use rust_decimal::Decimal;
 
     // Simple test trade implementation
@@ -103,13 +103,19 @@ mod tests {
         let mut provider = EntryVolatilityProvider::new_entry_hv(trade, 0.20, 0.05);
 
         // Compute delta at entry (ATM should be ~0.5)
-        let entry_time = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()
-            .and_hms_opt(9, 30, 0).unwrap()
+        let entry_time = NaiveDate::from_ymd_opt(2024, 1, 1)
+            .unwrap()
+            .and_hms_opt(9, 30, 0)
+            .unwrap()
             .and_utc();
         let delta = provider.compute_delta(100.0, entry_time).await.unwrap();
 
         // Should be positive (call) and less than 1
-        assert!(delta > 0.0 && delta < 1.0, "Delta should be per-share, got {}", delta);
+        assert!(
+            delta > 0.0 && delta < 1.0,
+            "Delta should be per-share, got {}",
+            delta
+        );
     }
 
     #[tokio::test]
@@ -129,13 +135,19 @@ mod tests {
 
         let mut provider = EntryVolatilityProvider::new_entry_iv(trade, 0.25, 0.05);
 
-        let entry_time = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()
-            .and_hms_opt(9, 30, 0).unwrap()
+        let entry_time = NaiveDate::from_ymd_opt(2024, 1, 1)
+            .unwrap()
+            .and_hms_opt(9, 30, 0)
+            .unwrap()
             .and_utc();
         let delta = provider.compute_delta(100.0, entry_time).await.unwrap();
 
         // Delta should be per-share (< 2.0), NOT multiplied by 100
-        assert!(delta.abs() < 2.0, "Delta should be per-share, got {}", delta);
+        assert!(
+            delta.abs() < 2.0,
+            "Delta should be per-share, got {}",
+            delta
+        );
     }
 
     #[tokio::test]
@@ -156,8 +168,10 @@ mod tests {
         let mut provider = EntryVolatilityProvider::new_entry_hv(trade, 0.20, 0.05);
 
         // Check delta after expiration
-        let after_exp = NaiveDate::from_ymd_opt(2024, 2, 1).unwrap()
-            .and_hms_opt(9, 30, 0).unwrap()
+        let after_exp = NaiveDate::from_ymd_opt(2024, 2, 1)
+            .unwrap()
+            .and_hms_opt(9, 30, 0)
+            .unwrap()
             .and_utc();
         let delta = provider.compute_delta(100.0, after_exp).await.unwrap();
 
@@ -174,7 +188,7 @@ mod tests {
             expiration,
             OptionType::Call,
         );
-        let position = LegPosition::Short;  // Short position
+        let position = LegPosition::Short; // Short position
 
         let trade = TestTrade {
             legs: vec![(leg, position)],
@@ -182,12 +196,18 @@ mod tests {
 
         let mut provider = EntryVolatilityProvider::new_entry_hv(trade, 0.20, 0.05);
 
-        let entry_time = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()
-            .and_hms_opt(9, 30, 0).unwrap()
+        let entry_time = NaiveDate::from_ymd_opt(2024, 1, 1)
+            .unwrap()
+            .and_hms_opt(9, 30, 0)
+            .unwrap()
             .and_utc();
         let delta = provider.compute_delta(100.0, entry_time).await.unwrap();
 
         // Short call should have negative delta
-        assert!(delta < 0.0, "Short call delta should be negative, got {}", delta);
+        assert!(
+            delta < 0.0,
+            "Short call delta should be negative, got {}",
+            delta
+        );
     }
 }

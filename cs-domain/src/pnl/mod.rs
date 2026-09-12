@@ -8,10 +8,10 @@
 //!
 //! See `specs/pnl_computation.md` for the full specification.
 
+mod convert;
 mod record;
 mod statistics;
-mod convert;
 
+pub use convert::ToPnlRecord;
 pub use record::TradePnlRecord;
 pub use statistics::PnlStatistics;
-pub use convert::ToPnlRecord;

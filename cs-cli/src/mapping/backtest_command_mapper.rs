@@ -5,8 +5,8 @@
 //! are intentionally excluded — they are passed separately to the factory.
 
 use cs_backtest::{
-    BacktestConfig, RunBacktestCommand,
-    BacktestPeriod, StrategySpec, ExecutionSpec, FilterSet, RiskConfig,
+    BacktestConfig, BacktestPeriod, ExecutionSpec, FilterSet, RiskConfig, RunBacktestCommand,
+    StrategySpec,
 };
 
 /// Translate a `BacktestConfig` TOML DTO into a `RunBacktestCommand`.

@@ -1,10 +1,10 @@
 use chrono::{NaiveDate, NaiveTime};
 use thiserror::Error;
 
-use crate::entities::EarningsEvent;
-use crate::value_objects::EarningsTime;
-use crate::timing::TradingCalendar;
 use super::TradingPeriod;
+use crate::entities::EarningsEvent;
+use crate::timing::TradingCalendar;
+use crate::value_objects::EarningsTime;
 
 /// Errors during trading period construction
 #[derive(Error, Debug)]
@@ -122,16 +122,56 @@ impl TradingPeriodSpec {
     /// Set entry/exit times
     pub fn with_times(self, entry_time: NaiveTime, exit_time: NaiveTime) -> Self {
         match self {
-            Self::PreEarnings { entry_days_before, exit_days_before, .. } =>
-                Self::PreEarnings { entry_days_before, exit_days_before, entry_time, exit_time },
-            Self::PostEarnings { entry_offset, holding_days, .. } =>
-                Self::PostEarnings { entry_offset, holding_days, entry_time, exit_time },
-            Self::CrossEarnings { entry_days_before, exit_days_after, .. } =>
-                Self::CrossEarnings { entry_days_before, exit_days_after, entry_time, exit_time },
-            Self::FixedDates { entry_date, exit_date, .. } =>
-                Self::FixedDates { entry_date, exit_date, entry_time, exit_time },
-            Self::HoldingPeriod { entry_date, holding_days, .. } =>
-                Self::HoldingPeriod { entry_date, holding_days, entry_time, exit_time },
+            Self::PreEarnings {
+                entry_days_before,
+                exit_days_before,
+                ..
+            } => Self::PreEarnings {
+                entry_days_before,
+                exit_days_before,
+                entry_time,
+                exit_time,
+            },
+            Self::PostEarnings {
+                entry_offset,
+                holding_days,
+                ..
+            } => Self::PostEarnings {
+                entry_offset,
+                holding_days,
+                entry_time,
+                exit_time,
+            },
+            Self::CrossEarnings {
+                entry_days_before,
+                exit_days_after,
+                ..
+            } => Self::CrossEarnings {
+                entry_days_before,
+                exit_days_after,
+                entry_time,
+                exit_time,
+            },
+            Self::FixedDates {
+                entry_date,
+                exit_date,
+                ..
+            } => Self::FixedDates {
+                entry_date,
+                exit_date,
+                entry_time,
+                exit_time,
+            },
+            Self::HoldingPeriod {
+                entry_date,
+                holding_days,
+                ..
+            } => Self::HoldingPeriod {
+                entry_date,
+                holding_days,
+                entry_time,
+                exit_time,
+            },
         }
     }
 
@@ -142,26 +182,41 @@ impl TradingPeriodSpec {
     /// Build a concrete TradingPeriod from this specification
     pub fn build(&self, event: Option<&EarningsEvent>) -> Result<TradingPeriod, TimingError> {
         match self {
-            Self::PreEarnings { entry_days_before, exit_days_before, entry_time, exit_time } => {
+            Self::PreEarnings {
+                entry_days_before,
+                exit_days_before,
+                entry_time,
+                exit_time,
+            } => {
                 let event = event.ok_or(TimingError::RequiresEarningsEvent)?;
 
                 let entry_date = TradingCalendar::n_trading_days_before(
                     event.earnings_date,
-                    *entry_days_before as usize
+                    *entry_days_before as usize,
                 );
                 let exit_date = TradingCalendar::n_trading_days_before(
                     event.earnings_date,
-                    *exit_days_before as usize
+                    *exit_days_before as usize,
                 );
 
                 if exit_date < entry_date {
                     return Err(TimingError::ExitBeforeEntry);
                 }
 
-                Ok(TradingPeriod::new(entry_date, exit_date, *entry_time, *exit_time))
+                Ok(TradingPeriod::new(
+                    entry_date,
+                    exit_date,
+                    *entry_time,
+                    *exit_time,
+                ))
             }
 
-            Self::PostEarnings { entry_offset, holding_days, entry_time, exit_time } => {
+            Self::PostEarnings {
+                entry_offset,
+                holding_days,
+                entry_time,
+                exit_time,
+            } => {
                 let event = event.ok_or(TimingError::RequiresEarningsEvent)?;
 
                 // Entry depends on earnings time
@@ -170,32 +225,40 @@ impl TradingPeriodSpec {
                         // BMO: can enter same day (offset 0) or later
                         TradingCalendar::n_trading_days_after(
                             event.earnings_date,
-                            (*entry_offset).max(0) as usize
+                            (*entry_offset).max(0) as usize,
                         )
                     }
                     EarningsTime::AfterMarketClose | EarningsTime::Unknown => {
                         // AMC: enter next day (offset 0 = next day)
                         TradingCalendar::n_trading_days_after(
                             event.earnings_date,
-                            ((*entry_offset).max(0) + 1) as usize
+                            ((*entry_offset).max(0) + 1) as usize,
                         )
                     }
                 };
 
-                let exit_date = TradingCalendar::n_trading_days_after(
-                    entry_date,
-                    *holding_days as usize
-                );
+                let exit_date =
+                    TradingCalendar::n_trading_days_after(entry_date, *holding_days as usize);
 
-                Ok(TradingPeriod::new(entry_date, exit_date, *entry_time, *exit_time))
+                Ok(TradingPeriod::new(
+                    entry_date,
+                    exit_date,
+                    *entry_time,
+                    *exit_time,
+                ))
             }
 
-            Self::CrossEarnings { entry_days_before, exit_days_after, entry_time, exit_time } => {
+            Self::CrossEarnings {
+                entry_days_before,
+                exit_days_after,
+                entry_time,
+                exit_time,
+            } => {
                 let event = event.ok_or(TimingError::RequiresEarningsEvent)?;
 
                 let entry_date = TradingCalendar::n_trading_days_before(
                     event.earnings_date,
-                    *entry_days_before as usize
+                    *entry_days_before as usize,
                 );
 
                 // Exit depends on earnings time
@@ -204,7 +267,7 @@ impl TradingPeriodSpec {
                         // AMC: exit N days after earnings
                         TradingCalendar::n_trading_days_after(
                             event.earnings_date,
-                            *exit_days_after as usize
+                            *exit_days_after as usize,
                         )
                     }
                     EarningsTime::BeforeMarketOpen => {
@@ -214,34 +277,55 @@ impl TradingPeriodSpec {
                         } else {
                             TradingCalendar::n_trading_days_after(
                                 event.earnings_date,
-                                (*exit_days_after - 1) as usize
+                                (*exit_days_after - 1) as usize,
                             )
                         }
                     }
-                    EarningsTime::Unknown => {
-                        TradingCalendar::n_trading_days_after(
-                            event.earnings_date,
-                            *exit_days_after as usize
-                        )
-                    }
+                    EarningsTime::Unknown => TradingCalendar::n_trading_days_after(
+                        event.earnings_date,
+                        *exit_days_after as usize,
+                    ),
                 };
 
-                Ok(TradingPeriod::new(entry_date, exit_date, *entry_time, *exit_time))
+                Ok(TradingPeriod::new(
+                    entry_date,
+                    exit_date,
+                    *entry_time,
+                    *exit_time,
+                ))
             }
 
-            Self::FixedDates { entry_date, exit_date, entry_time, exit_time } => {
+            Self::FixedDates {
+                entry_date,
+                exit_date,
+                entry_time,
+                exit_time,
+            } => {
                 if exit_date < entry_date {
                     return Err(TimingError::ExitBeforeEntry);
                 }
-                Ok(TradingPeriod::new(*entry_date, *exit_date, *entry_time, *exit_time))
+                Ok(TradingPeriod::new(
+                    *entry_date,
+                    *exit_date,
+                    *entry_time,
+                    *exit_time,
+                ))
             }
 
-            Self::HoldingPeriod { entry_date, holding_days, entry_time, exit_time } => {
-                let exit_date = TradingCalendar::n_trading_days_after(
+            Self::HoldingPeriod {
+                entry_date,
+                holding_days,
+                entry_time,
+                exit_time,
+            } => {
+                let exit_date =
+                    TradingCalendar::n_trading_days_after(*entry_date, *holding_days as usize);
+                Ok(TradingPeriod::new(
                     *entry_date,
-                    *holding_days as usize
-                );
-                Ok(TradingPeriod::new(*entry_date, exit_date, *entry_time, *exit_time))
+                    exit_date,
+                    *entry_time,
+                    *exit_time,
+                ))
             }
         }
     }
@@ -249,7 +333,9 @@ impl TradingPeriodSpec {
     /// Calculate lookahead days needed for event loading
     pub fn lookahead_days(&self) -> i64 {
         match self {
-            Self::PreEarnings { entry_days_before, .. } => {
+            Self::PreEarnings {
+                entry_days_before, ..
+            } => {
                 // Add buffer for weekends: multiply by 1.5 and add 7
                 ((*entry_days_before as f64 * 1.5) as i64) + 7
             }
@@ -257,9 +343,9 @@ impl TradingPeriodSpec {
                 // Post-earnings needs lookback, not lookahead
                 -3
             }
-            Self::CrossEarnings { entry_days_before, .. } => {
-                (*entry_days_before as i64) + 3
-            }
+            Self::CrossEarnings {
+                entry_days_before, ..
+            } => (*entry_days_before as i64) + 3,
             Self::FixedDates { .. } | Self::HoldingPeriod { .. } => {
                 0 // No earnings-based lookahead needed
             }
@@ -296,21 +382,19 @@ impl TradingPeriodSpec {
         use chrono::Duration;
 
         match self {
-            Self::PreEarnings { entry_days_before, .. } => {
+            Self::PreEarnings {
+                entry_days_before, ..
+            } => {
                 // Entry is N trading days BEFORE event
                 // To have entry in range:
                 //   event_date - N_trading = entry_date ∈ [range.start, range.end]
                 //   event_date ∈ [range.start + N_trading, range.end + N_trading]
                 //
                 // Use TradingCalendar for exact calculation
-                let search_start_calc = TradingCalendar::n_trading_days_after(
-                    range.start,
-                    *entry_days_before as usize
-                );
-                let search_end_calc = TradingCalendar::n_trading_days_after(
-                    range.end,
-                    *entry_days_before as usize
-                );
+                let search_start_calc =
+                    TradingCalendar::n_trading_days_after(range.start, *entry_days_before as usize);
+                let search_end_calc =
+                    TradingCalendar::n_trading_days_after(range.end, *entry_days_before as usize);
                 // Buffer: previous/next trading day for edge cases
                 let search_start = TradingCalendar::previous_trading_day(search_start_calc);
                 let search_end = TradingCalendar::next_trading_day(search_end_calc);
@@ -328,17 +412,15 @@ impl TradingPeriodSpec {
                 (search_start, search_end)
             }
 
-            Self::CrossEarnings { entry_days_before, .. } => {
+            Self::CrossEarnings {
+                entry_days_before, ..
+            } => {
                 // Entry is before event, exit is after
                 // Similar to PreEarnings for event search
-                let search_start_calc = TradingCalendar::n_trading_days_after(
-                    range.start,
-                    *entry_days_before as usize
-                );
-                let search_end_calc = TradingCalendar::n_trading_days_after(
-                    range.end,
-                    *entry_days_before as usize
-                );
+                let search_start_calc =
+                    TradingCalendar::n_trading_days_after(range.start, *entry_days_before as usize);
+                let search_end_calc =
+                    TradingCalendar::n_trading_days_after(range.end, *entry_days_before as usize);
                 // Buffer: previous/next trading day for edge cases
                 let search_start = TradingCalendar::previous_trading_day(search_start_calc);
                 let search_end = TradingCalendar::next_trading_day(search_end_calc);
@@ -379,8 +461,14 @@ mod tests {
 
         // 10 trading days before Oct 30 = Oct 16 (Wed)
         // 1 trading day before Oct 30 = Oct 29 (Wed)
-        assert_eq!(period.entry_date, NaiveDate::from_ymd_opt(2025, 10, 16).unwrap());
-        assert_eq!(period.exit_date, NaiveDate::from_ymd_opt(2025, 10, 29).unwrap());
+        assert_eq!(
+            period.entry_date,
+            NaiveDate::from_ymd_opt(2025, 10, 16).unwrap()
+        );
+        assert_eq!(
+            period.exit_date,
+            NaiveDate::from_ymd_opt(2025, 10, 29).unwrap()
+        );
     }
 
     #[test]
@@ -396,7 +484,10 @@ mod tests {
         let period = spec.build(Some(&event)).unwrap();
 
         // AMC: entry is next day = Oct 31
-        assert_eq!(period.entry_date, NaiveDate::from_ymd_opt(2025, 10, 31).unwrap());
+        assert_eq!(
+            period.entry_date,
+            NaiveDate::from_ymd_opt(2025, 10, 31).unwrap()
+        );
     }
 
     #[test]
@@ -410,6 +501,9 @@ mod tests {
 
         // Should work without an earnings event
         let period = spec.build(None).unwrap();
-        assert_eq!(period.entry_date, NaiveDate::from_ymd_opt(2025, 10, 1).unwrap());
+        assert_eq!(
+            period.entry_date,
+            NaiveDate::from_ymd_opt(2025, 10, 1).unwrap()
+        );
     }
 }

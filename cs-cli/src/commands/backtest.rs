@@ -4,12 +4,12 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use console::style;
 
+use super::CommandHandler;
 use crate::args::{BacktestArgs, GlobalArgs};
-use cs_backtest::{DataSourceConfig, EarningsSourceConfig, RunBacktestCommand};
 use crate::config::BacktestConfigBuilder;
 use crate::factory::UseCaseFactory;
 use crate::output::BacktestOutputHandler;
-use super::CommandHandler;
+use cs_backtest::{DataSourceConfig, EarningsSourceConfig, RunBacktestCommand};
 
 /// Backtest command handler.
 ///
@@ -31,7 +31,9 @@ impl BacktestCommand {
     ///
     /// Returns `(command, data_source, earnings_source)` separately so each can
     /// be wired to the factory independently. See ADR-0003.
-    fn build_command(&self) -> Result<(RunBacktestCommand, DataSourceConfig, EarningsSourceConfig)> {
+    fn build_command(
+        &self,
+    ) -> Result<(RunBacktestCommand, DataSourceConfig, EarningsSourceConfig)> {
         BacktestConfigBuilder::from_args(&self.args)
             .with_global(&self.global)
             .with_config_files(&self.args.conf)?
@@ -58,13 +60,18 @@ impl CommandHandler for BacktestCommand {
         };
 
         println!("  Data source: {:?}", data_source);
-        println!("  Data directory: {} (from {})",
+        println!(
+            "  Data directory: {} (from {})",
             style(data_source.data_dir().display()).cyan(),
-            style(data_dir_source).dim());
+            style(data_dir_source).dim()
+        );
         println!("  Earnings source: {}", style(&earnings_source).cyan());
         println!("  Strategy: {:?}", command.strategy.spread);
         println!("  Selection: {:?}", command.strategy.selection_strategy);
-        println!("  Period: {} to {}", command.period.start_date, command.period.end_date);
+        println!(
+            "  Period: {} to {}",
+            command.period.start_date, command.period.end_date
+        );
         println!();
 
         // 2. Wire repositories and create use case via factory

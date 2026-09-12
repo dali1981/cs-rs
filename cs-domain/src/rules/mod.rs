@@ -7,14 +7,14 @@
 //!
 //! All rules at each level are evaluated with AND logic (all must pass).
 
-mod error;
 mod config;
+mod error;
 mod event;
 mod market;
 mod trade;
 
+pub use config::{FileRulesConfig, RulesConfig};
 pub use error::RuleError;
-pub use config::{RulesConfig, FileRulesConfig};
 pub use event::EventRule;
 pub use market::MarketRule;
 pub use trade::TradeRule;

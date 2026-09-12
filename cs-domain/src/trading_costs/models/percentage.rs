@@ -5,10 +5,10 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use crate::trading_costs::{
-    TradingCostCalculator, TradingContext, TradingCost, TradingCostBreakdown, TradeSide,
-};
 use super::CONTRACT_MULTIPLIER;
+use crate::trading_costs::{
+    TradeSide, TradingContext, TradingCost, TradingCostBreakdown, TradingCostCalculator,
+};
 
 /// Slippage as percentage of premium
 ///
@@ -91,13 +91,14 @@ impl PercentageOfPremiumSlippage {
 impl TradingCostCalculator for PercentageOfPremiumSlippage {
     fn entry_cost(&self, context: &TradingContext) -> TradingCost {
         // Sum cost across all legs
-        let leg_cost: Decimal = context.legs.iter()
+        let leg_cost: Decimal = context
+            .legs
+            .iter()
             .map(|leg| self.calculate_leg_cost(leg.price))
             .sum();
 
-        let total = leg_cost
-            * Decimal::from(self.multiplier)
-            * Decimal::from(context.num_contracts);
+        let total =
+            leg_cost * Decimal::from(self.multiplier) * Decimal::from(context.num_contracts);
 
         TradingCost {
             total,

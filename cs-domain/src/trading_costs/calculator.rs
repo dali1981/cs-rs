@@ -87,7 +87,7 @@ impl<T: TradingCostCalculator + Clone + 'static> ClonableCostCalculator for T {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trading_costs::{TradeSide, TradingCostBreakdown, LegContext, TradeType};
+    use crate::trading_costs::{LegContext, TradeSide, TradeType, TradingCostBreakdown};
     use chrono::Utc;
     use rust_decimal_macros::dec;
 
@@ -122,7 +122,9 @@ mod tests {
 
     #[test]
     fn test_calculator_trait() {
-        let calc = TestCalculator { cost_per_leg: dec!(5.00) };
+        let calc = TestCalculator {
+            cost_per_leg: dec!(5.00),
+        };
 
         let ctx = TradingContext::new(
             vec![

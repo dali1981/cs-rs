@@ -1,7 +1,4 @@
-use crate::{
-    ExpirationPolicy,
-    value_objects::TradeDirection,
-};
+use crate::{value_objects::TradeDirection, ExpirationPolicy};
 
 /// What option position structure to trade
 ///

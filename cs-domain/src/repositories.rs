@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::{NaiveDate, DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use thiserror::Error;
 
 use crate::entities::*;

@@ -2,7 +2,7 @@
 //!
 //! Use when you want to disable costs without changing code structure.
 
-use crate::trading_costs::{TradingCostCalculator, TradingContext, TradingCost};
+use crate::trading_costs::{TradingContext, TradingCost, TradingCostCalculator};
 
 /// No trading costs (null object pattern)
 ///

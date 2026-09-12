@@ -1,8 +1,8 @@
 //! Rule evaluator for entry filtering
 
-use cs_domain::{RulesConfig, MarketRule, EarningsEvent, RuleError};
-use cs_analytics::IVSurface;
 use crate::backtest_use_case_helpers::PreparedData;
+use cs_analytics::IVSurface;
+use cs_domain::{EarningsEvent, MarketRule, RuleError, RulesConfig};
 
 /// Evaluates entry rules at each stage of the backtest pipeline
 #[derive(Clone)]
@@ -178,17 +178,25 @@ impl RuleEvaluator {
     }
 
     /// Evaluate a single market rule
-    fn eval_market_rule(
-        &self,
-        rule: &MarketRule,
-        data: &PreparedData,
-    ) -> Result<bool, RuleError> {
+    fn eval_market_rule(&self, rule: &MarketRule, data: &PreparedData) -> Result<bool, RuleError> {
         match rule {
-            MarketRule::IvSlope { short_dte, long_dte, threshold_pp } => {
-                let iv_short = get_atm_iv_at_dte(&data.surface, *short_dte)
-                    .ok_or(RuleError::MissingDteData { rule: "iv_slope", dte: *short_dte })?;
-                let iv_long = get_atm_iv_at_dte(&data.surface, *long_dte)
-                    .ok_or(RuleError::MissingDteData { rule: "iv_slope", dte: *long_dte })?;
+            MarketRule::IvSlope {
+                short_dte,
+                long_dte,
+                threshold_pp,
+            } => {
+                let iv_short = get_atm_iv_at_dte(&data.surface, *short_dte).ok_or(
+                    RuleError::MissingDteData {
+                        rule: "iv_slope",
+                        dte: *short_dte,
+                    },
+                )?;
+                let iv_long = get_atm_iv_at_dte(&data.surface, *long_dte).ok_or(
+                    RuleError::MissingDteData {
+                        rule: "iv_slope",
+                        dte: *long_dte,
+                    },
+                )?;
 
                 tracing::trace!(
                     short_dte = short_dte,
@@ -214,8 +222,11 @@ impl RuleEvaluator {
             }
 
             MarketRule::MaxEntryIv { threshold } => {
-                let atm_iv = get_front_month_atm_iv(&data.surface)
-                    .ok_or(RuleError::MissingData { rule: "max_entry_iv", field: "ATM IV" })?;
+                let atm_iv =
+                    get_front_month_atm_iv(&data.surface).ok_or(RuleError::MissingData {
+                        rule: "max_entry_iv",
+                        field: "ATM IV",
+                    })?;
                 let passes = atm_iv <= *threshold;
                 if !passes {
                     tracing::debug!(
@@ -227,11 +238,23 @@ impl RuleEvaluator {
                 Ok(passes)
             }
 
-            MarketRule::MinIvRatio { short_dte, long_dte, threshold } => {
-                let iv_short = get_atm_iv_at_dte(&data.surface, *short_dte)
-                    .ok_or(RuleError::MissingDteData { rule: "min_iv_ratio", dte: *short_dte })?;
-                let iv_long = get_atm_iv_at_dte(&data.surface, *long_dte)
-                    .ok_or(RuleError::MissingDteData { rule: "min_iv_ratio", dte: *long_dte })?;
+            MarketRule::MinIvRatio {
+                short_dte,
+                long_dte,
+                threshold,
+            } => {
+                let iv_short = get_atm_iv_at_dte(&data.surface, *short_dte).ok_or(
+                    RuleError::MissingDteData {
+                        rule: "min_iv_ratio",
+                        dte: *short_dte,
+                    },
+                )?;
+                let iv_long = get_atm_iv_at_dte(&data.surface, *long_dte).ok_or(
+                    RuleError::MissingDteData {
+                        rule: "min_iv_ratio",
+                        dte: *long_dte,
+                    },
+                )?;
 
                 if iv_long <= 0.0 {
                     return Ok(false); // Can't compute ratio with zero denominator
@@ -253,7 +276,10 @@ impl RuleEvaluator {
                 Ok(passes)
             }
 
-            MarketRule::IvVsHv { hv_window_days: _, min_ratio: _ } => {
+            MarketRule::IvVsHv {
+                hv_window_days: _,
+                min_ratio: _,
+            } => {
                 // HV computation not yet implemented
                 // For now, pass if HV rule is specified but we can't evaluate
                 tracing::warn!("IV vs HV rule not yet implemented, passing by default");
@@ -296,19 +322,25 @@ fn get_atm_iv_for_expiration(surface: &IVSurface, expiration: chrono::NaiveDate)
     // Find points for this expiration near ATM
     let atm_tolerance = 0.05; // 5% moneyness tolerance
 
-    let atm_points: Vec<_> = surface.points().iter()
+    let atm_points: Vec<_> = surface
+        .points()
+        .iter()
         .filter(|p| p.expiration == expiration)
         .filter(|p| p.is_atm(atm_tolerance))
         .collect();
 
     if atm_points.is_empty() {
         // Fall back to closest to ATM
-        let closest = surface.points().iter()
+        let closest = surface
+            .points()
+            .iter()
             .filter(|p| p.expiration == expiration)
             .min_by(|a, b| {
                 let a_dist = (a.moneyness() - 1.0).abs();
                 let b_dist = (b.moneyness() - 1.0).abs();
-                a_dist.partial_cmp(&b_dist).unwrap_or(std::cmp::Ordering::Equal)
+                a_dist
+                    .partial_cmp(&b_dist)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })?;
         return Some(closest.iv);
     }
@@ -323,7 +355,9 @@ fn get_front_month_atm_iv(surface: &IVSurface) -> Option<f64> {
     let as_of = surface.as_of_time().date_naive();
 
     // Find closest future expiration
-    let front_month = surface.expirations().into_iter()
+    let front_month = surface
+        .expirations()
+        .into_iter()
         .filter(|exp| *exp > as_of)
         .min()?;
 
@@ -351,8 +385,9 @@ mod tests {
 
     #[test]
     fn test_event_rule_market_cap_passes() {
-        let config = RulesConfig::default()
-            .with_event_rule(EventRule::MinMarketCap { threshold: 1_000_000_000 });
+        let config = RulesConfig::default().with_event_rule(EventRule::MinMarketCap {
+            threshold: 1_000_000_000,
+        });
         let evaluator = RuleEvaluator::new(config);
         let event = mock_event("AAPL", Some(2_000_000_000));
 
@@ -361,8 +396,9 @@ mod tests {
 
     #[test]
     fn test_event_rule_market_cap_fails() {
-        let config = RulesConfig::default()
-            .with_event_rule(EventRule::MinMarketCap { threshold: 1_000_000_000 });
+        let config = RulesConfig::default().with_event_rule(EventRule::MinMarketCap {
+            threshold: 1_000_000_000,
+        });
         let evaluator = RuleEvaluator::new(config);
         let event = mock_event("SMALL", Some(500_000_000));
 
@@ -371,8 +407,10 @@ mod tests {
 
     #[test]
     fn test_trade_rule_price_range() {
-        let config = RulesConfig::default()
-            .with_trade_rule(TradeRule::EntryPriceRange { min: Some(0.50), max: Some(50.0) });
+        let config = RulesConfig::default().with_trade_rule(TradeRule::EntryPriceRange {
+            min: Some(0.50),
+            max: Some(50.0),
+        });
         let evaluator = RuleEvaluator::new(config);
         let event = mock_event("AAPL", None);
 

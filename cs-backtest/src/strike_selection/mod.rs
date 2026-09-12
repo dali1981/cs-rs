@@ -8,16 +8,16 @@ pub mod delta;
 pub mod multi_leg;
 
 pub use atm::ATMStrategy;
-pub use delta::{DeltaStrategy, DeltaScanMode};
+pub use delta::{DeltaScanMode, DeltaStrategy};
 pub use multi_leg::SymmetricMultiLegSelector;
 
+use chrono::NaiveDate;
+use cs_analytics::IVSurface;
 use cs_domain::entities::{
     CalendarSpread, CalendarStraddle, IronButterfly, LongIronButterfly, LongStraddle, ShortStraddle,
 };
 use cs_domain::strike_selection::{ExpirationCriteria, MultiLegStrikeSelection, SelectionError};
 use cs_domain::value_objects::{MultiLegStrategyConfig, SpotPrice};
-use chrono::NaiveDate;
-use cs_analytics::IVSurface;
 use finq_core::OptionType;
 use rust_decimal::Decimal;
 

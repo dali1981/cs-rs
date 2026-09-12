@@ -1,14 +1,12 @@
 //! ExecutableTrade implementation for IronButterfly
 
-use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
-use cs_domain::{
-    IronButterfly, IronButterflyResult, CONTRACT_MULTIPLIER, EarningsEvent,
-};
-use crate::composite_pricer::{IronButterflyCompositePricer, CompositePricing};
-use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
+use super::types::ExecutionError;
 use super::types::{ExecutionConfig, SimulationOutput};
+use crate::composite_pricer::{CompositePricing, IronButterflyCompositePricer};
+use cs_domain::{EarningsEvent, IronButterfly, IronButterflyResult, CONTRACT_MULTIPLIER};
+use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 
 impl ExecutableTrade for IronButterfly {
     type Pricer = IronButterflyCompositePricer;
@@ -71,8 +69,7 @@ impl ExecutableTrade for IronButterfly {
         if net_credit < config.min_entry_cost {
             return Err(ExecutionError::InvalidSpread(format!(
                 "Entry credit too small: {} < {}",
-                net_credit,
-                config.min_entry_cost,
+                net_credit, config.min_entry_cost,
             )));
         }
 
@@ -111,7 +108,8 @@ impl ExecutableTrade for IronButterfly {
         };
 
         // Calculate max loss (wing width - entry credit)
-        let wing_width = (self.long_call.strike.value() - self.short_call.strike.value()) * Decimal::from(CONTRACT_MULTIPLIER);
+        let wing_width = (self.long_call.strike.value() - self.short_call.strike.value())
+            * Decimal::from(CONTRACT_MULTIPLIER);
         let max_loss = wing_width - (entry_credit * Decimal::from(CONTRACT_MULTIPLIER));
 
         // Net Greeks from CompositePricing (already computed with signs)
@@ -121,8 +119,16 @@ impl ExecutableTrade for IronButterfly {
         let net_vega = Some(entry_pricing.net_vega * CONTRACT_MULTIPLIER as f64);
 
         // Average IV
-        let iv_entry = if entry_pricing.avg_iv > 0.0 { Some(entry_pricing.avg_iv) } else { None };
-        let iv_exit = if exit_pricing.avg_iv > 0.0 { Some(exit_pricing.avg_iv) } else { None };
+        let iv_entry = if entry_pricing.avg_iv > 0.0 {
+            Some(entry_pricing.avg_iv)
+        } else {
+            None
+        };
+        let iv_exit = if exit_pricing.avg_iv > 0.0 {
+            Some(exit_pricing.avg_iv)
+        } else {
+            None
+        };
         let iv_crush = match (iv_entry, iv_exit) {
             (Some(entry), Some(exit)) => Some(entry - exit),
             _ => None,
@@ -145,7 +151,8 @@ impl ExecutableTrade for IronButterfly {
         let credit_per_share = entry_credit.to_f64().unwrap_or(0.0);
         let breakeven_up = center_strike_f64 + credit_per_share;
         let breakeven_down = center_strike_f64 - credit_per_share;
-        let within_breakeven = output.exit_spot >= breakeven_down && output.exit_spot <= breakeven_up;
+        let within_breakeven =
+            output.exit_spot >= breakeven_down && output.exit_spot <= breakeven_up;
 
         let spot_move = output.exit_spot - output.entry_spot;
         let spot_move_pct = if output.entry_spot != 0.0 {
@@ -206,7 +213,7 @@ impl ExecutableTrade for IronButterfly {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
-            cost_summary: None,  // Costs applied separately via ApplyCosts trait
+            cost_summary: None, // Costs applied separately via ApplyCosts trait
             bpr_timeline: None,
         }
     }
@@ -302,7 +309,9 @@ fn calculate_pnl_attribution(
     let mut theta_sum = 0.0;
     let mut vega_sum = 0.0;
 
-    for ((entry_leg, position), (exit_leg, _)) in entry_pricing.legs.iter().zip(exit_pricing.legs.iter()) {
+    for ((entry_leg, position), (exit_leg, _)) in
+        entry_pricing.legs.iter().zip(exit_pricing.legs.iter())
+    {
         let sign = position.sign();
         let leg_pnl = cs_analytics::calculate_option_leg_pnl(
             entry_leg.greeks.as_ref(),
@@ -341,8 +350,8 @@ fn calculate_pnl_attribution(
 // LongIronButterfly ExecutableTrade implementation
 // ============================================================================
 
-use cs_domain::{LongIronButterfly, IronButterflyDirection, IronButterflyTrade};
 use crate::composite_pricer::LongIronButterflyCompositePricer;
+use cs_domain::{IronButterflyDirection, IronButterflyTrade, LongIronButterfly};
 
 impl ExecutableTrade for LongIronButterfly {
     type Pricer = LongIronButterflyCompositePricer;
@@ -354,7 +363,7 @@ impl ExecutableTrade for LongIronButterfly {
     }
 
     fn trade_type() -> cs_domain::TradeType {
-        cs_domain::TradeType::IronButterfly  // Same result type, different direction
+        cs_domain::TradeType::IronButterfly // Same result type, different direction
     }
 
     fn validate_entry(
@@ -404,8 +413,7 @@ impl ExecutableTrade for LongIronButterfly {
         if net_debit < config.min_entry_cost {
             return Err(ExecutionError::InvalidSpread(format!(
                 "Entry debit too small: {} < {}",
-                net_debit,
-                config.min_entry_cost,
+                net_debit, config.min_entry_cost,
             )));
         }
 
@@ -432,7 +440,7 @@ impl ExecutableTrade for LongIronButterfly {
 
         // Net debit = net_cost (since long legs pay)
         let entry_debit = entry_pricing.net_cost;
-        let exit_credit = exit_pricing.net_cost;  // What we receive when closing
+        let exit_credit = exit_pricing.net_cost; // What we receive when closing
 
         // Calculate GROSS P&L: we paid entry_debit, received exit_credit
         let pnl_per_share = exit_credit - entry_debit;
@@ -445,7 +453,8 @@ impl ExecutableTrade for LongIronButterfly {
 
         // Max profit is theoretically limited by wing width minus debit paid
         // For a long iron butterfly: max profit = wing_width - entry_debit
-        let wing_width = (self.upper_call.strike.value() - self.center_call.strike.value()) * Decimal::from(CONTRACT_MULTIPLIER);
+        let wing_width = (self.upper_call.strike.value() - self.center_call.strike.value())
+            * Decimal::from(CONTRACT_MULTIPLIER);
         let max_loss = entry_debit * Decimal::from(CONTRACT_MULTIPLIER);
 
         // Net Greeks from CompositePricing (already computed with signs)
@@ -455,8 +464,16 @@ impl ExecutableTrade for LongIronButterfly {
         let net_vega = Some(entry_pricing.net_vega * CONTRACT_MULTIPLIER as f64);
 
         // Average IV
-        let iv_entry = if entry_pricing.avg_iv > 0.0 { Some(entry_pricing.avg_iv) } else { None };
-        let iv_exit = if exit_pricing.avg_iv > 0.0 { Some(exit_pricing.avg_iv) } else { None };
+        let iv_entry = if entry_pricing.avg_iv > 0.0 {
+            Some(entry_pricing.avg_iv)
+        } else {
+            None
+        };
+        let iv_exit = if exit_pricing.avg_iv > 0.0 {
+            Some(exit_pricing.avg_iv)
+        } else {
+            None
+        };
         let iv_crush = match (iv_entry, iv_exit) {
             (Some(entry), Some(exit)) => Some(entry - exit),
             _ => None,
@@ -476,13 +493,19 @@ impl ExecutableTrade for LongIronButterfly {
 
         // Breakeven calculation for long iron butterfly
         // Long iron butterfly profits when stock moves significantly
-        let center_strike_f64 = IronButterflyTrade::center_strike(self).value().to_f64().unwrap_or(0.0);
+        let center_strike_f64 = IronButterflyTrade::center_strike(self)
+            .value()
+            .to_f64()
+            .unwrap_or(0.0);
         let debit_per_share = entry_debit.to_f64().unwrap_or(0.0);
         // Breakeven points: center +/- (wing_width - debit)
-        let wing_width_f64 = (self.upper_call.strike.value() - self.center_call.strike.value()).to_f64().unwrap_or(0.0);
+        let wing_width_f64 = (self.upper_call.strike.value() - self.center_call.strike.value())
+            .to_f64()
+            .unwrap_or(0.0);
         let breakeven_up = center_strike_f64 + wing_width_f64 - debit_per_share;
         let breakeven_down = center_strike_f64 - wing_width_f64 + debit_per_share;
-        let within_breakeven = output.exit_spot >= breakeven_down && output.exit_spot <= breakeven_up;
+        let within_breakeven =
+            output.exit_spot >= breakeven_down && output.exit_spot <= breakeven_up;
 
         let spot_move = output.exit_spot - output.entry_spot;
         let spot_move_pct = if output.entry_spot != 0.0 {
@@ -507,7 +530,7 @@ impl ExecutableTrade for LongIronButterfly {
             short_put_entry: center_put_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             long_call_entry: upper_call_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
             long_put_entry: lower_put_entry.price * Decimal::from(CONTRACT_MULTIPLIER),
-            entry_credit: -entry_debit * Decimal::from(CONTRACT_MULTIPLIER),  // Negative because it's a debit
+            entry_credit: -entry_debit * Decimal::from(CONTRACT_MULTIPLIER), // Negative because it's a debit
             exit_time: output.exit_time,
             short_call_exit: center_call_exit.price * Decimal::from(CONTRACT_MULTIPLIER),
             short_put_exit: center_put_exit.price * Decimal::from(CONTRACT_MULTIPLIER),

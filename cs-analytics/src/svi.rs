@@ -29,7 +29,13 @@ pub struct SVIParams {
 impl SVIParams {
     /// Create new SVI parameters
     pub fn new(a: f64, b: f64, rho: f64, m: f64, sigma: f64) -> Self {
-        Self { a, b, rho, m, sigma }
+        Self {
+            a,
+            b,
+            rho,
+            m,
+            sigma,
+        }
     }
 
     /// Check Gatheral & Jacquier no-arbitrage constraints
@@ -163,9 +169,9 @@ mod tests {
     #[test]
     fn test_svi_skew_with_negative_rho() {
         let params = SVIParams::new(0.04, 0.1, -0.5, 0.0, 0.1);
-        let w_otm_put = params.total_variance(-0.1);  // OTM put
-        let w_otm_call = params.total_variance(0.1);  // OTM call
-        // Negative rho means higher variance on downside (puts)
+        let w_otm_put = params.total_variance(-0.1); // OTM put
+        let w_otm_call = params.total_variance(0.1); // OTM call
+                                                     // Negative rho means higher variance on downside (puts)
         assert!(w_otm_put > w_otm_call);
     }
 
@@ -201,7 +207,11 @@ mod tests {
         let params = SVIParams::default();
         // Valid SVI should have positive second derivative everywhere
         for k in [-0.5, -0.2, 0.0, 0.2, 0.5] {
-            assert!(params.d2w_dk2(k) > 0.0, "d2w/dk2 should be positive at k={}", k);
+            assert!(
+                params.d2w_dk2(k) > 0.0,
+                "d2w/dk2 should be positive at k={}",
+                k
+            );
         }
     }
 

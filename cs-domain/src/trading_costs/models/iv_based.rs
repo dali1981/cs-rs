@@ -5,10 +5,10 @@
 
 use rust_decimal::Decimal;
 
-use crate::trading_costs::{
-    TradingCostCalculator, TradingContext, TradingCost, TradingCostBreakdown, TradeSide,
-};
 use super::CONTRACT_MULTIPLIER;
+use crate::trading_costs::{
+    TradeSide, TradingContext, TradingCost, TradingCostBreakdown, TradingCostCalculator,
+};
 
 /// IV-based slippage model
 ///
@@ -110,16 +110,17 @@ impl TradingCostCalculator for IVBasedSlippage {
         let default_iv = context.avg_iv().unwrap_or(0.30); // Default 30% IV
 
         // Calculate per-leg costs using leg-specific IV if available
-        let leg_cost: Decimal = context.legs.iter()
+        let leg_cost: Decimal = context
+            .legs
+            .iter()
             .map(|leg| {
                 let leg_iv = leg.iv.unwrap_or(default_iv);
                 self.half_spread_cost(leg.price, leg_iv)
             })
             .sum();
 
-        let total = leg_cost
-            * Decimal::from(self.multiplier)
-            * Decimal::from(context.num_contracts);
+        let total =
+            leg_cost * Decimal::from(self.multiplier) * Decimal::from(context.num_contracts);
 
         TradingCost {
             total,
@@ -225,7 +226,7 @@ mod tests {
         // Calendar spread with different IVs
         let ctx = TradingContext::new(
             vec![
-                LegContext::long(dec!(3.00), Some(0.40)),  // Far leg, lower IV
+                LegContext::long(dec!(3.00), Some(0.40)), // Far leg, lower IV
                 LegContext::short(dec!(2.00), Some(0.80)), // Near leg, higher IV
             ],
             "TEST".to_string(),

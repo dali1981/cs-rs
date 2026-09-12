@@ -93,7 +93,14 @@ pub fn bs_implied_volatility(
 
     // Objective function for root finding
     let objective = |sigma: f64| -> f64 {
-        bs_price(spot, strike, time_to_expiry, sigma, is_call, config.risk_free_rate) - option_price
+        bs_price(
+            spot,
+            strike,
+            time_to_expiry,
+            sigma,
+            is_call,
+            config.risk_free_rate,
+        ) - option_price
     };
 
     // Brent's method
@@ -121,9 +128,17 @@ pub fn bs_delta(
     if time_to_expiry <= 0.0 || volatility <= 0.0 {
         // At expiry
         return if is_call {
-            if spot > strike { 1.0 } else { 0.0 }
+            if spot > strike {
+                1.0
+            } else {
+                0.0
+            }
         } else {
-            if spot < strike { -1.0 } else { 0.0 }
+            if spot < strike {
+                -1.0
+            } else {
+                0.0
+            }
         };
     }
 
@@ -184,7 +199,13 @@ pub fn bs_greeks(
         -strike * time_to_expiry * discount * norm.cdf(-d2) * 0.01
     };
 
-    Greeks { delta, gamma, theta, vega, rho }
+    Greeks {
+        delta,
+        gamma,
+        theta,
+        vega,
+        rho,
+    }
 }
 
 #[cfg(test)]
@@ -205,11 +226,7 @@ mod tests {
         // Put-call parity check
         let call_price = bs_price(100.0, 100.0, 1.0, 0.2, true, 0.05);
         let discount = (-0.05 * 1.0_f64).exp();
-        assert_relative_eq!(
-            call_price - price,
-            100.0 - 100.0 * discount,
-            epsilon = 0.01
-        );
+        assert_relative_eq!(call_price - price, 100.0 - 100.0 * discount, epsilon = 0.01);
     }
 
     #[test]

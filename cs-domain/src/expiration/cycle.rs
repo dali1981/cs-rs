@@ -1,4 +1,4 @@
-use chrono::{NaiveDate, Datelike, Weekday};
+use chrono::{Datelike, NaiveDate, Weekday};
 
 /// Classification of option expiration cycles
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -80,7 +80,10 @@ mod tests {
     fn test_quarterly_detection() {
         // Dec 19, 2025 is 3rd Friday of December
         let quarterly = NaiveDate::from_ymd_opt(2025, 12, 19).unwrap();
-        assert_eq!(ExpirationCycle::classify(quarterly), ExpirationCycle::Quarterly);
+        assert_eq!(
+            ExpirationCycle::classify(quarterly),
+            ExpirationCycle::Quarterly
+        );
     }
 
     #[test]

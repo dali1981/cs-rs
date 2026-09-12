@@ -1,13 +1,13 @@
 //! Generic pricer for any CompositeTrade
 
 use chrono::{DateTime, Utc};
-use polars::prelude::DataFrame;
-use rust_decimal::Decimal;
 use cs_analytics::IVSurface;
 use cs_domain::trade::{CompositeTrade, LegPosition};
-use cs_domain::{TradingContext, LegContext, TradeType};
+use cs_domain::{LegContext, TradeType, TradingContext};
+use polars::prelude::DataFrame;
+use rust_decimal::Decimal;
 
-use crate::spread_pricer::{SpreadPricer, PricingError, LegPricing};
+use crate::spread_pricer::{LegPricing, PricingError, SpreadPricer};
 
 /// Pricing result for a composite trade
 #[derive(Debug, Clone)]
@@ -63,7 +63,11 @@ impl CompositePricing {
             net_gamma,
             net_theta,
             net_vega,
-            avg_iv: if iv_count > 0 { iv_sum / iv_count as f64 } else { 0.0 },
+            avg_iv: if iv_count > 0 {
+                iv_sum / iv_count as f64
+            } else {
+                0.0
+            },
         }
     }
 
@@ -74,9 +78,7 @@ impl CompositePricing {
 
     /// Average IV across all legs (recomputed from legs for consistency)
     pub fn avg_iv_from_legs(&self) -> Option<f64> {
-        let ivs: Vec<f64> = self.legs.iter()
-            .filter_map(|(p, _)| p.iv)
-            .collect();
+        let ivs: Vec<f64> = self.legs.iter().filter_map(|(p, _)| p.iv).collect();
 
         if ivs.is_empty() {
             None
@@ -93,13 +95,12 @@ impl CompositePricing {
 
         for (pricing, _) in &self.legs {
             if let Some(iv) = pricing.iv {
-                by_expiry.entry(pricing.expiration)
-                    .or_default()
-                    .push(iv);
+                by_expiry.entry(pricing.expiration).or_default().push(iv);
             }
         }
 
-        by_expiry.into_iter()
+        by_expiry
+            .into_iter()
             .map(|(exp, ivs)| (exp, ivs.iter().sum::<f64>() / ivs.len() as f64))
             .collect()
     }
@@ -107,9 +108,8 @@ impl CompositePricing {
     /// Detect if this is a calendar structure (multiple expirations)
     pub fn is_calendar(&self) -> bool {
         use std::collections::HashSet;
-        let expirations: HashSet<chrono::NaiveDate> = self.legs.iter()
-            .map(|(p, _)| p.expiration)
-            .collect();
+        let expirations: HashSet<chrono::NaiveDate> =
+            self.legs.iter().map(|(p, _)| p.expiration).collect();
         expirations.len() > 1
     }
 
@@ -123,11 +123,11 @@ impl CompositePricing {
         let expirations: Vec<_> = by_exp.keys().collect();
 
         if expirations.len() != 2 {
-            return None;  // Not a simple calendar
+            return None; // Not a simple calendar
         }
 
-        let short_exp = expirations[0];  // Earlier = short
-        let long_exp = expirations[1];   // Later = long
+        let short_exp = expirations[0]; // Earlier = short
+        let long_exp = expirations[1]; // Later = long
 
         let short_iv = by_exp.get(short_exp)?;
         let long_iv = by_exp.get(long_exp)?;
@@ -141,7 +141,7 @@ impl CompositePricing {
     pub fn primary_iv(&self) -> Option<f64> {
         if self.is_calendar() {
             let by_exp = self.iv_by_expiration();
-            by_exp.values().next().copied()  // Earliest expiration
+            by_exp.values().next().copied() // Earliest expiration
         } else {
             self.avg_iv_from_legs()
         }
@@ -158,22 +158,16 @@ impl CompositePricing {
         trade_type: TradeType,
     ) -> TradingContext {
         // Build leg contexts from pricing
-        let legs: Vec<LegContext> = self.legs.iter()
-            .map(|(leg_pricing, position)| {
-                match position {
-                    LegPosition::Long => LegContext::long(leg_pricing.price, leg_pricing.iv),
-                    LegPosition::Short => LegContext::short(leg_pricing.price, leg_pricing.iv),
-                }
+        let legs: Vec<LegContext> = self
+            .legs
+            .iter()
+            .map(|(leg_pricing, position)| match position {
+                LegPosition::Long => LegContext::long(leg_pricing.price, leg_pricing.iv),
+                LegPosition::Short => LegContext::short(leg_pricing.price, leg_pricing.iv),
             })
             .collect();
 
-        TradingContext::new(
-            legs,
-            symbol.to_string(),
-            spot,
-            time,
-            trade_type,
-        )
+        TradingContext::new(legs, symbol.to_string(), spot, time, trade_type)
     }
 }
 
@@ -200,9 +194,10 @@ impl CompositePricer {
         let mut leg_pricings = Vec::with_capacity(trade.leg_count());
 
         // Create pricing provider based on configured pricing model
-        let pricing_provider = self.inner.pricing_model().to_provider_with_rate(
-            self.inner.risk_free_rate()
-        );
+        let pricing_provider = self
+            .inner
+            .pricing_model()
+            .to_provider_with_rate(self.inner.risk_free_rate());
 
         for (leg, position) in trade.legs() {
             let pricing = self.inner.price_leg(
@@ -241,7 +236,9 @@ impl Default for CompositePricer {
 // ============================================================================
 
 use crate::execution::TradePricer;
-use cs_domain::{LongStraddle, ShortStraddle, CalendarSpread, CalendarStraddle, IronButterfly, LongIronButterfly};
+use cs_domain::{
+    CalendarSpread, CalendarStraddle, IronButterfly, LongIronButterfly, LongStraddle, ShortStraddle,
+};
 
 impl TradePricer for CompositePricer {
     type Trade = LongStraddle;
@@ -427,8 +424,8 @@ mod tests {
 
     #[test]
     fn test_composite_pricing_from_legs() {
-        use cs_analytics::Greeks;
         use chrono::NaiveDate;
+        use cs_analytics::Greeks;
 
         let exp_date = NaiveDate::from_ymd_opt(2025, 3, 21).unwrap();
 
@@ -460,10 +457,7 @@ mod tests {
         };
 
         // Long leg1, Short leg2
-        let legs = vec![
-            (leg1, LegPosition::Long),
-            (leg2, LegPosition::Short),
-        ];
+        let legs = vec![(leg1, LegPosition::Long), (leg2, LegPosition::Short)];
 
         let pricing = CompositePricing::from_legs(legs);
 

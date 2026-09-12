@@ -1,14 +1,12 @@
 //! ExecutableTrade implementation for CalendarSpread
 
-use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
-use cs_domain::{
-    CalendarSpread, CalendarSpreadResult, CONTRACT_MULTIPLIER, EarningsEvent,
-};
-use crate::composite_pricer::{CalendarSpreadPricer, CompositePricing};
-use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
+use super::types::ExecutionError;
 use super::types::{ExecutionConfig, SimulationOutput};
+use crate::composite_pricer::{CalendarSpreadPricer, CompositePricing};
+use cs_domain::{CalendarSpread, CalendarSpreadResult, EarningsEvent, CONTRACT_MULTIPLIER};
+use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 
 impl ExecutableTrade for CalendarSpread {
     type Pricer = CalendarSpreadPricer;
@@ -65,10 +63,7 @@ impl ExecutableTrade for CalendarSpread {
         if pricing.net_cost < config.min_entry_cost {
             return Err(ExecutionError::InvalidSpread(format!(
                 "Entry cost too small: {} < {} (short={}, long={})",
-                pricing.net_cost,
-                config.min_entry_cost,
-                short_leg.price,
-                long_leg.price,
+                pricing.net_cost, config.min_entry_cost, short_leg.price, long_leg.price,
             )));
         }
 
@@ -92,7 +87,8 @@ impl ExecutableTrade for CalendarSpread {
         let pnl_per_share = exit_pricing.net_cost - entry_pricing.net_cost;
         let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
         let pnl_pct = if entry_pricing.net_cost.abs() > Decimal::ZERO {
-            (pnl / (entry_pricing.net_cost.abs() * Decimal::from(CONTRACT_MULTIPLIER))) * Decimal::from(100)
+            (pnl / (entry_pricing.net_cost.abs() * Decimal::from(CONTRACT_MULTIPLIER)))
+                * Decimal::from(100)
         } else {
             Decimal::ZERO
         };
@@ -164,7 +160,7 @@ impl ExecutableTrade for CalendarSpread {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
-            cost_summary: None,  // Costs applied separately via ApplyCosts trait
+            cost_summary: None, // Costs applied separately via ApplyCosts trait
             bpr_timeline: None,
         }
     }
@@ -260,7 +256,9 @@ fn calculate_pnl_attribution(
     let mut theta_sum = 0.0;
     let mut vega_sum = 0.0;
 
-    for ((entry_leg, position), (exit_leg, _)) in entry_pricing.legs.iter().zip(exit_pricing.legs.iter()) {
+    for ((entry_leg, position), (exit_leg, _)) in
+        entry_pricing.legs.iter().zip(exit_pricing.legs.iter())
+    {
         let sign = position.sign();
         let leg_pnl = cs_analytics::calculate_option_leg_pnl(
             entry_leg.greeks.as_ref(),

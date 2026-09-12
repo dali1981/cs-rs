@@ -1,5 +1,5 @@
+use crate::{datetime::eastern_to_utc, EarningsEvent};
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
-use crate::{EarningsEvent, datetime::eastern_to_utc};
 
 /// An earnings event resolved to concrete trading dates/times
 ///

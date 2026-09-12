@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use tracing::debug;
 
 use crate::entities::EarningsEvent as DomainEarningsEvent;
-use crate::repositories::{EarningsRepository, RepositoryError};
 use crate::infrastructure::mappers::IntoNormalized;
+use crate::repositories::{EarningsRepository, RepositoryError};
 
 /// Adapter that wraps earnings-rs EarningsReader to implement EarningsRepository
 pub struct EarningsReaderAdapter {
@@ -29,7 +29,6 @@ impl EarningsReaderAdapter {
             source,
         }
     }
-
 }
 
 #[async_trait]
@@ -40,8 +39,10 @@ impl EarningsRepository for EarningsReaderAdapter {
         end_date: NaiveDate,
         symbols: Option<&[String]>,
     ) -> Result<Vec<DomainEarningsEvent>, RepositoryError> {
-        debug!("Loading earnings: range={} to {}, symbols={:?}, source={:?}",
-            start_date, end_date, symbols, self.source);
+        debug!(
+            "Loading earnings: range={} to {}, symbols={:?}, source={:?}",
+            start_date, end_date, symbols, self.source
+        );
 
         // Build load options
         let mut options = earnings_rs::LoadOptions::new().source(self.source);

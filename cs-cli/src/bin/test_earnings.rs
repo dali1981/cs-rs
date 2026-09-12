@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
-use std::path::PathBuf;
 use cs_domain::infrastructure::EarningsReaderAdapter;
 use cs_domain::EarningsRepository;
+use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,7 +18,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let events = repo.load_earnings(start, end, None).await?;
 
-    println!("Found {} earnings events for {}-{}", events.len(), start, end);
+    println!(
+        "Found {} earnings events for {}-{}",
+        events.len(),
+        start,
+        end
+    );
 
     for (i, event) in events.iter().take(10).enumerate() {
         println!(
@@ -27,7 +32,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             event.symbol,
             event.earnings_date,
             event.earnings_time,
-            event.company_name.as_ref().unwrap_or(&"Unknown".to_string())
+            event
+                .company_name
+                .as_ref()
+                .unwrap_or(&"Unknown".to_string())
         );
     }
 

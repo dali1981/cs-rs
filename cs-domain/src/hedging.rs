@@ -1,19 +1,19 @@
+use crate::CONTRACT_MULTIPLIER;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use crate::CONTRACT_MULTIPLIER;
 
 /// A single hedge transaction
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HedgeAction {
     pub timestamp: DateTime<Utc>,
-    pub shares: i32,          // Positive = buy, negative = sell
+    pub shares: i32, // Positive = buy, negative = sell
     pub spot_price: f64,
-    pub delta_before: f64,    // Position delta before hedge
-    pub delta_after: f64,     // Position delta after hedge
-    pub cost: Decimal,        // Transaction cost
+    pub delta_before: f64, // Position delta before hedge
+    pub delta_after: f64,  // Position delta after hedge
+    pub cost: Decimal,     // Transaction cost
 }
 
 /// Enriched hedge trade with attribution metrics
@@ -82,7 +82,10 @@ impl HedgeTradeDetail {
     }
 
     /// Compute realized volatility from spot history up to a given time
-    pub fn compute_rv_to_date(history: &[(DateTime<Utc>, f64)], up_to: DateTime<Utc>) -> Option<f64> {
+    pub fn compute_rv_to_date(
+        history: &[(DateTime<Utc>, f64)],
+        up_to: DateTime<Utc>,
+    ) -> Option<f64> {
         let prices: Vec<f64> = history
             .iter()
             .filter(|(t, _)| *t <= up_to)
@@ -93,20 +96,15 @@ impl HedgeTradeDetail {
             return None;
         }
 
-        let returns: Vec<f64> = prices
-            .windows(2)
-            .map(|w| (w[1] / w[0]).ln())
-            .collect();
+        let returns: Vec<f64> = prices.windows(2).map(|w| (w[1] / w[0]).ln()).collect();
 
         if returns.is_empty() {
             return None;
         }
 
         let mean = returns.iter().sum::<f64>() / returns.len() as f64;
-        let variance = returns
-            .iter()
-            .map(|r| (r - mean).powi(2))
-            .sum::<f64>() / returns.len() as f64;
+        let variance =
+            returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / returns.len() as f64;
 
         Some(variance.sqrt() * 252.0_f64.sqrt())
     }
@@ -205,14 +203,12 @@ impl HedgePosition {
         }
         // Use abs(shares) for weighting - prevents division by near-zero
         // and nonsensical averages when buys and sells offset
-        let total_value: f64 = self.hedges
+        let total_value: f64 = self
+            .hedges
             .iter()
             .map(|h| h.shares.abs() as f64 * h.spot_price)
             .sum();
-        let total_abs_shares: i32 = self.hedges
-            .iter()
-            .map(|h| h.shares.abs())
-            .sum();
+        let total_abs_shares: i32 = self.hedges.iter().map(|h| h.shares.abs()).sum();
         if total_abs_shares == 0 {
             None
         } else {
@@ -232,7 +228,8 @@ impl HedgePosition {
     /// Uses peak_shares × spot_at_peak instead of average price.
     /// This is more robust when hedge positions flip between long and short.
     pub fn long_hedge_capital(&self) -> Decimal {
-        Decimal::from(self.peak_long_shares) * Decimal::try_from(self.peak_long_spot).unwrap_or_default()
+        Decimal::from(self.peak_long_shares)
+            * Decimal::try_from(self.peak_long_spot).unwrap_or_default()
     }
 
     /// Compute margin required for short hedge position (Phase 2a + Issue B fix)
@@ -271,7 +268,8 @@ impl HedgePosition {
 
             // Compute cumulative P&L up to and including this trade
             // For each prior trade: (current_spot - trade_spot) * shares
-            let cumulative_pnl: Decimal = self.hedges
+            let cumulative_pnl: Decimal = self
+                .hedges
                 .iter()
                 .take(details.len() + 1)
                 .map(|h| {
@@ -311,8 +309,8 @@ impl HedgePosition {
                 timestamp: exit_time,
                 shares: -cumulative_shares, // Sell all remaining shares
                 spot_price: exit_spot,
-                delta_before: 0.0, // Delta at exit (option position closing)
-                delta_after: 0.0,  // Zero after unwind
+                delta_before: 0.0,      // Delta at exit (option position closing)
+                delta_after: 0.0,       // Zero after unwind
                 cost: self.unwind_cost, // Transaction cost for unwinding (computed in finalize)
                 rv_to_date,
                 gamma_pnl,
@@ -354,9 +352,9 @@ impl Default for HedgeStrategy {
 pub struct HedgeConfig {
     pub strategy: HedgeStrategy,
     pub max_rehedges: Option<usize>, // Limit number of rehedges
-    pub min_hedge_size: i32,          // Minimum shares to trade
+    pub min_hedge_size: i32,         // Minimum shares to trade
     pub transaction_cost_per_share: Decimal, // Cost per share traded
-    pub contract_multiplier: i32,     // Usually 100 for options
+    pub contract_multiplier: i32,    // Usually 100 for options
 
     /// How to compute delta for rehedge decisions (default: GammaApproximation)
     #[serde(default)]
@@ -497,9 +495,9 @@ impl HedgeState {
     /// Create new hedge state from initial option position
     pub fn new(
         config: HedgeConfig,
-        initial_delta: f64,    // Option delta at entry (per-share)
-        initial_gamma: f64,    // Option gamma at entry (per-share)
-        initial_spot: f64,     // Spot price at entry
+        initial_delta: f64, // Option delta at entry (per-share)
+        initial_gamma: f64, // Option gamma at entry (per-share)
+        initial_spot: f64,  // Spot price at entry
     ) -> Self {
         Self {
             config,
@@ -545,11 +543,7 @@ impl HedgeState {
     /// 2. Check if net_delta exceeds threshold
     /// 3. If yes, compute shares to trade and execute
     /// 4. Update stock_shares and record transaction
-    pub fn update(
-        &mut self,
-        timestamp: DateTime<Utc>,
-        new_spot: f64,
-    ) -> Option<HedgeAction> {
+    pub fn update(&mut self, timestamp: DateTime<Utc>, new_spot: f64) -> Option<HedgeAction> {
         // 1. Update option delta using gamma approximation
         let spot_change = new_spot - self.last_spot;
         self.option_delta += self.option_gamma * spot_change;
@@ -557,7 +551,10 @@ impl HedgeState {
 
         // 2. Check if rehedge needed based on NET delta
         let net_delta = self.net_delta();
-        if !self.config.should_rehedge(net_delta, new_spot, self.option_gamma) {
+        if !self
+            .config
+            .should_rehedge(net_delta, new_spot, self.option_gamma)
+        {
             return None;
         }
 
@@ -667,7 +664,11 @@ impl<P: DeltaProvider> GenericHedgeState<P> {
             last_delta: 0.0,
             last_gamma: None,
             position: HedgePosition::new(),
-            spot_history: if track_rv { vec![(Utc::now(), initial_spot)] } else { vec![] },
+            spot_history: if track_rv {
+                vec![(Utc::now(), initial_spot)]
+            } else {
+                vec![]
+            },
             track_rv,
             attribution_enabled,
             entry_hv: None,
@@ -779,7 +780,12 @@ impl<P: DeltaProvider> GenericHedgeState<P> {
     }
 
     /// Finalize and compute P&L
-    pub fn finalize(mut self, exit_spot: f64, entry_iv: Option<f64>, exit_iv: Option<f64>) -> HedgePosition {
+    pub fn finalize(
+        mut self,
+        exit_spot: f64,
+        entry_iv: Option<f64>,
+        exit_iv: Option<f64>,
+    ) -> HedgePosition {
         self.position.unrealized_pnl = self.position.calculate_pnl(exit_spot);
 
         // Compute unwind cost for closing the hedge at exit (Issue A fix)
@@ -794,14 +800,13 @@ impl<P: DeltaProvider> GenericHedgeState<P> {
 
         // Compute RV metrics if tracking was enabled
         if self.track_rv && !self.spot_history.is_empty() {
-            self.position.realized_vol_metrics = Some(
-                RealizedVolatilityMetrics::from_spot_history(
+            self.position.realized_vol_metrics =
+                Some(RealizedVolatilityMetrics::from_spot_history(
                     &self.spot_history,
-                    self.entry_hv,  // Use stored entry_hv from set_entry_hv()
+                    self.entry_hv, // Use stored entry_hv from set_entry_hv()
                     entry_iv,
                     exit_iv,
-                )
-            );
+                ));
             self.position.spot_history = self.spot_history;
         }
 
@@ -947,18 +952,14 @@ impl RealizedVolatilityMetrics {
         // For now, stub with 0.0 - this will be implemented in Phase 2
         let realized_vol = if prices.len() >= 2 {
             // Simple std dev calculation as placeholder
-            let returns: Vec<f64> = prices
-                .windows(2)
-                .map(|w| (w[1] / w[0]).ln())
-                .collect();
+            let returns: Vec<f64> = prices.windows(2).map(|w| (w[1] / w[0]).ln()).collect();
 
             if returns.is_empty() {
                 0.0
             } else {
                 let mean = returns.iter().sum::<f64>() / returns.len() as f64;
-                let variance = returns.iter()
-                    .map(|r| (r - mean).powi(2))
-                    .sum::<f64>() / returns.len() as f64;
+                let variance =
+                    returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / returns.len() as f64;
                 variance.sqrt() * 252.0_f64.sqrt() // Annualize
             }
         } else {
@@ -1074,7 +1075,7 @@ pub struct AttributionConfig {
 impl Default for AttributionConfig {
     fn default() -> Self {
         Self {
-            enabled: false,  // Opt-in
+            enabled: false, // Opt-in
             vol_source: VolatilitySource::CurrentMarketIV,
             snapshot_times: SnapshotTimes::OpenClose,
         }

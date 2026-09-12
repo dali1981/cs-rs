@@ -8,10 +8,10 @@ use chrono::Utc;
 use polars::prelude::*;
 use rust_decimal::Decimal;
 
-use cs_analytics::IVSurface;
-use cs_domain::{Strangle, Butterfly, Condor, IronCondor, TradingContext, LegContext, TradeType};
-use crate::spread_pricer::{SpreadPricer, LegPricing, PricingError};
 use crate::execution::TradePricer;
+use crate::spread_pricer::{LegPricing, PricingError, SpreadPricer};
+use cs_analytics::IVSurface;
+use cs_domain::{Butterfly, Condor, IronCondor, LegContext, Strangle, TradeType, TradingContext};
 
 // ============================================================================
 // Strangle Pricer (2 legs: OTM call + OTM put)
@@ -50,7 +50,9 @@ pub struct StranglePricer {
 
 impl StranglePricer {
     pub fn new(spread_pricer: SpreadPricer) -> Self {
-        Self { inner: spread_pricer }
+        Self {
+            inner: spread_pricer,
+        }
     }
 
     pub fn price(
@@ -60,14 +62,17 @@ impl StranglePricer {
         spot_price: f64,
         pricing_time: DateTime<Utc>,
     ) -> Result<StranglePricing, PricingError> {
-        let iv_surface = self.inner.build_iv_surface(
+        let iv_surface =
+            self.inner
+                .build_iv_surface(chain_df, spot_price, pricing_time, strangle.symbol());
+
+        self.price_with_surface(
+            strangle,
             chain_df,
             spot_price,
             pricing_time,
-            strangle.symbol(),
-        );
-
-        self.price_with_surface(strangle, chain_df, spot_price, pricing_time, iv_surface.as_ref())
+            iv_surface.as_ref(),
+        )
     }
 
     pub fn price_with_surface(
@@ -78,7 +83,10 @@ impl StranglePricer {
         pricing_time: DateTime<Utc>,
         iv_surface: Option<&IVSurface>,
     ) -> Result<StranglePricing, PricingError> {
-        let pricing_provider = self.inner.pricing_model().to_provider_with_rate(self.inner.risk_free_rate());
+        let pricing_provider = self
+            .inner
+            .pricing_model()
+            .to_provider_with_rate(self.inner.risk_free_rate());
 
         let call = self.inner.price_leg(
             strangle.symbol(),
@@ -106,7 +114,11 @@ impl StranglePricer {
 
         let entry_debit = call.price + put.price;
 
-        Ok(StranglePricing { call, put, entry_debit })
+        Ok(StranglePricing {
+            call,
+            put,
+            entry_debit,
+        })
     }
 }
 
@@ -151,7 +163,9 @@ pub struct ButterflyPricer {
 
 impl ButterflyPricer {
     pub fn new(spread_pricer: SpreadPricer) -> Self {
-        Self { inner: spread_pricer }
+        Self {
+            inner: spread_pricer,
+        }
     }
 
     pub fn price(
@@ -161,14 +175,17 @@ impl ButterflyPricer {
         spot_price: f64,
         pricing_time: DateTime<Utc>,
     ) -> Result<ButterflyPricing, PricingError> {
-        let iv_surface = self.inner.build_iv_surface(
+        let iv_surface =
+            self.inner
+                .build_iv_surface(chain_df, spot_price, pricing_time, butterfly.symbol());
+
+        self.price_with_surface(
+            butterfly,
             chain_df,
             spot_price,
             pricing_time,
-            butterfly.symbol(),
-        );
-
-        self.price_with_surface(butterfly, chain_df, spot_price, pricing_time, iv_surface.as_ref())
+            iv_surface.as_ref(),
+        )
     }
 
     pub fn price_with_surface(
@@ -179,7 +196,10 @@ impl ButterflyPricer {
         pricing_time: DateTime<Utc>,
         iv_surface: Option<&IVSurface>,
     ) -> Result<ButterflyPricing, PricingError> {
-        let pricing_provider = self.inner.pricing_model().to_provider_with_rate(self.inner.risk_free_rate());
+        let pricing_provider = self
+            .inner
+            .pricing_model()
+            .to_provider_with_rate(self.inner.risk_free_rate());
 
         let short_call = self.inner.price_leg(
             butterfly.symbol(),
@@ -230,8 +250,8 @@ impl ButterflyPricer {
         )?;
 
         // Butterfly is a debit spread: pay for long wings, receive for short ATM
-        let entry_debit = (long_upper_call.price + long_lower_put.price)
-            - (short_call.price + short_put.price);
+        let entry_debit =
+            (long_upper_call.price + long_lower_put.price) - (short_call.price + short_put.price);
 
         Ok(ButterflyPricing {
             short_call,
@@ -284,7 +304,9 @@ pub struct CondorPricer {
 
 impl CondorPricer {
     pub fn new(spread_pricer: SpreadPricer) -> Self {
-        Self { inner: spread_pricer }
+        Self {
+            inner: spread_pricer,
+        }
     }
 
     pub fn price(
@@ -294,14 +316,17 @@ impl CondorPricer {
         spot_price: f64,
         pricing_time: DateTime<Utc>,
     ) -> Result<CondorPricing, PricingError> {
-        let iv_surface = self.inner.build_iv_surface(
+        let iv_surface =
+            self.inner
+                .build_iv_surface(chain_df, spot_price, pricing_time, condor.symbol());
+
+        self.price_with_surface(
+            condor,
             chain_df,
             spot_price,
             pricing_time,
-            condor.symbol(),
-        );
-
-        self.price_with_surface(condor, chain_df, spot_price, pricing_time, iv_surface.as_ref())
+            iv_surface.as_ref(),
+        )
     }
 
     pub fn price_with_surface(
@@ -312,7 +337,10 @@ impl CondorPricer {
         pricing_time: DateTime<Utc>,
         iv_surface: Option<&IVSurface>,
     ) -> Result<CondorPricing, PricingError> {
-        let pricing_provider = self.inner.pricing_model().to_provider_with_rate(self.inner.risk_free_rate());
+        let pricing_provider = self
+            .inner
+            .pricing_model()
+            .to_provider_with_rate(self.inner.risk_free_rate());
 
         let near_call = self.inner.price_leg(
             condor.symbol(),
@@ -363,8 +391,8 @@ impl CondorPricer {
         )?;
 
         // Condor is a debit spread
-        let entry_debit = (far_upper_call.price + far_lower_put.price)
-            - (near_call.price + near_put.price);
+        let entry_debit =
+            (far_upper_call.price + far_lower_put.price) - (near_call.price + near_put.price);
 
         Ok(CondorPricing {
             near_call,
@@ -417,7 +445,9 @@ pub struct IronCondorPricer {
 
 impl IronCondorPricer {
     pub fn new(spread_pricer: SpreadPricer) -> Self {
-        Self { inner: spread_pricer }
+        Self {
+            inner: spread_pricer,
+        }
     }
 
     pub fn price(
@@ -427,14 +457,17 @@ impl IronCondorPricer {
         spot_price: f64,
         pricing_time: DateTime<Utc>,
     ) -> Result<IronCondorPricing, PricingError> {
-        let iv_surface = self.inner.build_iv_surface(
+        let iv_surface =
+            self.inner
+                .build_iv_surface(chain_df, spot_price, pricing_time, condor.symbol());
+
+        self.price_with_surface(
+            condor,
             chain_df,
             spot_price,
             pricing_time,
-            condor.symbol(),
-        );
-
-        self.price_with_surface(condor, chain_df, spot_price, pricing_time, iv_surface.as_ref())
+            iv_surface.as_ref(),
+        )
     }
 
     pub fn price_with_surface(
@@ -445,7 +478,10 @@ impl IronCondorPricer {
         pricing_time: DateTime<Utc>,
         iv_surface: Option<&IVSurface>,
     ) -> Result<IronCondorPricing, PricingError> {
-        let pricing_provider = self.inner.pricing_model().to_provider_with_rate(self.inner.risk_free_rate());
+        let pricing_provider = self
+            .inner
+            .pricing_model()
+            .to_provider_with_rate(self.inner.risk_free_rate());
 
         let near_call = self.inner.price_leg(
             condor.symbol(),
@@ -496,8 +532,8 @@ impl IronCondorPricer {
         )?;
 
         // Iron condor is a credit spread: short near (receive) - long far (pay)
-        let net_credit = (near_call.price + near_put.price)
-            - (far_upper_call.price + far_lower_put.price);
+        let net_credit =
+            (near_call.price + near_put.price) - (far_upper_call.price + far_lower_put.price);
 
         Ok(IronCondorPricing {
             near_call,

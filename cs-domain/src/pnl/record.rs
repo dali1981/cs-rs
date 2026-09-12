@@ -144,12 +144,12 @@ mod tests {
     #[test]
     fn test_total_pnl() {
         let record = TradePnlRecord::new(
-            dec!(100),  // option premium
-            dec!(20),   // option pnl (+$20)
-            dec!(5),    // hedge pnl (+$5)
-            dec!(3),    // hedge costs (-$3)
-            dec!(150),  // peak capital
-            10,         // 10 days
+            dec!(100), // option premium
+            dec!(20),  // option pnl (+$20)
+            dec!(5),   // hedge pnl (+$5)
+            dec!(3),   // hedge costs (-$3)
+            dec!(150), // peak capital
+            10,        // 10 days
         );
 
         // Total = 20 + 5 - 3 = 22
@@ -160,10 +160,10 @@ mod tests {
     fn test_normalized_return() {
         let record = TradePnlRecord::new(
             dec!(100),
-            dec!(15),   // +$15 option pnl
-            dec!(0),    // no hedge pnl
-            dec!(0),    // no hedge costs
-            dec!(100),  // peak capital = premium (unhedged)
+            dec!(15),  // +$15 option pnl
+            dec!(0),   // no hedge pnl
+            dec!(0),   // no hedge costs
+            dec!(100), // peak capital = premium (unhedged)
             5,
         );
 
@@ -175,11 +175,11 @@ mod tests {
     fn test_daily_return() {
         let record = TradePnlRecord::new(
             dec!(100),
-            dec!(10),   // +10% total return
+            dec!(10), // +10% total return
             dec!(0),
             dec!(0),
             dec!(100),
-            10,         // 10 days
+            10, // 10 days
         );
 
         // r_daily = (1.10)^(1/10) - 1 ≈ 0.00957 (0.957% per day)
@@ -202,10 +202,10 @@ mod tests {
     #[test]
     fn test_hedge_cost_ratio() {
         let record = TradePnlRecord::new(
-            dec!(100),  // option premium
+            dec!(100), // option premium
             dec!(10),
             dec!(5),
-            dec!(35),   // hedge costs = 35% of premium (excessive!)
+            dec!(35), // hedge costs = 35% of premium (excessive!)
             dec!(150),
             10,
         );
@@ -229,7 +229,7 @@ mod tests {
     fn test_negative_return() {
         let record = TradePnlRecord::new(
             dec!(100),
-            dec!(-30),  // -30% loss
+            dec!(-30), // -30% loss
             dec!(0),
             dec!(0),
             dec!(100),

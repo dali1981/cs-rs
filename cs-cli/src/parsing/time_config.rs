@@ -86,9 +86,18 @@ mod tests {
 
     #[test]
     fn test_parse_time_valid() {
-        assert_eq!(parse_time(Some("09:35".to_string())).unwrap(), (Some(9), Some(35)));
-        assert_eq!(parse_time(Some("23:59".to_string())).unwrap(), (Some(23), Some(59)));
-        assert_eq!(parse_time(Some("00:00".to_string())).unwrap(), (Some(0), Some(0)));
+        assert_eq!(
+            parse_time(Some("09:35".to_string())).unwrap(),
+            (Some(9), Some(35))
+        );
+        assert_eq!(
+            parse_time(Some("23:59".to_string())).unwrap(),
+            (Some(23), Some(59))
+        );
+        assert_eq!(
+            parse_time(Some("00:00".to_string())).unwrap(),
+            (Some(0), Some(0))
+        );
     }
 
     #[test]
@@ -117,14 +126,26 @@ mod tests {
 
     #[test]
     fn test_parse_delta_range_valid() {
-        assert_eq!(parse_delta_range(Some("0.25,0.75".to_string())).unwrap(), Some((0.25, 0.75)));
-        assert_eq!(parse_delta_range(Some("0.1,0.9".to_string())).unwrap(), Some((0.1, 0.9)));
-        assert_eq!(parse_delta_range(Some("0.0,1.0".to_string())).unwrap(), Some((0.0, 1.0)));
+        assert_eq!(
+            parse_delta_range(Some("0.25,0.75".to_string())).unwrap(),
+            Some((0.25, 0.75))
+        );
+        assert_eq!(
+            parse_delta_range(Some("0.1,0.9".to_string())).unwrap(),
+            Some((0.1, 0.9))
+        );
+        assert_eq!(
+            parse_delta_range(Some("0.0,1.0".to_string())).unwrap(),
+            Some((0.0, 1.0))
+        );
     }
 
     #[test]
     fn test_parse_delta_range_with_spaces() {
-        assert_eq!(parse_delta_range(Some("0.25 , 0.75".to_string())).unwrap(), Some((0.25, 0.75)));
+        assert_eq!(
+            parse_delta_range(Some("0.25 , 0.75".to_string())).unwrap(),
+            Some((0.25, 0.75))
+        );
     }
 
     #[test]

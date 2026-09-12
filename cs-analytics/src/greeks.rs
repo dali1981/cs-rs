@@ -1,13 +1,13 @@
-use std::ops::{Add, Sub, Mul, Neg};
+use std::ops::{Add, Mul, Neg, Sub};
 
 /// Option Greeks - immutable value object
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Greeks {
     pub delta: f64,
     pub gamma: f64,
-    pub theta: f64,  // Per day
-    pub vega: f64,   // Per 1% vol change
-    pub rho: f64,    // Per 1% rate change
+    pub theta: f64, // Per day
+    pub vega: f64,  // Per 1% vol change
+    pub rho: f64,   // Per 1% rate change
 }
 
 impl Greeks {
@@ -22,11 +22,22 @@ impl Greeks {
     /// Greeks at expiry (delta only)
     pub fn at_expiry(spot: f64, strike: f64, is_call: bool) -> Self {
         let delta = if is_call {
-            if spot > strike { 1.0 } else { 0.0 }
+            if spot > strike {
+                1.0
+            } else {
+                0.0
+            }
         } else {
-            if spot < strike { -1.0 } else { 0.0 }
+            if spot < strike {
+                -1.0
+            } else {
+                0.0
+            }
         };
-        Self { delta, ..Self::ZERO }
+        Self {
+            delta,
+            ..Self::ZERO
+        }
     }
 
     /// Spread Greeks = long - short
@@ -121,8 +132,20 @@ mod tests {
 
     #[test]
     fn test_greeks_addition() {
-        let g1 = Greeks { delta: 0.5, gamma: 0.1, theta: -0.05, vega: 0.2, rho: 0.01 };
-        let g2 = Greeks { delta: 0.3, gamma: 0.05, theta: -0.02, vega: 0.1, rho: 0.005 };
+        let g1 = Greeks {
+            delta: 0.5,
+            gamma: 0.1,
+            theta: -0.05,
+            vega: 0.2,
+            rho: 0.01,
+        };
+        let g2 = Greeks {
+            delta: 0.3,
+            gamma: 0.05,
+            theta: -0.02,
+            vega: 0.1,
+            rho: 0.005,
+        };
         let sum = g1 + g2;
 
         assert!((sum.delta - 0.8).abs() < 1e-10);
@@ -134,8 +157,20 @@ mod tests {
 
     #[test]
     fn test_greeks_subtraction() {
-        let long = Greeks { delta: 0.6, gamma: 0.1, theta: -0.05, vega: 0.2, rho: 0.01 };
-        let short = Greeks { delta: 0.4, gamma: 0.05, theta: -0.02, vega: 0.1, rho: 0.005 };
+        let long = Greeks {
+            delta: 0.6,
+            gamma: 0.1,
+            theta: -0.05,
+            vega: 0.2,
+            rho: 0.01,
+        };
+        let short = Greeks {
+            delta: 0.4,
+            gamma: 0.05,
+            theta: -0.02,
+            vega: 0.1,
+            rho: 0.005,
+        };
         let spread = long - short;
 
         assert!((spread.delta - 0.2).abs() < 1e-10);
@@ -144,8 +179,20 @@ mod tests {
 
     #[test]
     fn test_greeks_spread_helper() {
-        let long = Greeks { delta: 0.6, gamma: 0.1, theta: -0.05, vega: 0.2, rho: 0.01 };
-        let short = Greeks { delta: 0.4, gamma: 0.05, theta: -0.02, vega: 0.1, rho: 0.005 };
+        let long = Greeks {
+            delta: 0.6,
+            gamma: 0.1,
+            theta: -0.05,
+            vega: 0.2,
+            rho: 0.01,
+        };
+        let short = Greeks {
+            delta: 0.4,
+            gamma: 0.05,
+            theta: -0.02,
+            vega: 0.1,
+            rho: 0.005,
+        };
         let spread = Greeks::spread(&long, &short);
 
         assert!((spread.delta - 0.2).abs() < 1e-10);
@@ -153,7 +200,13 @@ mod tests {
 
     #[test]
     fn test_greeks_scalar_multiplication() {
-        let g = Greeks { delta: 0.5, gamma: 0.1, theta: -0.05, vega: 0.2, rho: 0.01 };
+        let g = Greeks {
+            delta: 0.5,
+            gamma: 0.1,
+            theta: -0.05,
+            vega: 0.2,
+            rho: 0.01,
+        };
         let scaled = g * 2.0;
 
         assert!((scaled.delta - 1.0).abs() < 1e-10);
@@ -163,7 +216,13 @@ mod tests {
 
     #[test]
     fn test_greeks_position() {
-        let g = Greeks { delta: 0.5, gamma: 0.1, theta: -0.05, vega: 0.2, rho: 0.01 };
+        let g = Greeks {
+            delta: 0.5,
+            gamma: 0.1,
+            theta: -0.05,
+            vega: 0.2,
+            rho: 0.01,
+        };
         let position = g.position(10);
 
         assert!((position.delta - 5.0).abs() < 1e-10);
@@ -172,7 +231,13 @@ mod tests {
 
     #[test]
     fn test_greeks_negation() {
-        let g = Greeks { delta: 0.5, gamma: 0.1, theta: -0.05, vega: 0.2, rho: 0.01 };
+        let g = Greeks {
+            delta: 0.5,
+            gamma: 0.1,
+            theta: -0.05,
+            vega: 0.2,
+            rho: 0.01,
+        };
         let neg = -g;
 
         assert!((neg.delta + 0.5).abs() < 1e-10);

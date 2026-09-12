@@ -15,8 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file_path = &args[1];
 
     // Read parquet file
-    let df = LazyFrame::scan_parquet(file_path, Default::default())?
-        .collect()?;
+    let df = LazyFrame::scan_parquet(file_path, Default::default())?.collect()?;
 
     println!("{}", "=".repeat(100));
     println!("ATM IV Time Series: {}", file_path);
@@ -27,12 +26,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Convert date column from days since epoch to readable format
-    let df_display = df.clone().lazy()
-        .with_column(
-            col("date")
-                .cast(DataType::Date)
-                .alias("date")
-        )
+    let df_display = df
+        .clone()
+        .lazy()
+        .with_column(col("date").cast(DataType::Date).alias("date"))
         .collect()?;
 
     // Display data
@@ -44,7 +41,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Summary Statistics:");
     println!("{}", "=".repeat(100));
 
-    let stats_cols = vec!["atm_iv_30d", "atm_iv_60d", "atm_iv_90d", "term_spread_30_60", "term_spread_30_90"];
+    let stats_cols = vec![
+        "atm_iv_30d",
+        "atm_iv_60d",
+        "atm_iv_90d",
+        "term_spread_30_60",
+        "term_spread_30_90",
+    ];
 
     for col_name in stats_cols {
         if let Ok(col) = df.column(col_name) {
@@ -54,8 +57,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let min = valid.iter().cloned().fold(f64::INFINITY, f64::min);
                     let max = valid.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
                     let mean = valid.iter().sum::<f64>() / valid.len() as f64;
-                    println!("{:20} count={:3}, min={:.4}, max={:.4}, mean={:.4}",
-                        col_name, valid.len(), min, max, mean);
+                    println!(
+                        "{:20} count={:3}, min={:.4}, max={:.4}, mean={:.4}",
+                        col_name,
+                        valid.len(),
+                        min,
+                        max,
+                        mean
+                    );
                 }
             }
         }
@@ -109,7 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 found_signals = true;
                 // Convert days since epoch to date
                 if let Some(days) = date_days {
-                    use chrono::{NaiveDate, Duration};
+                    use chrono::{Duration, NaiveDate};
                     let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
                     let date = epoch + Duration::days(days as i64);
                     println!("{}: {}", date, signals.join(", "));

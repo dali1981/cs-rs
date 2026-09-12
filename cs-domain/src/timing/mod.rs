@@ -1,5 +1,5 @@
-use chrono::{DateTime, NaiveDate, Utc};
 use crate::entities::EarningsEvent;
+use chrono::{DateTime, NaiveDate, Utc};
 
 /// Trait for calculating trade entry/exit timing
 ///
@@ -20,12 +20,11 @@ pub trait TradeTiming: Send + Sync {
 }
 
 pub mod earnings;
-pub mod straddle;
 pub mod post_earnings;
+pub mod straddle;
 pub mod trading_calendar;
 
 pub use earnings::EarningsTradeTiming;
-pub use straddle::StraddleTradeTiming;
 pub use post_earnings::PostEarningsStraddleTiming;
+pub use straddle::StraddleTradeTiming;
 pub use trading_calendar::TradingCalendar;
-

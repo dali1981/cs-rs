@@ -352,8 +352,14 @@ mod tests {
         ];
 
         // Spot at 100 -> ATM strike = 100, straddle = 5 + 4.5 = 9.5
-        let straddle =
-            StraddlePriceComputer::compute_straddle(&options, 100.0, pricing_date, None, 1, AtmMethod::Closest);
+        let straddle = StraddlePriceComputer::compute_straddle(
+            &options,
+            100.0,
+            pricing_date,
+            None,
+            1,
+            AtmMethod::Closest,
+        );
 
         assert!(straddle.is_some());
         let s = straddle.unwrap();
@@ -367,7 +373,7 @@ mod tests {
     #[test]
     fn test_compute_straddle_for_dte() {
         let pricing_date = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
-        let exp_7d = NaiveDate::from_ymd_opt(2025, 1, 22).unwrap();  // 7 DTE
+        let exp_7d = NaiveDate::from_ymd_opt(2025, 1, 22).unwrap(); // 7 DTE
         let exp_30d = NaiveDate::from_ymd_opt(2025, 2, 14).unwrap(); // 30 DTE
 
         let options = vec![
@@ -397,11 +403,7 @@ mod tests {
 
     #[test]
     fn test_select_atm_strike() {
-        let options = vec![
-            (95.0, 2.0, true),
-            (100.0, 5.0, true),
-            (105.0, 3.0, true),
-        ];
+        let options = vec![(95.0, 2.0, true), (100.0, 5.0, true), (105.0, 3.0, true)];
 
         // Spot at 102 -> closest is 100
         let atm = StraddlePriceComputer::select_atm_strike(&options, 102.0, AtmMethod::Closest);

@@ -1,6 +1,6 @@
-use chrono::{NaiveDate, NaiveTime, DateTime, Utc};
 use crate::datetime::eastern_to_utc;
 use crate::timing::TradingCalendar;
+use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 
 /// A concrete trading period with resolved dates and times
 #[derive(Debug, Clone, PartialEq, Eq)]

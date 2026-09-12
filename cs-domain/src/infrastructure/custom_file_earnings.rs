@@ -5,8 +5,8 @@ use std::path::PathBuf;
 
 use crate::datetime::TradingDate;
 use crate::entities::EarningsEvent;
-use crate::repositories::{EarningsRepository, RepositoryError};
 use crate::infrastructure::mappers::earnings::parse_earnings_time;
+use crate::repositories::{EarningsRepository, RepositoryError};
 
 /// Custom file-based EarningsRepository for user-provided earnings files.
 ///
@@ -145,8 +145,8 @@ impl CustomFileEarningsReader {
             market_cap: Option<u64>,
         }
 
-        let content = std::fs::read_to_string(&self.file_path)
-            .map_err(|e| RepositoryError::Io(e))?;
+        let content =
+            std::fs::read_to_string(&self.file_path).map_err(|e| RepositoryError::Io(e))?;
 
         let json_events: Vec<JsonEarningsEvent> = serde_json::from_str(&content)
             .map_err(|e| RepositoryError::Parse(format!("Invalid JSON: {}", e)))?;
@@ -154,8 +154,10 @@ impl CustomFileEarningsReader {
         let mut events = Vec::new();
         for json_event in json_events {
             // Parse date
-            let earnings_date = NaiveDate::parse_from_str(&json_event.date, "%Y-%m-%d")
-                .map_err(|e| RepositoryError::Parse(format!("Invalid date '{}': {}", json_event.date, e)))?;
+            let earnings_date =
+                NaiveDate::parse_from_str(&json_event.date, "%Y-%m-%d").map_err(|e| {
+                    RepositoryError::Parse(format!("Invalid date '{}': {}", json_event.date, e))
+                })?;
 
             // Filter by date range
             if earnings_date < start_date || earnings_date > end_date {
@@ -239,7 +241,12 @@ mod tests {
         let times = Series::new("earnings_time".into(), &["BMO", "AMC"]);
 
         let mut df = DataFrame::new(vec![symbols, dates, times]).unwrap();
-        let cast_col = df.column("earnings_date").unwrap().clone().cast(&DataType::Date).unwrap();
+        let cast_col = df
+            .column("earnings_date")
+            .unwrap()
+            .clone()
+            .cast(&DataType::Date)
+            .unwrap();
         df.with_column(cast_col).unwrap();
 
         // Write to temp parquet
@@ -312,6 +319,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(events.len(), 2);
-        assert!(events.iter().all(|e| e.symbol == "AAPL" || e.symbol == "GOOGL"));
+        assert!(events
+            .iter()
+            .all(|e| e.symbol == "AAPL" || e.symbol == "GOOGL"));
     }
 }

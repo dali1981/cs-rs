@@ -1,12 +1,12 @@
-use cs_domain::entities::CalendarSpread;
-use cs_domain::value_objects::Strike;
-use cs_domain::strike_selection::{ExpirationCriteria, MultiLegStrikeSelection, SelectionError};
-use cs_domain::value_objects::{
-    CenterConfig, DistanceSpec, MultiLegStrategyConfig, SpotPrice, SpreadType,
-};
 use super::StrikeSelector;
 use chrono::NaiveDate;
 use cs_analytics::IVSurface;
+use cs_domain::entities::CalendarSpread;
+use cs_domain::strike_selection::{ExpirationCriteria, MultiLegStrikeSelection, SelectionError};
+use cs_domain::value_objects::Strike;
+use cs_domain::value_objects::{
+    CenterConfig, DistanceSpec, MultiLegStrategyConfig, SpotPrice, SpreadType,
+};
 use finq_core::OptionType;
 use rust_decimal::Decimal;
 
@@ -60,10 +60,8 @@ impl SymmetricMultiLegSelector {
         let upper_val = spot_f64 * (1.0 + moneyness_percent);
         let lower_val = spot_f64 * (1.0 - moneyness_percent);
 
-        let upper_strike =
-            Decimal::from_f64_retain(upper_val).ok_or(SelectionError::NoStrikes)?;
-        let lower_strike =
-            Decimal::from_f64_retain(lower_val).ok_or(SelectionError::NoStrikes)?;
+        let upper_strike = Decimal::from_f64_retain(upper_val).ok_or(SelectionError::NoStrikes)?;
+        let lower_strike = Decimal::from_f64_retain(lower_val).ok_or(SelectionError::NoStrikes)?;
 
         Ok((Strike::new(lower_strike)?, Strike::new(upper_strike)?))
     }
@@ -178,67 +176,57 @@ impl StrikeSelector for SymmetricMultiLegSelector {
         let center_strikes = self.build_center_strikes(surface, config.center)?;
 
         let (near_strikes, far_strikes) = match config.wings.spread_type {
-            SpreadType::Simple { distance_from_center } => {
-                match distance_from_center {
-                    DistanceSpec::Moneyness(moneyness_pct) => {
-                        let (put_strike, call_strike) =
-                            self.find_strike_at_moneyness(surface, moneyness_pct)?;
+            SpreadType::Simple {
+                distance_from_center,
+            } => match distance_from_center {
+                DistanceSpec::Moneyness(moneyness_pct) => {
+                    let (put_strike, call_strike) =
+                        self.find_strike_at_moneyness(surface, moneyness_pct)?;
 
-                        let put_snapped = self.snap_to_available_strike(surface, put_strike)?;
-                        let call_snapped = self.snap_to_available_strike(surface, call_strike)?;
+                    let put_snapped = self.snap_to_available_strike(surface, put_strike)?;
+                    let call_snapped = self.snap_to_available_strike(surface, call_strike)?;
 
-                        let center_strike = center_strikes
-                            .first()
-                            .cloned()
-                            .ok_or(SelectionError::NoStrikes)?;
+                    let center_strike = center_strikes
+                        .first()
+                        .cloned()
+                        .ok_or(SelectionError::NoStrikes)?;
 
-                        if config.wings.symmetric {
-                            self.validate_symmetric(
-                                center_strike,
-                                call_snapped,
-                                put_snapped,
-                                0.05,
-                            )?;
-                        }
-
-                        (None, Some(vec![put_snapped, call_snapped]))
+                    if config.wings.symmetric {
+                        self.validate_symmetric(center_strike, call_snapped, put_snapped, 0.05)?;
                     }
-                    DistanceSpec::Delta(_) => {
-                        return Err(SelectionError::UnsupportedStrategy(
-                            "Delta-based multi-leg selection not yet implemented".to_string(),
-                        ))
-                    }
+
+                    (None, Some(vec![put_snapped, call_snapped]))
                 }
-            }
-            SpreadType::Double { near_distance, far_distance } => {
-                match (near_distance, far_distance) {
-                    (DistanceSpec::Moneyness(near_pct), DistanceSpec::Moneyness(far_pct)) => {
-                        let (put_near, call_near) =
-                            self.find_strike_at_moneyness(surface, near_pct)?;
-                        let (put_far, call_far) =
-                            self.find_strike_at_moneyness(surface, far_pct)?;
-
-                        let put_near_snap =
-                            self.snap_to_available_strike(surface, put_near)?;
-                        let call_near_snap =
-                            self.snap_to_available_strike(surface, call_near)?;
-                        let put_far_snap = self.snap_to_available_strike(surface, put_far)?;
-                        let call_far_snap =
-                            self.snap_to_available_strike(surface, call_far)?;
-
-                        (
-                            Some(vec![put_near_snap, call_near_snap]),
-                            Some(vec![put_far_snap, call_far_snap]),
-                        )
-                    }
-                    _ => {
-                        return Err(SelectionError::UnsupportedStrategy(
-                            "Mixed delta/moneyness double spreads not yet implemented"
-                                .to_string(),
-                        ))
-                    }
+                DistanceSpec::Delta(_) => {
+                    return Err(SelectionError::UnsupportedStrategy(
+                        "Delta-based multi-leg selection not yet implemented".to_string(),
+                    ))
                 }
-            }
+            },
+            SpreadType::Double {
+                near_distance,
+                far_distance,
+            } => match (near_distance, far_distance) {
+                (DistanceSpec::Moneyness(near_pct), DistanceSpec::Moneyness(far_pct)) => {
+                    let (put_near, call_near) = self.find_strike_at_moneyness(surface, near_pct)?;
+                    let (put_far, call_far) = self.find_strike_at_moneyness(surface, far_pct)?;
+
+                    let put_near_snap = self.snap_to_available_strike(surface, put_near)?;
+                    let call_near_snap = self.snap_to_available_strike(surface, call_near)?;
+                    let put_far_snap = self.snap_to_available_strike(surface, put_far)?;
+                    let call_far_snap = self.snap_to_available_strike(surface, call_far)?;
+
+                    (
+                        Some(vec![put_near_snap, call_near_snap]),
+                        Some(vec![put_far_snap, call_far_snap]),
+                    )
+                }
+                _ => {
+                    return Err(SelectionError::UnsupportedStrategy(
+                        "Mixed delta/moneyness double spreads not yet implemented".to_string(),
+                    ))
+                }
+            },
         };
 
         Ok(MultiLegStrikeSelection {

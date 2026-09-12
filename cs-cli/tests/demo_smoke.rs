@@ -28,9 +28,9 @@ use std::path::PathBuf;
 
 // ── Canonical demo parameters ────────────────────────────────────────────────
 // Must match scripts/demo_command.sh and README.md.
-const DEMO_CONF:  &str = "configs/demo.toml";
+const DEMO_CONF: &str = "configs/demo.toml";
 const DEMO_START: &str = "2024-08-14";
-const DEMO_END:   &str = "2024-08-28";
+const DEMO_END: &str = "2024-08-28";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Workspace root: cs-cli's manifest dir is cs-cli/, one level up is the root.
@@ -47,22 +47,28 @@ fn workspace_root() -> PathBuf {
 fn demo_params_match_shell_script() {
     let root = workspace_root();
     let script = root.join("scripts/demo_command.sh");
-    assert!(script.exists(), "scripts/demo_command.sh not found at {:?}", root);
+    assert!(
+        script.exists(),
+        "scripts/demo_command.sh not found at {:?}",
+        root
+    );
 
-    let content = std::fs::read_to_string(&script)
-        .expect("could not read scripts/demo_command.sh");
+    let content = std::fs::read_to_string(&script).expect("could not read scripts/demo_command.sh");
 
     assert!(
         content.contains(&format!("DEMO_CONF=\"{}\"", DEMO_CONF)),
-        "DEMO_CONF mismatch: expected '{}' in scripts/demo_command.sh", DEMO_CONF
+        "DEMO_CONF mismatch: expected '{}' in scripts/demo_command.sh",
+        DEMO_CONF
     );
     assert!(
         content.contains(&format!("DEMO_START=\"{}\"", DEMO_START)),
-        "DEMO_START mismatch: expected '{}' in scripts/demo_command.sh", DEMO_START
+        "DEMO_START mismatch: expected '{}' in scripts/demo_command.sh",
+        DEMO_START
     );
     assert!(
         content.contains(&format!("DEMO_END=\"{}\"", DEMO_END)),
-        "DEMO_END mismatch: expected '{}' in scripts/demo_command.sh", DEMO_END
+        "DEMO_END mismatch: expected '{}' in scripts/demo_command.sh",
+        DEMO_END
     );
 }
 
@@ -75,21 +81,20 @@ fn demo_backtest_exits_successfully_and_produces_results() {
     // if the test environment is missing required files.
     assert!(
         root.join(DEMO_CONF).exists(),
-        "{} not found at {:?}", DEMO_CONF, root
+        "{} not found at {:?}",
+        DEMO_CONF,
+        root
     );
     assert!(
         root.join("fixtures").exists(),
-        "fixtures/ directory not found at {:?} — demo data is missing", root
+        "fixtures/ directory not found at {:?} — demo data is missing",
+        root
     );
 
     let mut cmd = Command::cargo_bin("cs").unwrap();
-    cmd.current_dir(&root)
-        .args([
-            "backtest",
-            "--conf",  DEMO_CONF,
-            "--start", DEMO_START,
-            "--end",   DEMO_END,
-        ]);
+    cmd.current_dir(&root).args([
+        "backtest", "--conf", DEMO_CONF, "--start", DEMO_START, "--end", DEMO_END,
+    ]);
 
     cmd.assert()
         .success()

@@ -1,10 +1,10 @@
 //! Backtest command arguments
 
+use super::{
+    AttributionArgs, HedgingArgs, MetricsArgs, RulesArgs, SelectionArgs, StrategyArgs, TimingArgs,
+};
 use clap::Args;
 use std::path::PathBuf;
-use super::{
-    TimingArgs, SelectionArgs, StrategyArgs, HedgingArgs, AttributionArgs, RulesArgs, MetricsArgs,
-};
 
 /// Arguments for the backtest command
 #[derive(Debug, Clone, Args)]

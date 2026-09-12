@@ -6,7 +6,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 use crate::trading_costs::{
-    TradingCostCalculator, TradingContext, TradingCost, TradingCostBreakdown, TradeSide,
+    TradeSide, TradingContext, TradingCost, TradingCostBreakdown, TradingCostCalculator,
 };
 
 /// Commission model
@@ -103,12 +103,10 @@ impl CommissionModel {
         let legs = context.num_legs();
 
         // Per-leg commission (capped if applicable)
-        let per_leg = (self.per_contract * contracts)
-            .min(self.max_per_leg.unwrap_or(Decimal::MAX));
+        let per_leg = (self.per_contract * contracts).min(self.max_per_leg.unwrap_or(Decimal::MAX));
 
         // Total (with minimum)
-        (per_leg * Decimal::from(legs as u32))
-            .max(self.min_per_order)
+        (per_leg * Decimal::from(legs as u32)).max(self.min_per_order)
     }
 }
 

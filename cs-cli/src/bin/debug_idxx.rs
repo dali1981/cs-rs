@@ -1,14 +1,12 @@
 use chrono::NaiveDate;
-use std::path::PathBuf;
-use cs_domain::infrastructure::{FinqOptionsRepository};
+use cs_domain::infrastructure::FinqOptionsRepository;
 use cs_domain::OptionsDataRepository;
 use polars::prelude::*;
+use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let data_dir = dirs::home_dir()
-        .unwrap()
-        .join("polygon/data");
+    let data_dir = dirs::home_dir().unwrap().join("polygon/data");
 
     let options_repo = FinqOptionsRepository::new(data_dir);
 

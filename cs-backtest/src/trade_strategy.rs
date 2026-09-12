@@ -27,28 +27,30 @@
 //! 2. Add a variant to `SpreadType` in config.rs
 //! 3. Update `strategy_factory::create_strategy()` to handle the new variant
 
+use crate::backtest_use_case::{TradeGenerationError, TradeResultMethods};
+use crate::backtest_use_case_helpers::{PreparedData, TradeSimulator};
+use crate::bpr::{build_bpr_timeline, BprPricingContext, HasBprTimeline};
+use crate::composite_pricer::{
+    CalendarSpreadPricer, CalendarStraddleCompositePricer, CompositePricer, CompositePricing,
+    IronButterflyCompositePricer, LongIronButterflyCompositePricer, ShortStraddlePricer,
+};
+use crate::config::BacktestConfig;
+use crate::execution::cost_helpers::apply_costs_to_result;
+use crate::execution::{ExecutableTrade, ExecutionConfig, TradePricer};
+use crate::hedging_simulator::{
+    simulate_with_hedging_prepriced, EntryPricingContext, HedgedSimulationOutput,
+};
+use crate::rules::RuleEvaluator;
+use crate::strike_selection::StrikeSelector;
+use crate::timing_strategy::TimingStrategy;
+use chrono::{DateTime, NaiveDate, Utc};
+use cs_domain::strike_selection::ExpirationCriteria;
+use cs_domain::*;
+use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use chrono::{DateTime, NaiveDate, Utc};
-use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
-use cs_domain::*;
-use cs_domain::strike_selection::ExpirationCriteria;
-use crate::strike_selection::StrikeSelector;
-use crate::config::BacktestConfig;
-use crate::bpr::{build_bpr_timeline, BprPricingContext, HasBprTimeline};
-use crate::execution::{ExecutionConfig, ExecutableTrade, TradePricer};
-use crate::execution::cost_helpers::apply_costs_to_result;
-use crate::timing_strategy::TimingStrategy;
-use crate::backtest_use_case::{TradeResultMethods, TradeGenerationError};
-use crate::backtest_use_case_helpers::{PreparedData, TradeSimulator};
-use crate::hedging_simulator::{simulate_with_hedging_prepriced, EntryPricingContext, HedgedSimulationOutput};
-use crate::composite_pricer::{
-    CompositePricer, CompositePricing, CalendarSpreadPricer, IronButterflyCompositePricer,
-    LongIronButterflyCompositePricer, CalendarStraddleCompositePricer, ShortStraddlePricer,
-};
-use crate::rules::RuleEvaluator;
 
 /// Context for trade selection - contains all inputs needed for selection and validation
 #[derive(Clone)]
@@ -94,7 +96,10 @@ where
         + Sync;
 
     /// The pricer type for this trade
-    type Pricer: TradePricer<Trade = Self::Trade, Pricing = CompositePricing> + Send + Sync + 'static;
+    type Pricer: TradePricer<Trade = Self::Trade, Pricing = CompositePricing>
+        + Send
+        + Sync
+        + 'static;
 
     // ========================================================================
     // Required methods - each strategy must implement these
@@ -137,7 +142,11 @@ where
     }
 
     /// Create a filter rejection error for dropped trades
-    fn create_filter_error(&self, result: &R, event: &EarningsEvent) -> Option<TradeGenerationError> {
+    fn create_filter_error(
+        &self,
+        result: &R,
+        event: &EarningsEvent,
+    ) -> Option<TradeGenerationError> {
         let _ = (result, event);
         None
     }
@@ -312,7 +321,10 @@ fn passes_trade_rules(
             earnings_date: event.earnings_date,
             earnings_time: event.earnings_time,
             reason: "TRADE_RULE_FAILED".into(),
-            details: Some(format!("Rule: {}, entry_price: {:.4}", rule_name, entry_price)),
+            details: Some(format!(
+                "Rule: {}, entry_price: {:.4}",
+                rule_name, entry_price
+            )),
             phase: "filter".into(),
         }),
     }
@@ -443,7 +455,11 @@ async fn execute_common<T, Pr, R>(
     exit_time: DateTime<Utc>,
 ) -> TradeExecutionOutcome<R>
 where
-    T: ExecutableTrade<Pricer = Pr, Pricing = CompositePricing, Result = R> + CompositeTrade + Clone + Send + Sync,
+    T: ExecutableTrade<Pricer = Pr, Pricing = CompositePricing, Result = R>
+        + CompositeTrade
+        + Clone
+        + Send
+        + Sync,
     Pr: TradePricer<Trade = T, Pricing = CompositePricing> + Send + Sync,
     R: TradeResultMethods + TradeResult + ApplyCosts + HasBprTimeline + Send,
 {
@@ -457,9 +473,11 @@ where
     ) {
         Ok(pricing) => pricing,
         Err(err) => {
-            return TradeExecutionOutcome::Executed(
-                trade.to_failed_result(&simulator.failed_output(), Some(event), err.into()),
-            );
+            return TradeExecutionOutcome::Executed(trade.to_failed_result(
+                &simulator.failed_output(),
+                Some(event),
+                err.into(),
+            ));
         }
     };
 
@@ -495,9 +513,11 @@ where
     {
         Ok(s) => s,
         Err(err) => {
-            return TradeExecutionOutcome::Executed(
-                trade.to_failed_result(&simulator.failed_output(), Some(event), err),
-            );
+            return TradeExecutionOutcome::Executed(trade.to_failed_result(
+                &simulator.failed_output(),
+                Some(event),
+                err,
+            ));
         }
     };
 
@@ -633,7 +653,12 @@ impl TradeStrategy<CalendarSpreadResult> for CalendarSpreadStrategy {
 
     fn select_trade(&self, ctx: &SelectionContext<'_>) -> Option<Self::Trade> {
         ctx.selector
-            .select_calendar_spread(&ctx.data.spot, &ctx.data.surface, self.option_type, ctx.criteria)
+            .select_calendar_spread(
+                &ctx.data.spot,
+                &ctx.data.surface,
+                self.option_type,
+                ctx.criteria,
+            )
             .ok()
     }
     // Uses default execute_trade implementation
@@ -768,7 +793,10 @@ impl LongStraddleStrategy {
         let rules_config = config.build_rules_config();
         let rule_evaluator = RuleEvaluator::new(rules_config);
 
-        Self { timing, rule_evaluator }
+        Self {
+            timing,
+            rule_evaluator,
+        }
     }
 }
 
@@ -790,8 +818,9 @@ impl TradeStrategy<StraddleResult> for LongStraddleStrategy {
 
     fn select_trade(&self, ctx: &SelectionContext<'_>) -> Option<Self::Trade> {
         let entry_date = ctx.entry_time.date_naive();
-        let min_expiration = (entry_date + chrono::Duration::days(ctx.criteria.min_short_dte as i64))
-            .max(entry_date);
+        let min_expiration = (entry_date
+            + chrono::Duration::days(ctx.criteria.min_short_dte as i64))
+        .max(entry_date);
         ctx.selector
             .select_long_straddle(&ctx.data.spot, &ctx.data.surface, min_expiration)
             .ok()
@@ -830,7 +859,10 @@ impl ShortStraddleStrategy {
         let rules_config = config.build_rules_config();
         let rule_evaluator = RuleEvaluator::new(rules_config);
 
-        Self { timing, rule_evaluator }
+        Self {
+            timing,
+            rule_evaluator,
+        }
     }
 }
 
@@ -852,8 +884,9 @@ impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
 
     fn select_trade(&self, ctx: &SelectionContext<'_>) -> Option<Self::Trade> {
         let entry_date = ctx.entry_time.date_naive();
-        let min_expiration = (entry_date + chrono::Duration::days(ctx.criteria.min_short_dte as i64))
-            .max(entry_date);
+        let min_expiration = (entry_date
+            + chrono::Duration::days(ctx.criteria.min_short_dte as i64))
+        .max(entry_date);
         ctx.selector
             .select_short_straddle(&ctx.data.spot, &ctx.data.surface, min_expiration)
             .ok()
@@ -875,8 +908,6 @@ impl TradeStrategy<StraddleResult> for ShortStraddleStrategy {
     // Uses default execute_trade implementation
 }
 
-
-
 /// Post-Earnings Straddle Strategy
 pub struct PostEarningsStraddleStrategy {
     timing: TimingStrategy,
@@ -885,13 +916,14 @@ pub struct PostEarningsStraddleStrategy {
 
 impl PostEarningsStraddleStrategy {
     pub fn new(config: &BacktestConfig) -> Self {
-        let timing = TimingStrategy::for_post_earnings(
-            config.timing,
-            config.post_earnings_holding_days,
-        );
+        let timing =
+            TimingStrategy::for_post_earnings(config.timing, config.post_earnings_holding_days);
         let rules_config = config.build_rules_config();
         let rule_evaluator = RuleEvaluator::new(rules_config);
-        Self { timing, rule_evaluator }
+        Self {
+            timing,
+            rule_evaluator,
+        }
     }
 }
 
@@ -913,8 +945,9 @@ impl TradeStrategy<StraddleResult> for PostEarningsStraddleStrategy {
 
     fn select_trade(&self, ctx: &SelectionContext<'_>) -> Option<Self::Trade> {
         let entry_date = ctx.entry_time.date_naive();
-        let min_expiration = (entry_date + chrono::Duration::days(ctx.criteria.min_short_dte as i64))
-            .max(entry_date);
+        let min_expiration = (entry_date
+            + chrono::Duration::days(ctx.criteria.min_short_dte as i64))
+        .max(entry_date);
         ctx.selector
             .select_long_straddle(&ctx.data.spot, &ctx.data.surface, min_expiration)
             .ok()
@@ -947,7 +980,10 @@ impl CalendarStraddleStrategy {
         let timing = TimingStrategy::for_earnings(config.timing);
         let rules_config = config.build_rules_config();
         let rule_evaluator = RuleEvaluator::new(rules_config);
-        Self { timing, rule_evaluator }
+        Self {
+            timing,
+            rule_evaluator,
+        }
     }
 }
 

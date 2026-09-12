@@ -1,5 +1,5 @@
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use serde::{Serialize, Deserialize};
 
 fn default_finq_dir() -> PathBuf {
     std::env::var("FINQ_DATA_DIR")

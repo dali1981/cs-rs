@@ -1,10 +1,10 @@
-use polars::prelude::*;
+use crate::execution::TradePricer;
+use crate::spread_pricer::{LegPricing, PricingError, SpreadPricer};
 use chrono::{DateTime, Utc};
-use rust_decimal::Decimal;
 use cs_analytics::{IVSurface, PricingModel};
 use cs_domain::{LongStraddle, PricingSource};
-use crate::spread_pricer::{SpreadPricer, LegPricing, PricingError};
-use crate::execution::TradePricer;
+use polars::prelude::*;
+use rust_decimal::Decimal;
 
 /// Pricer for straddle positions
 ///
@@ -39,12 +39,9 @@ impl StraddlePricer {
         timestamp: DateTime<Utc>,
     ) -> Result<StraddlePricing, PricingError> {
         // Build IV surface for fallback interpolation
-        let iv_surface = self.spread_pricer.build_iv_surface(
-            chain_df,
-            spot,
-            timestamp,
-            straddle.symbol(),
-        );
+        let iv_surface =
+            self.spread_pricer
+                .build_iv_surface(chain_df, spot, timestamp, straddle.symbol());
 
         self.price_with_surface(straddle, chain_df, spot, timestamp, iv_surface.as_ref())
     }
@@ -61,7 +58,10 @@ impl StraddlePricer {
         iv_surface: Option<&IVSurface>,
     ) -> Result<StraddlePricing, PricingError> {
         // Create pricing provider
-        let pricing_provider = self.spread_pricer.pricing_model().to_provider_with_rate(self.spread_pricer.risk_free_rate());
+        let pricing_provider = self
+            .spread_pricer
+            .pricing_model()
+            .to_provider_with_rate(self.spread_pricer.risk_free_rate());
 
         // Price call leg
         let call_pricing = self.spread_pricer.price_leg(

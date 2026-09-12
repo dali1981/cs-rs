@@ -96,9 +96,7 @@ impl TradingContext {
 
     /// Average IV across all legs
     pub fn avg_iv(&self) -> Option<f64> {
-        let ivs: Vec<f64> = self.legs.iter()
-            .filter_map(|leg| leg.iv)
-            .collect();
+        let ivs: Vec<f64> = self.legs.iter().filter_map(|leg| leg.iv).collect();
 
         if ivs.is_empty() {
             None
@@ -109,14 +107,13 @@ impl TradingContext {
 
     /// Total absolute premium across all legs (per share)
     pub fn total_premium(&self) -> Decimal {
-        self.legs.iter()
-            .map(|leg| leg.price.abs())
-            .sum()
+        self.legs.iter().map(|leg| leg.price.abs()).sum()
     }
 
     /// Net premium (accounting for long/short positions)
     pub fn net_premium(&self) -> Decimal {
-        self.legs.iter()
+        self.legs
+            .iter()
             .map(|leg| if leg.is_long { leg.price } else { -leg.price })
             .sum()
     }

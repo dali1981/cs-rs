@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
-use ib_data_collector::database::{ParquetDatabase, DatabaseRepository};
-use ib_data_collector::domain::{Contract, OptionType as IbOptionType, BarType};
-use rust_decimal::Decimal;
+use ib_data_collector::database::{DatabaseRepository, ParquetDatabase};
+use ib_data_collector::domain::{BarType, Contract, OptionType as IbOptionType};
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -16,17 +16,26 @@ pub struct IbOptionsRepository {
 
 impl IbOptionsRepository {
     pub fn new(data_dir: &Path) -> Result<Self, RepositoryError> {
-        let db = ParquetDatabase::open(data_dir)
-            .map_err(|e| RepositoryError::NotFound(format!("Failed to open IB database at {:?}: {}", data_dir, e)))?;
+        let db = ParquetDatabase::open(data_dir).map_err(|e| {
+            RepositoryError::NotFound(format!(
+                "Failed to open IB database at {:?}: {}",
+                data_dir, e
+            ))
+        })?;
         Ok(Self { db })
     }
 
     /// Group contracts by (expiration, strike, option_type)
-    fn group_contracts(&self, symbol: &str) -> Result<HashMap<(NaiveDate, Decimal, IbOptionType), Vec<Contract>>, RepositoryError> {
-        let contracts = self.db.get_symbol_contracts(symbol)
-            .map_err(|e| RepositoryError::NotFound(format!("Failed to get contracts for {}: {}", symbol, e)))?;
+    fn group_contracts(
+        &self,
+        symbol: &str,
+    ) -> Result<HashMap<(NaiveDate, Decimal, IbOptionType), Vec<Contract>>, RepositoryError> {
+        let contracts = self.db.get_symbol_contracts(symbol).map_err(|e| {
+            RepositoryError::NotFound(format!("Failed to get contracts for {}: {}", symbol, e))
+        })?;
 
-        let mut grouped: HashMap<(NaiveDate, Decimal, IbOptionType), Vec<Contract>> = HashMap::new();
+        let mut grouped: HashMap<(NaiveDate, Decimal, IbOptionType), Vec<Contract>> =
+            HashMap::new();
 
         for state in contracts {
             let key = (
@@ -41,7 +50,10 @@ impl IbOptionsRepository {
     }
 
     /// Find latest bar at or before target time
-    fn find_latest_bar(bars: &[ib_data_collector::database::repository::Bar], target_time: DateTime<Utc>) -> Option<&ib_data_collector::database::repository::Bar> {
+    fn find_latest_bar(
+        bars: &[ib_data_collector::database::repository::Bar],
+        target_time: DateTime<Utc>,
+    ) -> Option<&ib_data_collector::database::repository::Bar> {
         bars.iter()
             .filter(|b| b.timestamp <= target_time)
             .max_by_key(|b| b.timestamp)
@@ -58,7 +70,8 @@ struct OptionSnapshot {
 }
 
 fn snapshots_to_option_bars(snapshots: Vec<OptionSnapshot>) -> Vec<OptionBar> {
-    snapshots.into_iter()
+    snapshots
+        .into_iter()
         .filter(|s| s.close > 0.0)
         .map(|s| OptionBar {
             strike: s.strike.to_f64().unwrap_or(0.0),
@@ -82,7 +95,7 @@ impl OptionsDataRepository for IbOptionsRepository {
     ) -> Result<Vec<OptionBar>, RepositoryError> {
         // Not implemented for IB - daily bars not typically used in backtests
         Err(RepositoryError::NotFound(
-            "Daily option bars not implemented for IB data source".to_string()
+            "Daily option bars not implemented for IB data source".to_string(),
         ))
     }
 
@@ -93,7 +106,7 @@ impl OptionsDataRepository for IbOptionsRepository {
     ) -> Result<Vec<OptionBar>, RepositoryError> {
         // Not implemented for IB - use get_option_bars_at_time instead
         Err(RepositoryError::NotFound(
-            "Minute option bars not implemented for IB data source".to_string()
+            "Minute option bars not implemented for IB data source".to_string(),
         ))
     }
 
@@ -112,10 +125,12 @@ impl OptionsDataRepository for IbOptionsRepository {
 
             if let (Some(bid_c), Some(ask_c)) = (bid_contract, ask_contract) {
                 // Read bars
-                let bid_bars = self.db.read_bars(bid_c)
-                    .map_err(|e| RepositoryError::NotFound(format!("Failed to read bid bars: {}", e)))?;
-                let ask_bars = self.db.read_bars(ask_c)
-                    .map_err(|e| RepositoryError::NotFound(format!("Failed to read ask bars: {}", e)))?;
+                let bid_bars = self.db.read_bars(bid_c).map_err(|e| {
+                    RepositoryError::NotFound(format!("Failed to read bid bars: {}", e))
+                })?;
+                let ask_bars = self.db.read_bars(ask_c).map_err(|e| {
+                    RepositoryError::NotFound(format!("Failed to read ask bars: {}", e))
+                })?;
 
                 // Find latest bars at or before target_time
                 if let (Some(bid_bar), Some(ask_bar)) = (
@@ -184,8 +199,9 @@ impl OptionsDataRepository for IbOptionsRepository {
         underlying: &str,
         as_of_date: NaiveDate,
     ) -> Result<Vec<NaiveDate>, RepositoryError> {
-        let contracts = self.db.get_symbol_contracts(underlying)
-            .map_err(|e| RepositoryError::NotFound(format!("Failed to get contracts for {}: {}", underlying, e)))?;
+        let contracts = self.db.get_symbol_contracts(underlying).map_err(|e| {
+            RepositoryError::NotFound(format!("Failed to get contracts for {}: {}", underlying, e))
+        })?;
 
         let expirations: HashSet<NaiveDate> = contracts
             .iter()
@@ -204,8 +220,9 @@ impl OptionsDataRepository for IbOptionsRepository {
         expiration: NaiveDate,
         _as_of_date: NaiveDate,
     ) -> Result<Vec<Strike>, RepositoryError> {
-        let contracts = self.db.get_symbol_contracts(underlying)
-            .map_err(|e| RepositoryError::NotFound(format!("Failed to get contracts for {}: {}", underlying, e)))?;
+        let contracts = self.db.get_symbol_contracts(underlying).map_err(|e| {
+            RepositoryError::NotFound(format!("Failed to get contracts for {}: {}", underlying, e))
+        })?;
 
         let strikes: HashSet<Decimal> = contracts
             .iter()

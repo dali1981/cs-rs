@@ -1,13 +1,13 @@
 //! Types for generic trade execution
 
+use crate::spread_pricer::PricingError;
 use chrono::{DateTime, Utc};
+use cs_domain::{
+    AttributionConfig, HedgeConfig, MarginConfig, OptionStrategy, RepositoryError,
+    TradingCostCalculator, TradingCostConfig,
+};
 use rust_decimal::Decimal;
 use thiserror::Error;
-use cs_domain::{
-    OptionStrategy, RepositoryError, TradingCostConfig, TradingCostCalculator, HedgeConfig,
-    MarginConfig, AttributionConfig,
-};
-use crate::spread_pricer::PricingError;
 
 /// Errors that can occur during trade execution
 #[derive(Debug, Error)]
@@ -120,7 +120,9 @@ impl ExecutionConfig {
 
     /// Check if hedging is enabled
     pub fn has_hedging(&self) -> bool {
-        self.hedge_config.as_ref().map_or(false, |h| !matches!(h.strategy, cs_domain::HedgeStrategy::None))
+        self.hedge_config.as_ref().map_or(false, |h| {
+            !matches!(h.strategy, cs_domain::HedgeStrategy::None)
+        })
     }
 
     /// Set custom trading costs configuration

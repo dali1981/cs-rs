@@ -1,11 +1,11 @@
 //! ExecutableTrade implementation for IronCondor
 
-use rust_decimal::Decimal;
-use cs_domain::{IronCondor, IronCondorResult, CONTRACT_MULTIPLIER, EarningsEvent};
-use crate::multi_leg_pricer::{IronCondorPricer, IronCondorPricing};
-use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
+use super::types::ExecutionError;
 use super::types::{ExecutionConfig, SimulationOutput};
+use crate::multi_leg_pricer::{IronCondorPricer, IronCondorPricing};
+use cs_domain::{EarningsEvent, IronCondor, IronCondorResult, CONTRACT_MULTIPLIER};
+use rust_decimal::Decimal;
 
 impl ExecutableTrade for IronCondor {
     type Pricer = IronCondorPricer;
@@ -55,8 +55,7 @@ impl ExecutableTrade for IronCondor {
         if pricing.net_credit < config.min_entry_cost {
             return Err(ExecutionError::InvalidSpread(format!(
                 "Entry credit too small: {} < {}",
-                pricing.net_credit,
-                config.min_entry_cost,
+                pricing.net_credit, config.min_entry_cost,
             )));
         }
 
@@ -228,7 +227,7 @@ impl ExecutableTrade for IronCondor {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
-            cost_summary: None,  // Costs applied separately via ApplyCosts trait
+            cost_summary: None, // Costs applied separately via ApplyCosts trait
         }
     }
 }

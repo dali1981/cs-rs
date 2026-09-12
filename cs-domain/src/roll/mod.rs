@@ -2,8 +2,8 @@
 //!
 //! Defines when and how positions should be renewed/rolled.
 
-mod policy;
 mod event;
+mod policy;
 
-pub use policy::RollPolicy;
 pub use event::RollEvent;
+pub use policy::RollPolicy;

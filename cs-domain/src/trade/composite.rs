@@ -5,8 +5,8 @@ use crate::entities::OptionLeg;
 /// Position direction for a leg
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LegPosition {
-    Long,   // +1: bought, profit when price rises
-    Short,  // -1: sold, profit when price falls
+    Long,  // +1: bought, profit when price rises
+    Short, // -1: sold, profit when price falls
 }
 
 impl LegPosition {
@@ -39,7 +39,10 @@ pub trait CompositeTrade: Sized + Send + Sync {
 
     /// Symbol (derived from first leg by default)
     fn symbol(&self) -> &str {
-        self.legs().first().map(|(leg, _)| leg.symbol.as_str()).unwrap_or("")
+        self.legs()
+            .first()
+            .map(|(leg, _)| leg.symbol.as_str())
+            .unwrap_or("")
     }
 
     /// Number of legs
@@ -76,7 +79,7 @@ impl CompositeIV {
     /// Create from calendar trade (short/long IV)
     pub fn calendar(short_iv: f64, long_iv: f64) -> Self {
         Self {
-            primary: short_iv,  // Short = earnings-affected leg
+            primary: short_iv, // Short = earnings-affected leg
             ratio: Some(short_iv / long_iv),
             by_expiration: Some((short_iv, long_iv)),
         }

@@ -1,7 +1,7 @@
-use chrono::{NaiveDate, DateTime, Utc};
-use rust_decimal::Decimal;
+use chrono::{DateTime, NaiveDate, Utc};
 use finq_core::OptionType;
-use serde::{Serialize, Deserialize};
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 
 use crate::value_objects::*;
 
@@ -28,7 +28,7 @@ impl CostSummary {
 
 // Submodule for rolling results
 pub mod rolling_result;
-pub use rolling_result::{RollingResult, RollPeriod, RollReason};
+pub use rolling_result::{RollPeriod, RollReason, RollingResult};
 
 // RollableTrade trait implementations
 pub mod rollable_impls;
@@ -89,7 +89,12 @@ impl OptionLeg {
         expiration: NaiveDate,
         option_type: OptionType,
     ) -> Self {
-        Self { symbol, strike, expiration, option_type }
+        Self {
+            symbol,
+            strike,
+            expiration,
+            option_type,
+        }
     }
 
     /// Generate OCC ticker (e.g., "O:AAPL250117C00180000")
@@ -101,7 +106,9 @@ impl OptionLeg {
         // Convert strike to cents (multiply by 1000 for OCC format)
         let strike_millis = self.strike.value() * Decimal::from(1000);
         // Round to nearest integer and convert
-        let strike_int = strike_millis.round().to_string()
+        let strike_int = strike_millis
+            .round()
+            .to_string()
             .split('.')
             .next()
             .and_then(|s| s.parse::<u64>().ok())
@@ -142,14 +149,27 @@ impl CalendarSpread {
                 long: long.expiration,
             });
         }
-        Ok(Self { short_leg: short, long_leg: long })
+        Ok(Self {
+            short_leg: short,
+            long_leg: long,
+        })
     }
 
-    pub fn symbol(&self) -> &str { &self.short_leg.symbol }
-    pub fn strike(&self) -> Strike { self.short_leg.strike }
-    pub fn option_type(&self) -> OptionType { self.short_leg.option_type }
-    pub fn short_expiry(&self) -> NaiveDate { self.short_leg.expiration }
-    pub fn long_expiry(&self) -> NaiveDate { self.long_leg.expiration }
+    pub fn symbol(&self) -> &str {
+        &self.short_leg.symbol
+    }
+    pub fn strike(&self) -> Strike {
+        self.short_leg.strike
+    }
+    pub fn option_type(&self) -> OptionType {
+        self.short_leg.option_type
+    }
+    pub fn short_expiry(&self) -> NaiveDate {
+        self.short_leg.expiration
+    }
+    pub fn long_expiry(&self) -> NaiveDate {
+        self.long_leg.expiration
+    }
 }
 
 /// Iron butterfly = short ATM straddle + long OTM wings
@@ -202,7 +222,10 @@ pub trait StraddleTrade: crate::trade::CompositeTrade + Send + Sync {
 }
 
 /// Shared validation for straddle legs
-fn validate_straddle_legs(call_leg: &OptionLeg, put_leg: &OptionLeg) -> Result<(), ValidationError> {
+fn validate_straddle_legs(
+    call_leg: &OptionLeg,
+    put_leg: &OptionLeg,
+) -> Result<(), ValidationError> {
     // Validate same symbol
     if call_leg.symbol != put_leg.symbol {
         return Err(ValidationError::SymbolMismatch(
@@ -255,8 +278,6 @@ pub struct ShortStraddle {
     pub call_leg: OptionLeg,
     pub put_leg: OptionLeg,
 }
-
-
 
 /// Iron butterfly trade direction (for result serialization)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -328,8 +349,6 @@ pub struct LongIronButterfly {
     /// Short put at lower strike (wing)
     pub lower_put: OptionLeg,
 }
-
-
 
 impl IronButterfly {
     pub fn new(
@@ -1359,7 +1378,7 @@ pub struct StraddleResult {
     pub entry_time: DateTime<Utc>,
     pub call_entry_price: Decimal,
     pub put_entry_price: Decimal,
-    pub entry_debit: Decimal,  // Total premium paid
+    pub entry_debit: Decimal, // Total premium paid
 
     // Exit (credit received)
     pub exit_time: DateTime<Utc>,
@@ -1391,7 +1410,7 @@ pub struct StraddleResult {
     // IV at entry/exit
     pub iv_entry: Option<f64>,
     pub iv_exit: Option<f64>,
-    pub iv_change: Option<f64>,  // IV expansion (positive = good for long straddle)
+    pub iv_change: Option<f64>, // IV expansion (positive = good for long straddle)
 
     // P&L Attribution
     pub delta_pnl: Option<Decimal>,
@@ -1407,7 +1426,7 @@ pub struct StraddleResult {
     pub spot_move_pct: f64,
 
     // Expected move context
-    pub expected_move_pct: Option<f64>,  // Straddle / Spot at entry
+    pub expected_move_pct: Option<f64>, // Straddle / Spot at entry
 
     // Status
     pub success: bool,
@@ -1467,7 +1486,7 @@ pub struct CalendarStraddleResult {
     pub short_put_entry: Decimal,
     pub long_call_entry: Decimal,
     pub long_put_entry: Decimal,
-    pub entry_cost: Decimal,  // Net debit: (long_call + long_put) - (short_call + short_put)
+    pub entry_cost: Decimal, // Net debit: (long_call + long_put) - (short_call + short_put)
 
     // Exit (4 leg prices)
     pub exit_time: DateTime<Utc>,
@@ -1500,7 +1519,7 @@ pub struct CalendarStraddleResult {
     pub long_iv_entry: Option<f64>,
     pub short_iv_exit: Option<f64>,
     pub long_iv_exit: Option<f64>,
-    pub iv_ratio_entry: Option<f64>,  // short_iv / long_iv
+    pub iv_ratio_entry: Option<f64>, // short_iv / long_iv
 
     // P&L Attribution
     pub delta_pnl: Option<Decimal>,
@@ -1621,19 +1640,45 @@ impl StrangleResult {
 }
 
 impl crate::trade::TradeResult for StrangleResult {
-    fn symbol(&self) -> &str { &self.symbol }
-    fn pnl(&self) -> Decimal { self.pnl }
-    fn entry_cost(&self) -> Decimal { self.entry_debit }
-    fn exit_value(&self) -> Decimal { self.exit_credit }
-    fn success(&self) -> bool { self.success }
-    fn entry_time(&self) -> DateTime<Utc> { self.entry_time }
-    fn exit_time(&self) -> DateTime<Utc> { self.exit_time }
-    fn spot_at_entry(&self) -> f64 { self.spot_at_entry }
-    fn spot_at_exit(&self) -> f64 { self.spot_at_exit }
-    fn net_delta(&self) -> Option<f64> { self.net_delta }
-    fn net_gamma(&self) -> Option<f64> { self.net_gamma }
-    fn hedge_pnl(&self) -> Option<Decimal> { self.hedge_pnl }
-    fn total_pnl_with_hedge(&self) -> Option<Decimal> { self.total_pnl_with_hedge }
+    fn symbol(&self) -> &str {
+        &self.symbol
+    }
+    fn pnl(&self) -> Decimal {
+        self.pnl
+    }
+    fn entry_cost(&self) -> Decimal {
+        self.entry_debit
+    }
+    fn exit_value(&self) -> Decimal {
+        self.exit_credit
+    }
+    fn success(&self) -> bool {
+        self.success
+    }
+    fn entry_time(&self) -> DateTime<Utc> {
+        self.entry_time
+    }
+    fn exit_time(&self) -> DateTime<Utc> {
+        self.exit_time
+    }
+    fn spot_at_entry(&self) -> f64 {
+        self.spot_at_entry
+    }
+    fn spot_at_exit(&self) -> f64 {
+        self.spot_at_exit
+    }
+    fn net_delta(&self) -> Option<f64> {
+        self.net_delta
+    }
+    fn net_gamma(&self) -> Option<f64> {
+        self.net_gamma
+    }
+    fn hedge_pnl(&self) -> Option<Decimal> {
+        self.hedge_pnl
+    }
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> {
+        self.total_pnl_with_hedge
+    }
     fn apply_hedge_results(
         &mut self,
         _position: crate::hedging::HedgePosition,
@@ -1702,19 +1747,45 @@ impl ButterflyResult {
 }
 
 impl crate::trade::TradeResult for ButterflyResult {
-    fn symbol(&self) -> &str { &self.symbol }
-    fn pnl(&self) -> Decimal { self.pnl }
-    fn entry_cost(&self) -> Decimal { self.entry_debit }
-    fn exit_value(&self) -> Decimal { self.exit_credit }
-    fn success(&self) -> bool { self.success }
-    fn entry_time(&self) -> DateTime<Utc> { self.entry_time }
-    fn exit_time(&self) -> DateTime<Utc> { self.exit_time }
-    fn spot_at_entry(&self) -> f64 { self.spot_at_entry }
-    fn spot_at_exit(&self) -> f64 { self.spot_at_exit }
-    fn net_delta(&self) -> Option<f64> { self.net_delta }
-    fn net_gamma(&self) -> Option<f64> { self.net_gamma }
-    fn hedge_pnl(&self) -> Option<Decimal> { self.hedge_pnl }
-    fn total_pnl_with_hedge(&self) -> Option<Decimal> { self.total_pnl_with_hedge }
+    fn symbol(&self) -> &str {
+        &self.symbol
+    }
+    fn pnl(&self) -> Decimal {
+        self.pnl
+    }
+    fn entry_cost(&self) -> Decimal {
+        self.entry_debit
+    }
+    fn exit_value(&self) -> Decimal {
+        self.exit_credit
+    }
+    fn success(&self) -> bool {
+        self.success
+    }
+    fn entry_time(&self) -> DateTime<Utc> {
+        self.entry_time
+    }
+    fn exit_time(&self) -> DateTime<Utc> {
+        self.exit_time
+    }
+    fn spot_at_entry(&self) -> f64 {
+        self.spot_at_entry
+    }
+    fn spot_at_exit(&self) -> f64 {
+        self.spot_at_exit
+    }
+    fn net_delta(&self) -> Option<f64> {
+        self.net_delta
+    }
+    fn net_gamma(&self) -> Option<f64> {
+        self.net_gamma
+    }
+    fn hedge_pnl(&self) -> Option<Decimal> {
+        self.hedge_pnl
+    }
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> {
+        self.total_pnl_with_hedge
+    }
     fn apply_hedge_results(
         &mut self,
         _position: crate::hedging::HedgePosition,
@@ -1784,19 +1855,45 @@ impl CondorResult {
 }
 
 impl crate::trade::TradeResult for CondorResult {
-    fn symbol(&self) -> &str { &self.symbol }
-    fn pnl(&self) -> Decimal { self.pnl }
-    fn entry_cost(&self) -> Decimal { self.entry_debit }
-    fn exit_value(&self) -> Decimal { self.exit_credit }
-    fn success(&self) -> bool { self.success }
-    fn entry_time(&self) -> DateTime<Utc> { self.entry_time }
-    fn exit_time(&self) -> DateTime<Utc> { self.exit_time }
-    fn spot_at_entry(&self) -> f64 { self.spot_at_entry }
-    fn spot_at_exit(&self) -> f64 { self.spot_at_exit }
-    fn net_delta(&self) -> Option<f64> { self.net_delta }
-    fn net_gamma(&self) -> Option<f64> { self.net_gamma }
-    fn hedge_pnl(&self) -> Option<Decimal> { self.hedge_pnl }
-    fn total_pnl_with_hedge(&self) -> Option<Decimal> { self.total_pnl_with_hedge }
+    fn symbol(&self) -> &str {
+        &self.symbol
+    }
+    fn pnl(&self) -> Decimal {
+        self.pnl
+    }
+    fn entry_cost(&self) -> Decimal {
+        self.entry_debit
+    }
+    fn exit_value(&self) -> Decimal {
+        self.exit_credit
+    }
+    fn success(&self) -> bool {
+        self.success
+    }
+    fn entry_time(&self) -> DateTime<Utc> {
+        self.entry_time
+    }
+    fn exit_time(&self) -> DateTime<Utc> {
+        self.exit_time
+    }
+    fn spot_at_entry(&self) -> f64 {
+        self.spot_at_entry
+    }
+    fn spot_at_exit(&self) -> f64 {
+        self.spot_at_exit
+    }
+    fn net_delta(&self) -> Option<f64> {
+        self.net_delta
+    }
+    fn net_gamma(&self) -> Option<f64> {
+        self.net_gamma
+    }
+    fn hedge_pnl(&self) -> Option<Decimal> {
+        self.hedge_pnl
+    }
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> {
+        self.total_pnl_with_hedge
+    }
     fn apply_hedge_results(
         &mut self,
         _position: crate::hedging::HedgePosition,
@@ -1866,19 +1963,45 @@ impl IronCondorResult {
 }
 
 impl crate::trade::TradeResult for IronCondorResult {
-    fn symbol(&self) -> &str { &self.symbol }
-    fn pnl(&self) -> Decimal { self.pnl }
-    fn entry_cost(&self) -> Decimal { self.entry_credit }
-    fn exit_value(&self) -> Decimal { self.exit_cost }
-    fn success(&self) -> bool { self.success }
-    fn entry_time(&self) -> DateTime<Utc> { self.entry_time }
-    fn exit_time(&self) -> DateTime<Utc> { self.exit_time }
-    fn spot_at_entry(&self) -> f64 { self.spot_at_entry }
-    fn spot_at_exit(&self) -> f64 { self.spot_at_exit }
-    fn net_delta(&self) -> Option<f64> { self.net_delta }
-    fn net_gamma(&self) -> Option<f64> { self.net_gamma }
-    fn hedge_pnl(&self) -> Option<Decimal> { self.hedge_pnl }
-    fn total_pnl_with_hedge(&self) -> Option<Decimal> { self.total_pnl_with_hedge }
+    fn symbol(&self) -> &str {
+        &self.symbol
+    }
+    fn pnl(&self) -> Decimal {
+        self.pnl
+    }
+    fn entry_cost(&self) -> Decimal {
+        self.entry_credit
+    }
+    fn exit_value(&self) -> Decimal {
+        self.exit_cost
+    }
+    fn success(&self) -> bool {
+        self.success
+    }
+    fn entry_time(&self) -> DateTime<Utc> {
+        self.entry_time
+    }
+    fn exit_time(&self) -> DateTime<Utc> {
+        self.exit_time
+    }
+    fn spot_at_entry(&self) -> f64 {
+        self.spot_at_entry
+    }
+    fn spot_at_exit(&self) -> f64 {
+        self.spot_at_exit
+    }
+    fn net_delta(&self) -> Option<f64> {
+        self.net_delta
+    }
+    fn net_gamma(&self) -> Option<f64> {
+        self.net_gamma
+    }
+    fn hedge_pnl(&self) -> Option<Decimal> {
+        self.hedge_pnl
+    }
+    fn total_pnl_with_hedge(&self) -> Option<Decimal> {
+        self.total_pnl_with_hedge
+    }
     fn apply_hedge_results(
         &mut self,
         _position: crate::hedging::HedgePosition,
@@ -2113,7 +2236,10 @@ mod tests {
 
         let spread = CalendarSpread::new(short, long);
         assert!(spread.is_err());
-        assert!(matches!(spread.unwrap_err(), ValidationError::SymbolMismatch(_, _)));
+        assert!(matches!(
+            spread.unwrap_err(),
+            ValidationError::SymbolMismatch(_, _)
+        ));
     }
 
     #[test]
@@ -2134,7 +2260,10 @@ mod tests {
 
         let spread = CalendarSpread::new(short, long);
         assert!(spread.is_err());
-        assert!(matches!(spread.unwrap_err(), ValidationError::ExpirationMismatch { .. }));
+        assert!(matches!(
+            spread.unwrap_err(),
+            ValidationError::ExpirationMismatch { .. }
+        ));
     }
 
     #[test]
@@ -2264,7 +2393,7 @@ mod tests {
         let short_call = OptionLeg::new(
             "AAPL".to_string(),
             Strike::new(Decimal::new(180, 0)).unwrap(),
-            NaiveDate::from_ymd_opt(2025, 11, 7).unwrap(),  // Near-term
+            NaiveDate::from_ymd_opt(2025, 11, 7).unwrap(), // Near-term
             OptionType::Call,
         );
         let short_put = OptionLeg::new(
@@ -2276,7 +2405,7 @@ mod tests {
         let long_call = OptionLeg::new(
             "AAPL".to_string(),
             Strike::new(Decimal::new(180, 0)).unwrap(),
-            NaiveDate::from_ymd_opt(2025, 11, 21).unwrap(),  // Far-term
+            NaiveDate::from_ymd_opt(2025, 11, 21).unwrap(), // Far-term
             OptionType::Call,
         );
         let long_put = OptionLeg::new(
@@ -2293,8 +2422,14 @@ mod tests {
         assert_eq!(straddle.symbol(), "AAPL");
         assert_eq!(straddle.short_strike().value(), Decimal::new(180, 0));
         assert_eq!(straddle.long_strike().value(), Decimal::new(180, 0));
-        assert_eq!(straddle.short_expiry(), NaiveDate::from_ymd_opt(2025, 11, 7).unwrap());
-        assert_eq!(straddle.long_expiry(), NaiveDate::from_ymd_opt(2025, 11, 21).unwrap());
+        assert_eq!(
+            straddle.short_expiry(),
+            NaiveDate::from_ymd_opt(2025, 11, 7).unwrap()
+        );
+        assert_eq!(
+            straddle.long_expiry(),
+            NaiveDate::from_ymd_opt(2025, 11, 21).unwrap()
+        );
     }
 
     #[test]
@@ -2306,7 +2441,7 @@ mod tests {
             OptionType::Call,
         );
         let short_put = OptionLeg::new(
-            "GOOGL".to_string(),  // Different symbol
+            "GOOGL".to_string(), // Different symbol
             Strike::new(Decimal::new(180, 0)).unwrap(),
             NaiveDate::from_ymd_opt(2025, 11, 7).unwrap(),
             OptionType::Put,
@@ -2326,7 +2461,10 @@ mod tests {
 
         let straddle = CalendarStraddle::new(short_call, short_put, long_call, long_put);
         assert!(straddle.is_err());
-        assert!(matches!(straddle.unwrap_err(), ValidationError::SymbolMismatch(_, _)));
+        assert!(matches!(
+            straddle.unwrap_err(),
+            ValidationError::SymbolMismatch(_, _)
+        ));
     }
 
     #[test]
@@ -2335,7 +2473,7 @@ mod tests {
         let short_call = OptionLeg::new(
             "AAPL".to_string(),
             Strike::new(Decimal::new(180, 0)).unwrap(),
-            NaiveDate::from_ymd_opt(2025, 11, 21).unwrap(),  // Far-term in short position
+            NaiveDate::from_ymd_opt(2025, 11, 21).unwrap(), // Far-term in short position
             OptionType::Call,
         );
         let short_put = OptionLeg::new(
@@ -2347,7 +2485,7 @@ mod tests {
         let long_call = OptionLeg::new(
             "AAPL".to_string(),
             Strike::new(Decimal::new(180, 0)).unwrap(),
-            NaiveDate::from_ymd_opt(2025, 11, 7).unwrap(),  // Near-term in long position
+            NaiveDate::from_ymd_opt(2025, 11, 7).unwrap(), // Near-term in long position
             OptionType::Call,
         );
         let long_put = OptionLeg::new(
@@ -2359,7 +2497,10 @@ mod tests {
 
         let straddle = CalendarStraddle::new(short_call, short_put, long_call, long_put);
         assert!(straddle.is_err());
-        assert!(matches!(straddle.unwrap_err(), ValidationError::ExpirationMismatch { .. }));
+        assert!(matches!(
+            straddle.unwrap_err(),
+            ValidationError::ExpirationMismatch { .. }
+        ));
     }
 
     #[test]
@@ -2373,7 +2514,7 @@ mod tests {
         );
         let short_put = OptionLeg::new(
             "AAPL".to_string(),
-            Strike::new(Decimal::new(175, 0)).unwrap(),  // Different strike
+            Strike::new(Decimal::new(175, 0)).unwrap(), // Different strike
             NaiveDate::from_ymd_opt(2025, 11, 7).unwrap(),
             OptionType::Put,
         );
@@ -2392,7 +2533,10 @@ mod tests {
 
         let straddle = CalendarStraddle::new(short_call, short_put, long_call, long_put);
         assert!(straddle.is_err());
-        assert!(matches!(straddle.unwrap_err(), ValidationError::StrikeMismatch { .. }));
+        assert!(matches!(
+            straddle.unwrap_err(),
+            ValidationError::StrikeMismatch { .. }
+        ));
     }
 
     #[test]
@@ -2410,16 +2554,16 @@ mod tests {
             short_put_entry: Decimal::new(3, 0),
             long_call_entry: Decimal::new(5, 0),
             long_put_entry: Decimal::new(5, 0),
-            entry_cost: Decimal::new(4, 0),  // (5+5) - (3+3) = 4
+            entry_cost: Decimal::new(4, 0), // (5+5) - (3+3) = 4
             exit_time: Utc::now(),
             short_call_exit: Decimal::new(1, 0),
             short_put_exit: Decimal::new(1, 0),
             long_call_exit: Decimal::new(4, 0),
             long_put_exit: Decimal::new(4, 0),
-            exit_value: Decimal::new(6, 0),  // (4+4) - (1+1) = 6
+            exit_value: Decimal::new(6, 0), // (4+4) - (1+1) = 6
             entry_surface_time: None,
             exit_surface_time: None,
-            pnl: Decimal::new(2, 0),  // 6 - 4 = 2
+            pnl: Decimal::new(2, 0), // 6 - 4 = 2
             pnl_pct: Decimal::new(50, 0),
             net_delta: Some(0.0),
             net_gamma: Some(0.05),

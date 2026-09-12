@@ -11,10 +11,10 @@ use serde::{Deserialize, Serialize};
 /// - vega: +30 per 1% IV move
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct PositionGreeks {
-    pub delta: f64,  // Position-level: e.g., +50 for 0.5 delta × 100 shares
-    pub gamma: f64,  // Position-level: e.g., +5 for 0.05 gamma × 100 shares
-    pub theta: f64,  // Position-level: e.g., -20 for -0.20 theta × 100 shares
-    pub vega: f64,   // Position-level: e.g., +30 for 0.30 vega × 100 shares
+    pub delta: f64, // Position-level: e.g., +50 for 0.5 delta × 100 shares
+    pub gamma: f64, // Position-level: e.g., +5 for 0.05 gamma × 100 shares
+    pub theta: f64, // Position-level: e.g., -20 for -0.20 theta × 100 shares
+    pub vega: f64,  // Position-level: e.g., +30 for 0.30 vega × 100 shares
 }
 
 impl PositionGreeks {
@@ -81,8 +81,7 @@ impl PositionSnapshot {
     /// For actual P&L attribution, Greeks must be recomputed from IV surface.
     pub fn with_gamma_adjusted_delta(&self, new_spot: f64) -> Self {
         let spot_change = new_spot - self.spot;
-        let new_option_delta = self.option_greeks.delta
-            + self.option_greeks.gamma * spot_change;
+        let new_option_delta = self.option_greeks.delta + self.option_greeks.gamma * spot_change;
 
         Self {
             option_greeks: PositionGreeks {
@@ -140,13 +139,7 @@ mod tests {
             vega: 30.0,
         };
 
-        let snapshot = PositionSnapshot::new(
-            Utc::now(),
-            100.0,
-            0.30,
-            greeks,
-            0,
-        );
+        let snapshot = PositionSnapshot::new(Utc::now(), 100.0, 0.30, greeks, 0);
 
         // Spot moves from 100 to 102 (+2)
         let adjusted = snapshot.with_gamma_adjusted_delta(102.0);

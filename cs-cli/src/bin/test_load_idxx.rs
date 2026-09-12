@@ -1,13 +1,11 @@
 use chrono::{NaiveDate, TimeZone, Utc};
-use std::path::PathBuf;
 use cs_domain::infrastructure::{FinqEquityRepository, FinqOptionsRepository};
 use cs_domain::{EquityDataRepository, OptionsDataRepository};
+use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let data_dir = dirs::home_dir()
-        .unwrap()
-        .join("polygon/data");
+    let data_dir = dirs::home_dir().unwrap().join("polygon/data");
 
     println!("Using data dir: {:?}\n", data_dir);
 
@@ -63,9 +61,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         for i in 0..5.min(df.height()) {
                             if let Some(days) = date_col.get(i) {
                                 let exp_date = NaiveDate::from_num_days_from_ce_opt(days);
-                                println!("    days={} -> date={:?}, is > {}? {}",
-                                    days, exp_date, date,
-                                    exp_date.map(|d| d > date).unwrap_or(false));
+                                println!(
+                                    "    days={} -> date={:?}, is > {}? {}",
+                                    days,
+                                    exp_date,
+                                    date,
+                                    exp_date.map(|d| d > date).unwrap_or(false)
+                                );
                             }
                         }
                     }

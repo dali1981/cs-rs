@@ -9,10 +9,9 @@ use std::sync::Arc;
 use tracing::info;
 
 use cs_domain::{
-    EquityDataRepository, OptionsDataRepository,
-    TradeFactory, TradingSession, SessionContext,
-    OptionStrategy, RollableTrade, TradeResult, EarningsEvent, EarningsTime,
-    LongStraddle, CalendarSpread, IronButterfly,
+    CalendarSpread, EarningsEvent, EarningsTime, EquityDataRepository, IronButterfly, LongStraddle,
+    OptionStrategy, OptionsDataRepository, RollableTrade, SessionContext, TradeFactory,
+    TradeResult, TradingSession,
 };
 
 use crate::execution::ExecutionConfig;
@@ -164,7 +163,8 @@ impl BatchResult {
 
     /// Calculate average P&L per successful trade
     pub fn avg_pnl(&self) -> Option<rust_decimal::Decimal> {
-        let pnls: Vec<_> = self.results
+        let pnls: Vec<_> = self
+            .results
             .iter()
             .filter_map(|r| r.pnl.as_ref())
             .map(|p| p.pnl)
@@ -173,21 +173,24 @@ impl BatchResult {
         if pnls.is_empty() {
             None
         } else {
-            Some(pnls.iter().sum::<rust_decimal::Decimal>() / rust_decimal::Decimal::from(pnls.len()))
+            Some(
+                pnls.iter().sum::<rust_decimal::Decimal>()
+                    / rust_decimal::Decimal::from(pnls.len()),
+            )
         }
     }
 
     /// Calculate win rate (percentage of profitable trades)
     pub fn win_rate(&self) -> Option<f64> {
-        let pnls: Vec<_> = self.results
-            .iter()
-            .filter_map(|r| r.pnl.as_ref())
-            .collect();
+        let pnls: Vec<_> = self.results.iter().filter_map(|r| r.pnl.as_ref()).collect();
 
         if pnls.is_empty() {
             None
         } else {
-            let wins = pnls.iter().filter(|p| p.pnl > rust_decimal::Decimal::ZERO).count();
+            let wins = pnls
+                .iter()
+                .filter(|p| p.pnl > rust_decimal::Decimal::ZERO)
+                .count();
             Some(100.0 * wins as f64 / pnls.len() as f64)
         }
     }
@@ -210,7 +213,8 @@ impl BatchResult {
 
     /// Calculate total hedge P&L across all sessions
     pub fn total_hedge_pnl(&self) -> Option<rust_decimal::Decimal> {
-        let hedge_pnls: Vec<_> = self.results
+        let hedge_pnls: Vec<_> = self
+            .results
             .iter()
             .filter_map(|r| r.pnl.as_ref())
             .filter_map(|p| p.hedge_pnl)
@@ -251,7 +255,8 @@ impl BatchResult {
 
     /// Calculate aggregated attribution summary
     pub fn attribution_summary(&self) -> Option<SessionAttribution> {
-        let attrs: Vec<_> = self.results
+        let attrs: Vec<_> = self
+            .results
             .iter()
             .filter_map(|r| r.pnl.as_ref())
             .filter_map(|p| p.attribution.as_ref())
@@ -268,7 +273,8 @@ impl BatchResult {
         let theta_pnl: rust_decimal::Decimal = attrs.iter().map(|a| a.theta_pnl).sum();
         let vega_pnl: rust_decimal::Decimal = attrs.iter().map(|a| a.vega_pnl).sum();
         let unexplained: rust_decimal::Decimal = attrs.iter().map(|a| a.unexplained).sum();
-        let avg_hedge_efficiency = attrs.iter().map(|a| a.hedge_efficiency).sum::<f64>() / attrs.len() as f64;
+        let avg_hedge_efficiency =
+            attrs.iter().map(|a| a.hedge_efficiency).sum::<f64>() / attrs.len() as f64;
 
         Some(SessionAttribution {
             gross_delta_pnl,
@@ -360,9 +366,7 @@ impl SessionExecutor {
             OptionStrategy::CalendarSpread => {
                 self.execute_calendar_spread(session, &earnings_event).await
             }
-            OptionStrategy::Straddle => {
-                self.execute_straddle(session, &earnings_event).await
-            }
+            OptionStrategy::Straddle => self.execute_straddle(session, &earnings_event).await,
             OptionStrategy::CalendarStraddle => {
                 // TODO: CalendarStraddle doesn't implement RollableTrade yet
                 // Need to implement a different creation pattern
@@ -374,18 +378,10 @@ impl SessionExecutor {
             OptionStrategy::IronButterfly => {
                 self.execute_iron_butterfly(session, &earnings_event).await
             }
-            OptionStrategy::Strangle => {
-                self.execute_strangle(session, &earnings_event).await
-            }
-            OptionStrategy::Butterfly => {
-                self.execute_butterfly(session, &earnings_event).await
-            }
-            OptionStrategy::Condor => {
-                self.execute_condor(session, &earnings_event).await
-            }
-            OptionStrategy::IronCondor => {
-                self.execute_iron_condor(session, &earnings_event).await
-            }
+            OptionStrategy::Strangle => self.execute_strangle(session, &earnings_event).await,
+            OptionStrategy::Butterfly => self.execute_butterfly(session, &earnings_event).await,
+            OptionStrategy::Condor => self.execute_condor(session, &earnings_event).await,
+            OptionStrategy::IronCondor => self.execute_iron_condor(session, &earnings_event).await,
         }
     }
 
@@ -427,7 +423,11 @@ impl SessionExecutor {
                 .push(session.clone());
         }
 
-        info!("Executing {} sessions across {} dates", sessions.len(), by_date.len());
+        info!(
+            "Executing {} sessions across {} dates",
+            sessions.len(),
+            by_date.len()
+        );
 
         // Execute each date's sessions
         let mut results = HashMap::new();
@@ -459,7 +459,9 @@ impl SessionExecutor {
             &session.symbol,
             session.entry_datetime,
             session.exit_date(),
-        ).await {
+        )
+        .await
+        {
             Ok(t) => t,
             Err(e) => {
                 return SessionResult::failure(
@@ -480,7 +482,9 @@ impl SessionExecutor {
         );
 
         // Apply hedging if configured
-        if let (Some(ref hedge_config), Some(ref timing)) = (&self.hedge_config, &self.timing_strategy) {
+        if let (Some(ref hedge_config), Some(ref timing)) =
+            (&self.hedge_config, &self.timing_strategy)
+        {
             executor = executor.with_hedging(hedge_config.clone(), timing.clone());
         }
 
@@ -490,26 +494,31 @@ impl SessionExecutor {
         }
 
         // Execute
-        let result = executor.execute(
-            &trade,
-            Some(earnings_event),
-            session.entry_datetime,
-            session.exit_datetime,
-        ).await;
+        let result = executor
+            .execute(
+                &trade,
+                Some(earnings_event),
+                session.entry_datetime,
+                session.exit_datetime,
+            )
+            .await;
 
         // Wrap result with P&L extraction including hedge details
         if result.success() {
             // Extract attribution if available
-            let attribution = result.position_attribution.as_ref().map(|attr| SessionAttribution {
-                gross_delta_pnl: attr.total_gross_delta_pnl,
-                hedge_delta_pnl: attr.total_hedge_delta_pnl,
-                net_delta_pnl: attr.total_net_delta_pnl,
-                gamma_pnl: attr.total_gamma_pnl,
-                theta_pnl: attr.total_theta_pnl,
-                vega_pnl: attr.total_vega_pnl,
-                unexplained: attr.total_unexplained,
-                hedge_efficiency: attr.hedge_efficiency,
-            });
+            let attribution = result
+                .position_attribution
+                .as_ref()
+                .map(|attr| SessionAttribution {
+                    gross_delta_pnl: attr.total_gross_delta_pnl,
+                    hedge_delta_pnl: attr.total_hedge_delta_pnl,
+                    net_delta_pnl: attr.total_net_delta_pnl,
+                    gamma_pnl: attr.total_gamma_pnl,
+                    theta_pnl: attr.total_theta_pnl,
+                    vega_pnl: attr.total_vega_pnl,
+                    unexplained: attr.total_unexplained,
+                    hedge_efficiency: attr.hedge_efficiency,
+                });
 
             let hedge_count: Option<usize> = None;
 
@@ -550,7 +559,9 @@ impl SessionExecutor {
             &session.symbol,
             session.entry_datetime,
             session.exit_date(),
-        ).await {
+        )
+        .await
+        {
             Ok(t) => t,
             Err(e) => {
                 return SessionResult::failure(
@@ -571,7 +582,9 @@ impl SessionExecutor {
         );
 
         // Apply hedging if configured
-        if let (Some(ref hedge_config), Some(ref timing)) = (&self.hedge_config, &self.timing_strategy) {
+        if let (Some(ref hedge_config), Some(ref timing)) =
+            (&self.hedge_config, &self.timing_strategy)
+        {
             executor = executor.with_hedging(hedge_config.clone(), timing.clone());
         }
 
@@ -581,26 +594,31 @@ impl SessionExecutor {
         }
 
         // Execute
-        let result = executor.execute(
-            &trade,
-            Some(earnings_event),
-            session.entry_datetime,
-            session.exit_datetime,
-        ).await;
+        let result = executor
+            .execute(
+                &trade,
+                Some(earnings_event),
+                session.entry_datetime,
+                session.exit_datetime,
+            )
+            .await;
 
         // Wrap result with P&L extraction including hedge details
         if result.success() {
             // Extract attribution from the straddle result if available
-            let attribution = result.position_attribution.as_ref().map(|attr| SessionAttribution {
-                gross_delta_pnl: attr.total_gross_delta_pnl,
-                hedge_delta_pnl: attr.total_hedge_delta_pnl,
-                net_delta_pnl: attr.total_net_delta_pnl,
-                gamma_pnl: attr.total_gamma_pnl,
-                theta_pnl: attr.total_theta_pnl,
-                vega_pnl: attr.total_vega_pnl,
-                unexplained: attr.total_unexplained,
-                hedge_efficiency: attr.hedge_efficiency,
-            });
+            let attribution = result
+                .position_attribution
+                .as_ref()
+                .map(|attr| SessionAttribution {
+                    gross_delta_pnl: attr.total_gross_delta_pnl,
+                    hedge_delta_pnl: attr.total_hedge_delta_pnl,
+                    net_delta_pnl: attr.total_net_delta_pnl,
+                    gamma_pnl: attr.total_gamma_pnl,
+                    theta_pnl: attr.total_theta_pnl,
+                    vega_pnl: attr.total_vega_pnl,
+                    unexplained: attr.total_unexplained,
+                    hedge_efficiency: attr.hedge_efficiency,
+                });
 
             // Extract hedge count from position if available
             let hedge_count: Option<usize> = None;
@@ -621,10 +639,7 @@ impl SessionExecutor {
             };
             SessionResult::success_with_pnl(session.clone(), pnl, Box::new(result))
         } else {
-            SessionResult::failure(
-                session.clone(),
-                "Straddle execution failed".to_string(),
-            )
+            SessionResult::failure(session.clone(), "Straddle execution failed".to_string())
         }
     }
 
@@ -639,18 +654,25 @@ impl SessionExecutor {
         // Create trade - use advanced method if config available, otherwise default
         let trade = if let Some(ref config) = session.iron_butterfly_config {
             // Use advanced factory method with config and direction
-            match self.trade_factory.create_iron_butterfly_advanced(
-                &session.symbol,
-                session.entry_datetime,
-                session.exit_date(),
-                config,
-                session.trade_direction,
-            ).await {
+            match self
+                .trade_factory
+                .create_iron_butterfly_advanced(
+                    &session.symbol,
+                    session.entry_datetime,
+                    session.exit_date(),
+                    config,
+                    session.trade_direction,
+                )
+                .await
+            {
                 Ok(t) => t,
                 Err(e) => {
                     return SessionResult::failure(
                         session.clone(),
-                        format!("Failed to create iron butterfly with advanced config: {}", e),
+                        format!(
+                            "Failed to create iron butterfly with advanced config: {}",
+                            e
+                        ),
                     );
                 }
             }
@@ -661,7 +683,9 @@ impl SessionExecutor {
                 &session.symbol,
                 session.entry_datetime,
                 session.exit_date(),
-            ).await {
+            )
+            .await
+            {
                 Ok(t) => t,
                 Err(e) => {
                     return SessionResult::failure(
@@ -683,7 +707,9 @@ impl SessionExecutor {
         );
 
         // Apply hedging if configured
-        if let (Some(ref hedge_config), Some(ref timing)) = (&self.hedge_config, &self.timing_strategy) {
+        if let (Some(ref hedge_config), Some(ref timing)) =
+            (&self.hedge_config, &self.timing_strategy)
+        {
             executor = executor.with_hedging(hedge_config.clone(), timing.clone());
         }
 
@@ -693,26 +719,31 @@ impl SessionExecutor {
         }
 
         // Execute
-        let result = executor.execute(
-            &trade,
-            Some(earnings_event),
-            session.entry_datetime,
-            session.exit_datetime,
-        ).await;
+        let result = executor
+            .execute(
+                &trade,
+                Some(earnings_event),
+                session.entry_datetime,
+                session.exit_datetime,
+            )
+            .await;
 
         // Wrap result with P&L extraction including hedge details
         if result.success() {
             // Extract attribution if available
-            let attribution = result.position_attribution.as_ref().map(|attr| SessionAttribution {
-                gross_delta_pnl: attr.total_gross_delta_pnl,
-                hedge_delta_pnl: attr.total_hedge_delta_pnl,
-                net_delta_pnl: attr.total_net_delta_pnl,
-                gamma_pnl: attr.total_gamma_pnl,
-                theta_pnl: attr.total_theta_pnl,
-                vega_pnl: attr.total_vega_pnl,
-                unexplained: attr.total_unexplained,
-                hedge_efficiency: attr.hedge_efficiency,
-            });
+            let attribution = result
+                .position_attribution
+                .as_ref()
+                .map(|attr| SessionAttribution {
+                    gross_delta_pnl: attr.total_gross_delta_pnl,
+                    hedge_delta_pnl: attr.total_hedge_delta_pnl,
+                    net_delta_pnl: attr.total_net_delta_pnl,
+                    gamma_pnl: attr.total_gamma_pnl,
+                    theta_pnl: attr.total_theta_pnl,
+                    vega_pnl: attr.total_vega_pnl,
+                    unexplained: attr.total_unexplained,
+                    hedge_efficiency: attr.hedge_efficiency,
+                });
 
             let hedge_count: Option<usize> = None;
 
@@ -756,12 +787,16 @@ impl SessionExecutor {
             }
         };
 
-        let trade = match self.trade_factory.create_strangle(
-            &session.symbol,
-            session.entry_datetime,
-            session.exit_date(),
-            &config,
-        ).await {
+        let trade = match self
+            .trade_factory
+            .create_strangle(
+                &session.symbol,
+                session.entry_datetime,
+                session.exit_date(),
+                &config,
+            )
+            .await
+        {
             Ok(t) => t,
             Err(e) => {
                 return SessionResult::failure(
@@ -786,7 +821,9 @@ impl SessionExecutor {
         );
 
         // Apply hedging if configured
-        if let (Some(ref hedge_config), Some(ref timing)) = (&self.hedge_config, &self.timing_strategy) {
+        if let (Some(ref hedge_config), Some(ref timing)) =
+            (&self.hedge_config, &self.timing_strategy)
+        {
             executor = executor.with_hedging(hedge_config.clone(), timing.clone());
         }
 
@@ -796,26 +833,31 @@ impl SessionExecutor {
         }
 
         // Execute
-        let result = executor.execute(
-            &trade,
-            Some(earnings_event),
-            session.entry_datetime,
-            session.exit_datetime,
-        ).await;
+        let result = executor
+            .execute(
+                &trade,
+                Some(earnings_event),
+                session.entry_datetime,
+                session.exit_datetime,
+            )
+            .await;
 
         // Wrap result with P&L extraction including hedge details
         if result.success() {
             // Extract attribution if available
-            let attribution = result.position_attribution.as_ref().map(|attr| SessionAttribution {
-                gross_delta_pnl: attr.total_gross_delta_pnl,
-                hedge_delta_pnl: attr.total_hedge_delta_pnl,
-                net_delta_pnl: attr.total_net_delta_pnl,
-                gamma_pnl: attr.total_gamma_pnl,
-                theta_pnl: attr.total_theta_pnl,
-                vega_pnl: attr.total_vega_pnl,
-                unexplained: attr.total_unexplained,
-                hedge_efficiency: attr.hedge_efficiency,
-            });
+            let attribution = result
+                .position_attribution
+                .as_ref()
+                .map(|attr| SessionAttribution {
+                    gross_delta_pnl: attr.total_gross_delta_pnl,
+                    hedge_delta_pnl: attr.total_hedge_delta_pnl,
+                    net_delta_pnl: attr.total_net_delta_pnl,
+                    gamma_pnl: attr.total_gamma_pnl,
+                    theta_pnl: attr.total_theta_pnl,
+                    vega_pnl: attr.total_vega_pnl,
+                    unexplained: attr.total_unexplained,
+                    hedge_efficiency: attr.hedge_efficiency,
+                });
 
             let hedge_count: Option<usize> = None;
 
@@ -835,10 +877,7 @@ impl SessionExecutor {
             };
             SessionResult::success_with_pnl(session.clone(), pnl, Box::new(result))
         } else {
-            SessionResult::failure(
-                session.clone(),
-                "Strangle execution failed".to_string(),
-            )
+            SessionResult::failure(session.clone(), "Strangle execution failed".to_string())
         }
     }
 
@@ -859,12 +898,16 @@ impl SessionExecutor {
             }
         };
 
-        let trade = match self.trade_factory.create_butterfly(
-            &session.symbol,
-            session.entry_datetime,
-            session.exit_date(),
-            &config,
-        ).await {
+        let trade = match self
+            .trade_factory
+            .create_butterfly(
+                &session.symbol,
+                session.entry_datetime,
+                session.exit_date(),
+                &config,
+            )
+            .await
+        {
             Ok(t) => t,
             Err(e) => {
                 return SessionResult::failure(
@@ -889,7 +932,9 @@ impl SessionExecutor {
         );
 
         // Apply hedging if configured
-        if let (Some(ref hedge_config), Some(ref timing)) = (&self.hedge_config, &self.timing_strategy) {
+        if let (Some(ref hedge_config), Some(ref timing)) =
+            (&self.hedge_config, &self.timing_strategy)
+        {
             executor = executor.with_hedging(hedge_config.clone(), timing.clone());
         }
 
@@ -899,26 +944,31 @@ impl SessionExecutor {
         }
 
         // Execute
-        let result = executor.execute(
-            &trade,
-            Some(earnings_event),
-            session.entry_datetime,
-            session.exit_datetime,
-        ).await;
+        let result = executor
+            .execute(
+                &trade,
+                Some(earnings_event),
+                session.entry_datetime,
+                session.exit_datetime,
+            )
+            .await;
 
         // Wrap result with P&L extraction including hedge details
         if result.success() {
             // Extract attribution if available
-            let attribution = result.position_attribution.as_ref().map(|attr| SessionAttribution {
-                gross_delta_pnl: attr.total_gross_delta_pnl,
-                hedge_delta_pnl: attr.total_hedge_delta_pnl,
-                net_delta_pnl: attr.total_net_delta_pnl,
-                gamma_pnl: attr.total_gamma_pnl,
-                theta_pnl: attr.total_theta_pnl,
-                vega_pnl: attr.total_vega_pnl,
-                unexplained: attr.total_unexplained,
-                hedge_efficiency: attr.hedge_efficiency,
-            });
+            let attribution = result
+                .position_attribution
+                .as_ref()
+                .map(|attr| SessionAttribution {
+                    gross_delta_pnl: attr.total_gross_delta_pnl,
+                    hedge_delta_pnl: attr.total_hedge_delta_pnl,
+                    net_delta_pnl: attr.total_net_delta_pnl,
+                    gamma_pnl: attr.total_gamma_pnl,
+                    theta_pnl: attr.total_theta_pnl,
+                    vega_pnl: attr.total_vega_pnl,
+                    unexplained: attr.total_unexplained,
+                    hedge_efficiency: attr.hedge_efficiency,
+                });
 
             let hedge_count: Option<usize> = None;
 
@@ -938,10 +988,7 @@ impl SessionExecutor {
             };
             SessionResult::success_with_pnl(session.clone(), pnl, Box::new(result))
         } else {
-            SessionResult::failure(
-                session.clone(),
-                "Butterfly execution failed".to_string(),
-            )
+            SessionResult::failure(session.clone(), "Butterfly execution failed".to_string())
         }
     }
 
@@ -962,12 +1009,16 @@ impl SessionExecutor {
             }
         };
 
-        let trade = match self.trade_factory.create_condor(
-            &session.symbol,
-            session.entry_datetime,
-            session.exit_date(),
-            &config,
-        ).await {
+        let trade = match self
+            .trade_factory
+            .create_condor(
+                &session.symbol,
+                session.entry_datetime,
+                session.exit_date(),
+                &config,
+            )
+            .await
+        {
             Ok(t) => t,
             Err(e) => {
                 return SessionResult::failure(
@@ -992,7 +1043,9 @@ impl SessionExecutor {
         );
 
         // Apply hedging if configured
-        if let (Some(ref hedge_config), Some(ref timing)) = (&self.hedge_config, &self.timing_strategy) {
+        if let (Some(ref hedge_config), Some(ref timing)) =
+            (&self.hedge_config, &self.timing_strategy)
+        {
             executor = executor.with_hedging(hedge_config.clone(), timing.clone());
         }
 
@@ -1002,26 +1055,31 @@ impl SessionExecutor {
         }
 
         // Execute
-        let result = executor.execute(
-            &trade,
-            Some(earnings_event),
-            session.entry_datetime,
-            session.exit_datetime,
-        ).await;
+        let result = executor
+            .execute(
+                &trade,
+                Some(earnings_event),
+                session.entry_datetime,
+                session.exit_datetime,
+            )
+            .await;
 
         // Wrap result with P&L extraction including hedge details
         if result.success() {
             // Extract attribution if available
-            let attribution = result.position_attribution.as_ref().map(|attr| SessionAttribution {
-                gross_delta_pnl: attr.total_gross_delta_pnl,
-                hedge_delta_pnl: attr.total_hedge_delta_pnl,
-                net_delta_pnl: attr.total_net_delta_pnl,
-                gamma_pnl: attr.total_gamma_pnl,
-                theta_pnl: attr.total_theta_pnl,
-                vega_pnl: attr.total_vega_pnl,
-                unexplained: attr.total_unexplained,
-                hedge_efficiency: attr.hedge_efficiency,
-            });
+            let attribution = result
+                .position_attribution
+                .as_ref()
+                .map(|attr| SessionAttribution {
+                    gross_delta_pnl: attr.total_gross_delta_pnl,
+                    hedge_delta_pnl: attr.total_hedge_delta_pnl,
+                    net_delta_pnl: attr.total_net_delta_pnl,
+                    gamma_pnl: attr.total_gamma_pnl,
+                    theta_pnl: attr.total_theta_pnl,
+                    vega_pnl: attr.total_vega_pnl,
+                    unexplained: attr.total_unexplained,
+                    hedge_efficiency: attr.hedge_efficiency,
+                });
 
             let hedge_count: Option<usize> = None;
 
@@ -1041,10 +1099,7 @@ impl SessionExecutor {
             };
             SessionResult::success_with_pnl(session.clone(), pnl, Box::new(result))
         } else {
-            SessionResult::failure(
-                session.clone(),
-                "Condor execution failed".to_string(),
-            )
+            SessionResult::failure(session.clone(), "Condor execution failed".to_string())
         }
     }
 
@@ -1065,12 +1120,16 @@ impl SessionExecutor {
             }
         };
 
-        let trade = match self.trade_factory.create_iron_condor(
-            &session.symbol,
-            session.entry_datetime,
-            session.exit_date(),
-            &config,
-        ).await {
+        let trade = match self
+            .trade_factory
+            .create_iron_condor(
+                &session.symbol,
+                session.entry_datetime,
+                session.exit_date(),
+                &config,
+            )
+            .await
+        {
             Ok(t) => t,
             Err(e) => {
                 return SessionResult::failure(
@@ -1095,7 +1154,9 @@ impl SessionExecutor {
         );
 
         // Apply hedging if configured
-        if let (Some(ref hedge_config), Some(ref timing)) = (&self.hedge_config, &self.timing_strategy) {
+        if let (Some(ref hedge_config), Some(ref timing)) =
+            (&self.hedge_config, &self.timing_strategy)
+        {
             executor = executor.with_hedging(hedge_config.clone(), timing.clone());
         }
 
@@ -1105,26 +1166,31 @@ impl SessionExecutor {
         }
 
         // Execute
-        let result = executor.execute(
-            &trade,
-            Some(earnings_event),
-            session.entry_datetime,
-            session.exit_datetime,
-        ).await;
+        let result = executor
+            .execute(
+                &trade,
+                Some(earnings_event),
+                session.entry_datetime,
+                session.exit_datetime,
+            )
+            .await;
 
         // Wrap result with P&L extraction including hedge details
         if result.success() {
             // Extract attribution if available
-            let attribution = result.position_attribution.as_ref().map(|attr| SessionAttribution {
-                gross_delta_pnl: attr.total_gross_delta_pnl,
-                hedge_delta_pnl: attr.total_hedge_delta_pnl,
-                net_delta_pnl: attr.total_net_delta_pnl,
-                gamma_pnl: attr.total_gamma_pnl,
-                theta_pnl: attr.total_theta_pnl,
-                vega_pnl: attr.total_vega_pnl,
-                unexplained: attr.total_unexplained,
-                hedge_efficiency: attr.hedge_efficiency,
-            });
+            let attribution = result
+                .position_attribution
+                .as_ref()
+                .map(|attr| SessionAttribution {
+                    gross_delta_pnl: attr.total_gross_delta_pnl,
+                    hedge_delta_pnl: attr.total_hedge_delta_pnl,
+                    net_delta_pnl: attr.total_net_delta_pnl,
+                    gamma_pnl: attr.total_gamma_pnl,
+                    theta_pnl: attr.total_theta_pnl,
+                    vega_pnl: attr.total_vega_pnl,
+                    unexplained: attr.total_unexplained,
+                    hedge_efficiency: attr.hedge_efficiency,
+                });
 
             let hedge_count: Option<usize> = None;
 
@@ -1144,10 +1210,7 @@ impl SessionExecutor {
             };
             SessionResult::success_with_pnl(session.clone(), pnl, Box::new(result))
         } else {
-            SessionResult::failure(
-                session.clone(),
-                "Iron condor execution failed".to_string(),
-            )
+            SessionResult::failure(session.clone(), "Iron condor execution failed".to_string())
         }
     }
 

@@ -19,9 +19,7 @@ pub fn realized_volatility(
     }
 
     // Calculate log returns
-    let returns: Vec<f64> = prices.windows(2)
-        .map(|w| (w[1] / w[0]).ln())
-        .collect();
+    let returns: Vec<f64> = prices.windows(2).map(|w| (w[1] / w[0]).ln()).collect();
 
     if returns.len() < window {
         return None;
@@ -32,9 +30,11 @@ pub fn realized_volatility(
 
     // Calculate standard deviation
     let mean = recent_returns.iter().sum::<f64>() / window as f64;
-    let variance = recent_returns.iter()
+    let variance = recent_returns
+        .iter()
         .map(|r| (r - mean).powi(2))
-        .sum::<f64>() / (window - 1) as f64;
+        .sum::<f64>()
+        / (window - 1) as f64;
 
     Some(variance.sqrt() * annualization_factor.sqrt())
 }

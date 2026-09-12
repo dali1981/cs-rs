@@ -1,19 +1,19 @@
 //! BPR timeline computation for trades.
 
 use chrono::{DateTime, Utc};
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use std::collections::BTreeSet;
 
 use cs_domain::{
-    BprInputs, BprSnapshot, BprTimeline, HedgeInput, MarginConfig, MarginMode, OptionLegInput,
-    OptionRight, margin_engine_for_config,
-    CalendarSpreadResult, CompositeTrade, HedgePosition, IronButterflyResult, OptionsDataRepository,
-    EquityDataRepository, StraddleResult, CalendarStraddleResult, TradeResult,
+    margin_engine_for_config, BprInputs, BprSnapshot, BprTimeline, CalendarSpreadResult,
+    CalendarStraddleResult, CompositeTrade, EquityDataRepository, HedgeInput, HedgePosition,
+    IronButterflyResult, MarginConfig, MarginMode, OptionLegInput, OptionRight,
+    OptionsDataRepository, StraddleResult, TradeResult,
 };
 
 use crate::composite_pricer::CompositePricing;
-use crate::execution::{ExecutionError, ExecutableTrade, TradePricer};
+use crate::execution::{ExecutableTrade, ExecutionError, TradePricer};
 use crate::iv_surface_builder::build_iv_surface_minute_aligned;
 use crate::timing_strategy::TimingStrategy;
 
@@ -129,7 +129,9 @@ where
 
         let mut option_legs = Vec::new();
         for (idx, (leg, position)) in trade_legs.iter().enumerate() {
-            let Some((leg_pricing, _)) = pricing.legs.get(idx) else { break };
+            let Some((leg_pricing, _)) = pricing.legs.get(idx) else {
+                break;
+            };
             let right = match leg.option_type {
                 finq_core::OptionType::Call => OptionRight::Call,
                 finq_core::OptionType::Put => OptionRight::Put,
@@ -204,13 +206,8 @@ where
 
         let surface = build_iv_surface_minute_aligned(&chain, equity_repo, &symbol).await;
         let spot_f64 = spot.to_f64().unwrap_or(0.0);
-        let pricing = match pricer.price_with_surface(
-            trade,
-            &chain,
-            spot_f64,
-            ts,
-            surface.as_ref(),
-        ) {
+        let pricing = match pricer.price_with_surface(trade, &chain, spot_f64, ts, surface.as_ref())
+        {
             Ok(p) => p,
             Err(e) => {
                 tracing::debug!(symbol = %symbol, time = %ts, error = %e, "BPR pricing failed");

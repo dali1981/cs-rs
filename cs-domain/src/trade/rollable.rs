@@ -7,8 +7,8 @@ use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
-use crate::trade::{TradeFactory, CompositeIV, CompositeIVChange};
 use crate::hedging::HedgePosition;
+use crate::trade::{CompositeIV, CompositeIVChange, TradeFactory};
 use crate::PositionAttribution;
 
 /// A trade that can be constructed, executed, and rolled

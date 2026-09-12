@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
 use crate::entities::CalendarSpreadResult;
-use crate::repositories::{ResultsRepository, RepositoryError};
+use crate::repositories::{RepositoryError, ResultsRepository};
 
 /// Parquet-based results persistence
 ///
@@ -71,10 +71,10 @@ impl ResultsRepository for ParquetResultsRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{NaiveDate, Utc};
-    use rust_decimal::Decimal;
-    use finq_core::OptionType;
     use crate::value_objects::{EarningsTime, Strike};
+    use chrono::{NaiveDate, Utc};
+    use finq_core::OptionType;
+    use rust_decimal::Decimal;
 
     fn create_test_result() -> CalendarSpreadResult {
         CalendarSpreadResult {

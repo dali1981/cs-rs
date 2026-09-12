@@ -3,18 +3,18 @@
 //! Computes delta using averaged implied volatility over a lookback period.
 //! Smooths out IV noise by averaging recent market IV values.
 
+use super::common::compute_position_delta_with_vol_lookup;
+use crate::iv_surface_builder::build_iv_surface;
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
-use rust_decimal::Decimal;
-use std::sync::Arc;
-use std::collections::HashMap;
 use cs_domain::hedging::DeltaProvider;
 use cs_domain::repositories::{EquityDataRepository, OptionsDataRepository};
 use cs_domain::trade::CompositeTrade;
 use cs_domain::TradingCalendar;
 use finq_core::OptionType;
-use super::common::compute_position_delta_with_vol_lookup;
-use crate::iv_surface_builder::build_iv_surface;
+use rust_decimal::Decimal;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Use historical average IV over lookback period
 ///
@@ -72,8 +72,8 @@ impl<T: CompositeTrade> HistoricalAverageIVProvider<T> {
         let end_date = current_date;
         let start_date = current_date - chrono::Duration::days(self.lookback_days as i64);
 
-        let trading_days: Vec<NaiveDate> = TradingCalendar::trading_days_between(start_date, end_date)
-            .collect();
+        let trading_days: Vec<NaiveDate> =
+            TradingCalendar::trading_days_between(start_date, end_date).collect();
 
         if trading_days.is_empty() {
             return Err("No trading days in lookback window".to_string());
@@ -106,10 +106,7 @@ impl<T: CompositeTrade> HistoricalAverageIVProvider<T> {
                 Err(_) => continue,
             };
 
-            let spot = bars.iter()
-                .map(|b| b.close)
-                .last()
-                .unwrap_or(100.0);
+            let spot = bars.iter().map(|b| b.close).last().unwrap_or(100.0);
 
             // Build IV surface
             let pricing_time = cs_domain::eastern_to_utc(
@@ -145,18 +142,23 @@ impl<T: CompositeTrade + Send + Sync> DeltaProvider for HistoricalAverageIVProvi
         let mut leg_ivs: HashMap<(Decimal, NaiveDate, bool), f64> = HashMap::new();
 
         for (leg, _) in self.trade.legs() {
-            let key = (leg.strike.value(), leg.expiration, leg.option_type == OptionType::Call);
+            let key = (
+                leg.strike.value(),
+                leg.expiration,
+                leg.option_type == OptionType::Call,
+            );
 
             // Only compute if not already cached
             if !leg_ivs.contains_key(&key) {
-                let avg_iv = self.compute_average_iv_for_leg(
-                    leg.strike.value(),
-                    leg.expiration,
-                    leg.option_type == OptionType::Call,
-                    current_date,
-                )
-                .await
-                .unwrap_or(0.30); // Fallback to 30% if computation fails
+                let avg_iv = self
+                    .compute_average_iv_for_leg(
+                        leg.strike.value(),
+                        leg.expiration,
+                        leg.option_type == OptionType::Call,
+                        current_date,
+                    )
+                    .await
+                    .unwrap_or(0.30); // Fallback to 30% if computation fails
 
                 leg_ivs.insert(key, avg_iv);
             }
@@ -168,7 +170,11 @@ impl<T: CompositeTrade + Send + Sync> DeltaProvider for HistoricalAverageIVProvi
             spot,
             timestamp,
             |leg, _spot| {
-                let key = (leg.strike.value(), leg.expiration, leg.option_type == OptionType::Call);
+                let key = (
+                    leg.strike.value(),
+                    leg.expiration,
+                    leg.option_type == OptionType::Call,
+                );
                 *leg_ivs.get(&key).unwrap_or(&0.30)
             },
             self.risk_free_rate,

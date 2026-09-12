@@ -1,9 +1,9 @@
 //! Campaign output handling (display and save results)
 
 use anyhow::Result;
-use std::path::PathBuf;
-use std::collections::HashMap;
 use console::style;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use tabled::{Table, Tabled};
 
 use cs_backtest::BatchResult;
@@ -41,27 +41,62 @@ impl CampaignOutputHandler {
         }
 
         let mut rows = vec![
-            SummaryRow { metric: "Total Sessions".into(), value: result.total_sessions.to_string() },
-            SummaryRow { metric: "Successful Sessions".into(), value: result.successful.to_string() },
-            SummaryRow { metric: "Failed Sessions".into(), value: result.failed.to_string() },
-            SummaryRow { metric: "".into(), value: "".into() },
-            SummaryRow { metric: "Win Rate".into(), value: format!("{:.2}%", win_rate) },
+            SummaryRow {
+                metric: "Total Sessions".into(),
+                value: result.total_sessions.to_string(),
+            },
+            SummaryRow {
+                metric: "Successful Sessions".into(),
+                value: result.successful.to_string(),
+            },
+            SummaryRow {
+                metric: "Failed Sessions".into(),
+                value: result.failed.to_string(),
+            },
+            SummaryRow {
+                metric: "".into(),
+                value: "".into(),
+            },
+            SummaryRow {
+                metric: "Win Rate".into(),
+                value: format!("{:.2}%", win_rate),
+            },
         ];
 
         // Add P&L rows - show both option-only and hedged if hedging is enabled
         if result.has_hedge_data() {
-            let hedge_pnl = result.total_hedge_pnl().unwrap_or(rust_decimal::Decimal::ZERO);
+            let hedge_pnl = result
+                .total_hedge_pnl()
+                .unwrap_or(rust_decimal::Decimal::ZERO);
             let total_with_hedge = result.total_pnl_with_hedge();
             rows.extend(vec![
-                SummaryRow { metric: "Option P&L".into(), value: format!("${:.2}", total_pnl) },
-                SummaryRow { metric: "Hedge P&L".into(), value: format!("${:.2}", hedge_pnl) },
-                SummaryRow { metric: "Total P&L (with hedge)".into(), value: format!("${:.2}", total_with_hedge) },
-                SummaryRow { metric: "Avg P&L per Session".into(), value: format!("${:.2}", avg_pnl) },
+                SummaryRow {
+                    metric: "Option P&L".into(),
+                    value: format!("${:.2}", total_pnl),
+                },
+                SummaryRow {
+                    metric: "Hedge P&L".into(),
+                    value: format!("${:.2}", hedge_pnl),
+                },
+                SummaryRow {
+                    metric: "Total P&L (with hedge)".into(),
+                    value: format!("${:.2}", total_with_hedge),
+                },
+                SummaryRow {
+                    metric: "Avg P&L per Session".into(),
+                    value: format!("${:.2}", avg_pnl),
+                },
             ]);
         } else {
             rows.extend(vec![
-                SummaryRow { metric: "Total P&L".into(), value: format!("${:.2}", total_pnl) },
-                SummaryRow { metric: "Avg P&L per Session".into(), value: format!("${:.2}", avg_pnl) },
+                SummaryRow {
+                    metric: "Total P&L".into(),
+                    value: format!("${:.2}", total_pnl),
+                },
+                SummaryRow {
+                    metric: "Avg P&L per Session".into(),
+                    value: format!("${:.2}", avg_pnl),
+                },
             ]);
         }
 
@@ -99,7 +134,9 @@ impl CampaignOutputHandler {
         println!("{}", style("Hedge Summary:").bold());
 
         let total_hedge_count = result.total_hedge_count();
-        let total_hedge_pnl = result.total_hedge_pnl().unwrap_or(rust_decimal::Decimal::ZERO);
+        let total_hedge_pnl = result
+            .total_hedge_pnl()
+            .unwrap_or(rust_decimal::Decimal::ZERO);
 
         println!("  Total Hedge Trades: {}", total_hedge_count);
         println!("  Hedge P&L: ${:.2}", total_hedge_pnl);
@@ -162,7 +199,10 @@ impl CampaignOutputHandler {
             fs::write(&output_file, json_str)?;
         }
 
-        println!("Detailed results saved to: {}", style(output_dir.display()).cyan());
+        println!(
+            "Detailed results saved to: {}",
+            style(output_dir.display()).cyan()
+        );
         Ok(())
     }
 }

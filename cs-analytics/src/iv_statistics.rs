@@ -37,7 +37,10 @@ pub fn iv_rank(current_iv: f64, historical_ivs: &[f64]) -> f64 {
     }
 
     let min = historical_ivs.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max = historical_ivs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let max = historical_ivs
+        .iter()
+        .cloned()
+        .fold(f64::NEG_INFINITY, f64::max);
 
     if (max - min).abs() < 1e-10 {
         return 50.0;

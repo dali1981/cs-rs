@@ -6,10 +6,10 @@
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use crate::trading_costs::{
-    TradingCostCalculator, TradingContext, TradingCost, TradingCostBreakdown, TradeSide,
-};
 use super::CONTRACT_MULTIPLIER;
+use crate::trading_costs::{
+    TradeSide, TradingContext, TradingCost, TradingCostBreakdown, TradingCostCalculator,
+};
 
 /// Half-spread model (most realistic)
 ///
@@ -90,13 +90,14 @@ impl HalfSpreadSlippage {
 impl TradingCostCalculator for HalfSpreadSlippage {
     fn entry_cost(&self, context: &TradingContext) -> TradingCost {
         // On entry, we cross the spread (pay the half-spread per leg)
-        let leg_cost: Decimal = context.legs.iter()
+        let leg_cost: Decimal = context
+            .legs
+            .iter()
             .map(|leg| self.half_spread(leg.price))
             .sum();
 
-        let total = leg_cost
-            * Decimal::from(self.multiplier)
-            * Decimal::from(context.num_contracts);
+        let total =
+            leg_cost * Decimal::from(self.multiplier) * Decimal::from(context.num_contracts);
 
         TradingCost {
             total,

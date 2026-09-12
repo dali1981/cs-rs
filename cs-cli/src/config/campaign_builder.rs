@@ -3,9 +3,9 @@
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
 
-use cs_backtest::CampaignConfig;
-use cs_domain::{PeriodPolicy, TradingPeriodSpec, ExpirationPolicy};
 use crate::args::{CampaignArgs, GlobalArgs};
+use cs_backtest::CampaignConfig;
+use cs_domain::{ExpirationPolicy, PeriodPolicy, TradingPeriodSpec};
 
 /// Builder for CampaignConfig from CLI args
 pub struct CampaignConfigBuilder {
@@ -30,7 +30,9 @@ impl CampaignConfigBuilder {
 
     /// Build and validate the config
     pub fn build(self) -> Result<CampaignConfig> {
-        let args = self.args.as_ref()
+        let args = self
+            .args
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Missing campaign args"))?;
 
         // Parse dates
@@ -38,7 +40,9 @@ impl CampaignConfigBuilder {
         let end_date = Self::parse_date(&args.end)?;
 
         // Determine data directory
-        let data_dir = self.global.as_ref()
+        let data_dir = self
+            .global
+            .as_ref()
             .and_then(|g| g.data_dir.clone())
             .or_else(|| {
                 std::env::var("FINQ_DATA_DIR")
@@ -112,7 +116,10 @@ impl CampaignConfigBuilder {
             "butterfly" => Ok(OptionStrategy::Butterfly),
             "condor" => Ok(OptionStrategy::Condor),
             "iron-condor" => Ok(OptionStrategy::IronCondor),
-            _ => anyhow::bail!("Invalid strategy: {}. Use calendar, iron-butterfly, straddle, etc.", s),
+            _ => anyhow::bail!(
+                "Invalid strategy: {}. Use calendar, iron-butterfly, straddle, etc.",
+                s
+            ),
         }
     }
 

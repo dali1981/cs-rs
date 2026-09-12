@@ -5,30 +5,25 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use cs_backtest::{
-    BacktestUseCase, BacktestConfig, DataSourceConfig, EarningsSourceConfig,
-    CampaignUseCase, CampaignConfig,
-    GenerateIvTimeSeriesUseCase,
-    MinuteAlignedIvUseCase,
-
-    RunBacktestCommand,
+    BacktestConfig, BacktestUseCase, CampaignConfig, CampaignUseCase, DataSourceConfig,
+    EarningsSourceConfig, GenerateIvTimeSeriesUseCase, MinuteAlignedIvUseCase, RunBacktestCommand,
 };
-use cs_domain::{OptionsDataRepository, EquityDataRepository};
+use cs_domain::{EquityDataRepository, OptionsDataRepository};
 
 // Full mode types
 #[cfg(feature = "full")]
 use cs_domain::infrastructure::{
-    FinqOptionsRepository, FinqEquityRepository,
-    IbOptionsRepository, IbEquityRepository,
+    FinqEquityRepository, FinqOptionsRepository, IbEquityRepository, IbOptionsRepository,
 };
 
 // Demo mode types
 #[cfg(feature = "demo")]
-use cs_domain::infrastructure::{DemoOptionsRepository, DemoEquityRepository};
+use cs_domain::infrastructure::{DemoEquityRepository, DemoOptionsRepository};
 
 #[cfg(feature = "full")]
-use super::{RepositoryFactory, IbRepositoryFactory, DataRepositoryFactory};
+use super::{DataRepositoryFactory, IbRepositoryFactory, RepositoryFactory};
 #[cfg(feature = "demo")]
-use super::{RepositoryFactory, DataRepositoryFactory};
+use super::{DataRepositoryFactory, RepositoryFactory};
 
 /// Enum wrapper for backtest use cases with different repository types
 #[cfg(feature = "full")]
@@ -39,7 +34,9 @@ pub enum BacktestUseCaseEnum {
 
 #[cfg(feature = "full")]
 impl BacktestUseCaseEnum {
-    pub async fn execute(&self) -> Result<cs_backtest::UnifiedBacktestResult, cs_backtest::BacktestError> {
+    pub async fn execute(
+        &self,
+    ) -> Result<cs_backtest::UnifiedBacktestResult, cs_backtest::BacktestError> {
         match self {
             Self::Finq(uc) => uc.execute().await,
             Self::Ib(uc) => uc.execute().await,
@@ -180,9 +177,7 @@ impl UseCaseFactory {
 
     /// Create a campaign use case with all dependencies
     #[cfg(any(feature = "full", feature = "demo"))]
-    pub fn create_campaign(
-        config: CampaignConfig,
-    ) -> Result<CampaignUseCase> {
+    pub fn create_campaign(config: CampaignConfig) -> Result<CampaignUseCase> {
         let options_repo = Arc::new(RepositoryFactory::create_options_repo(&config.data_dir));
         let equity_repo = Arc::new(RepositoryFactory::create_equity_repo(&config.data_dir));
 

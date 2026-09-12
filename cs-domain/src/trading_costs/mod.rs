@@ -16,15 +16,15 @@
 //! - `config`: Configuration for cost models (serde-compatible)
 //! - `models`: Concrete cost model implementations
 
-mod cost;
-mod context;
 mod calculator;
 mod config;
+mod context;
+mod cost;
 mod has_cost;
 pub mod models;
 
-pub use cost::{TradingCost, TradingCostBreakdown, TradeSide};
-pub use context::{TradingContext, TradeType, LegContext};
 pub use calculator::TradingCostCalculator;
-pub use config::{TradingCostConfig, CostPreset};
-pub use has_cost::{HasTradingCost, ApplyCosts};
+pub use config::{CostPreset, TradingCostConfig};
+pub use context::{LegContext, TradeType, TradingContext};
+pub use cost::{TradeSide, TradingCost, TradingCostBreakdown};
+pub use has_cost::{ApplyCosts, HasTradingCost};

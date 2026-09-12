@@ -3,8 +3,8 @@
 //! Provides comprehensive trade statistics including capital-weighted returns,
 //! profit factor, and other risk metrics.
 
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use super::{ReturnBasis, TradeAccounting};
@@ -96,35 +96,45 @@ impl TradeStatistics {
 
         // Basic counts
         let total_trades = trades.len();
-        let winning_trades = trades.iter().filter(|t| t.realized_pnl > Decimal::ZERO).count();
-        let losing_trades = trades.iter().filter(|t| t.realized_pnl < Decimal::ZERO).count();
-        let scratch_trades = trades.iter().filter(|t| t.realized_pnl == Decimal::ZERO).count();
+        let winning_trades = trades
+            .iter()
+            .filter(|t| t.realized_pnl > Decimal::ZERO)
+            .count();
+        let losing_trades = trades
+            .iter()
+            .filter(|t| t.realized_pnl < Decimal::ZERO)
+            .count();
+        let scratch_trades = trades
+            .iter()
+            .filter(|t| t.realized_pnl == Decimal::ZERO)
+            .count();
 
         // Dollar P&L
         let total_pnl: Decimal = trades.iter().map(|t| t.realized_pnl).sum();
-        let total_option_pnl: Decimal = trades.iter()
+        let total_option_pnl: Decimal = trades
+            .iter()
             .map(|t| t.realized_pnl - t.hedge_pnl.unwrap_or(Decimal::ZERO))
             .sum();
-        let total_hedge_pnl: Decimal = trades.iter()
-            .filter_map(|t| t.hedge_pnl)
-            .sum();
-        let total_transaction_costs: Decimal = trades.iter()
-            .map(|t| t.transaction_costs.abs())
-            .sum();
+        let total_hedge_pnl: Decimal = trades.iter().filter_map(|t| t.hedge_pnl).sum();
+        let total_transaction_costs: Decimal =
+            trades.iter().map(|t| t.transaction_costs.abs()).sum();
 
         // Basis metrics
-        let total_capital_deployed: Decimal = trades.iter()
+        let total_capital_deployed: Decimal = trades
+            .iter()
             .filter_map(|t| t.return_basis_value(basis))
             .sum();
 
         // Peak basis (simplified - assumes sequential trades)
-        let peak_capital_required = trades.iter()
+        let peak_capital_required = trades
+            .iter()
             .filter_map(|t| t.return_basis_value(basis))
             .max()
             .unwrap_or(Decimal::ZERO);
 
         // Returns
-        let returns: Vec<f64> = trades.iter()
+        let returns: Vec<f64> = trades
+            .iter()
             .filter_map(|t| t.return_on_basis(basis))
             .collect();
 
@@ -137,11 +147,10 @@ impl TradeStatistics {
 
         // Capital-weighted return
         let capital_weighted_return = {
-            let weighted_sum: f64 = trades.iter()
+            let weighted_sum: f64 = trades
+                .iter()
                 .filter_map(|t| {
-                    let basis_value = t.return_basis_value(basis)?
-                        .to_f64()
-                        .unwrap_or(0.0);
+                    let basis_value = t.return_basis_value(basis)?.to_f64().unwrap_or(0.0);
                     let ret = t.return_on_basis(basis)?;
                     if basis_value > 0.0 {
                         Some(basis_value * ret)
@@ -160,7 +169,8 @@ impl TradeStatistics {
 
         // Time-weighted return (geometric mean)
         let time_weighted_return = if !returns.is_empty() {
-            let product: f64 = returns.iter()
+            let product: f64 = returns
+                .iter()
                 .map(|r| 1.0 + r)
                 .filter(|x| *x > 0.0) // Avoid log of negative
                 .product();
@@ -176,9 +186,8 @@ impl TradeStatistics {
         // Standard deviation
         let std_deviation = if returns.len() > 1 {
             let mean = capital_weighted_return;
-            let variance = returns.iter()
-                .map(|r| (r - mean).powi(2))
-                .sum::<f64>() / (returns.len() - 1) as f64;
+            let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>()
+                / (returns.len() - 1) as f64;
             variance.sqrt()
         } else {
             0.0
@@ -195,29 +204,30 @@ impl TradeStatistics {
         let win_rate = winning_trades as f64 / total_trades as f64;
 
         // Winner/Loser analysis
-        let winners: Vec<&TradeAccounting> = trades.iter()
+        let winners: Vec<&TradeAccounting> = trades
+            .iter()
             .filter(|t| t.realized_pnl > Decimal::ZERO)
             .collect();
-        let losers: Vec<&TradeAccounting> = trades.iter()
+        let losers: Vec<&TradeAccounting> = trades
+            .iter()
             .filter(|t| t.realized_pnl < Decimal::ZERO)
             .collect();
 
         let avg_winner_dollars = if !winners.is_empty() {
-            winners.iter().map(|t| t.realized_pnl).sum::<Decimal>()
-                / Decimal::from(winners.len())
+            winners.iter().map(|t| t.realized_pnl).sum::<Decimal>() / Decimal::from(winners.len())
         } else {
             Decimal::ZERO
         };
 
         let avg_loser_dollars = if !losers.is_empty() {
-            losers.iter().map(|t| t.realized_pnl).sum::<Decimal>()
-                / Decimal::from(losers.len())
+            losers.iter().map(|t| t.realized_pnl).sum::<Decimal>() / Decimal::from(losers.len())
         } else {
             Decimal::ZERO
         };
 
         let avg_winner_pct = if !winners.is_empty() {
-            let winner_returns: Vec<f64> = winners.iter()
+            let winner_returns: Vec<f64> = winners
+                .iter()
                 .filter_map(|t| t.return_on_basis(basis))
                 .collect();
             if winner_returns.is_empty() {
@@ -230,7 +240,8 @@ impl TradeStatistics {
         };
 
         let avg_loser_pct = if !losers.is_empty() {
-            let loser_returns: Vec<f64> = losers.iter()
+            let loser_returns: Vec<f64> = losers
+                .iter()
                 .filter_map(|t| t.return_on_basis(basis))
                 .collect();
             if loser_returns.is_empty() {
@@ -268,7 +279,8 @@ impl TradeStatistics {
         let max_drawdown = Self::calculate_max_drawdown(trades);
 
         // Capital efficiency (basis-aware)
-        let basis_pnl: Decimal = trades.iter()
+        let basis_pnl: Decimal = trades
+            .iter()
             .filter(|t| t.return_basis_value(basis).is_some())
             .map(|t| t.realized_pnl)
             .sum();
@@ -436,9 +448,9 @@ mod tests {
     #[test]
     fn test_profit_factor() {
         let trades = vec![
-            make_trade(dec!(100), dec!(50)),   // Winner
-            make_trade(dec!(100), dec!(30)),   // Winner
-            make_trade(dec!(100), dec!(-20)),  // Loser
+            make_trade(dec!(100), dec!(50)),  // Winner
+            make_trade(dec!(100), dec!(30)),  // Winner
+            make_trade(dec!(100), dec!(-20)), // Loser
         ];
 
         let stats = TradeStatistics::from_trades(&trades);
@@ -452,10 +464,10 @@ mod tests {
     #[test]
     fn test_win_rate() {
         let trades = vec![
-            make_trade(dec!(100), dec!(50)),   // Winner
-            make_trade(dec!(100), dec!(30)),   // Winner
-            make_trade(dec!(100), dec!(-20)),  // Loser
-            make_trade(dec!(100), dec!(-10)),  // Loser
+            make_trade(dec!(100), dec!(50)),  // Winner
+            make_trade(dec!(100), dec!(30)),  // Winner
+            make_trade(dec!(100), dec!(-20)), // Loser
+            make_trade(dec!(100), dec!(-10)), // Loser
         ];
 
         let stats = TradeStatistics::from_trades(&trades);
@@ -467,11 +479,11 @@ mod tests {
     #[test]
     fn test_max_drawdown() {
         let trades = vec![
-            make_trade(dec!(100), dec!(50)),   // +50, cumulative: 50, peak: 50
-            make_trade(dec!(100), dec!(-30)),  // -30, cumulative: 20, dd: 30
-            make_trade(dec!(100), dec!(-40)),  // -40, cumulative: -20, dd: 70
-            make_trade(dec!(100), dec!(100)),  // +100, cumulative: 80, peak: 80
-            make_trade(dec!(100), dec!(-10)),  // -10, cumulative: 70, dd: 10
+            make_trade(dec!(100), dec!(50)),  // +50, cumulative: 50, peak: 50
+            make_trade(dec!(100), dec!(-30)), // -30, cumulative: 20, dd: 30
+            make_trade(dec!(100), dec!(-40)), // -40, cumulative: -20, dd: 70
+            make_trade(dec!(100), dec!(100)), // +100, cumulative: 80, peak: 80
+            make_trade(dec!(100), dec!(-10)), // -10, cumulative: 70, dd: 10
         ];
 
         let stats = TradeStatistics::from_trades(&trades);

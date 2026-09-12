@@ -99,8 +99,8 @@ impl TradingDate {
     /// Combine with time to create timestamp
     pub fn with_time(&self, time: &MarketTime) -> TradingTimestamp {
         // Convert MarketTime (Eastern) to UTC
-        let naive_time = NaiveTime::from_hms_opt(time.hour, time.minute, 0)
-            .expect("Valid market time");
+        let naive_time =
+            NaiveTime::from_hms_opt(time.hour, time.minute, 0).expect("Valid market time");
         let utc_datetime = eastern_to_utc(self.to_naive_date(), naive_time);
         TradingTimestamp::from_datetime_utc(utc_datetime)
     }
@@ -172,7 +172,10 @@ impl MarketTime {
     /// - Strike selection (queries spot at this time)
     /// - Trade entry (enters position at this time)
     /// - First hedge check (hedge immediately at entry)
-    pub const DEFAULT_ENTRY: MarketTime = MarketTime { hour: 10, minute: 0 };
+    pub const DEFAULT_ENTRY: MarketTime = MarketTime {
+        hour: 10,
+        minute: 0,
+    };
 
     /// Default hedging check time: 3:45 PM ET
     ///
@@ -183,13 +186,22 @@ impl MarketTime {
     /// - Allows time to execute before close
     ///
     /// Note: First hedge happens at entry time, subsequent hedges at this time daily.
-    pub const DEFAULT_HEDGE_CHECK: MarketTime = MarketTime { hour: 15, minute: 45 };
+    pub const DEFAULT_HEDGE_CHECK: MarketTime = MarketTime {
+        hour: 15,
+        minute: 45,
+    };
 
     /// Market open: 9:30 AM ET
-    pub const MARKET_OPEN: MarketTime = MarketTime { hour: 9, minute: 30 };
+    pub const MARKET_OPEN: MarketTime = MarketTime {
+        hour: 9,
+        minute: 30,
+    };
 
     /// Market close: 4:00 PM ET
-    pub const MARKET_CLOSE: MarketTime = MarketTime { hour: 16, minute: 0 };
+    pub const MARKET_CLOSE: MarketTime = MarketTime {
+        hour: 16,
+        minute: 0,
+    };
 
     pub fn new(hour: u32, minute: u32) -> Self {
         Self { hour, minute }
@@ -285,7 +297,10 @@ mod tests {
     #[test]
     fn test_with_time() {
         let date = TradingDate::from_ymd(2025, 11, 3).unwrap();
-        let time = MarketTime { hour: 9, minute: 35 };
+        let time = MarketTime {
+            hour: 9,
+            minute: 35,
+        };
         let ts = date.with_time(&time);
         let dt = ts.to_datetime_utc();
         // Nov 3, 2025 is EST (UTC-5), so 9:35 EST = 14:35 UTC

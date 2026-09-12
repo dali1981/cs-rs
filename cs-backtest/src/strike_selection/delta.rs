@@ -1,15 +1,17 @@
+use super::{ATMStrategy, StrikeSelector};
+use chrono::NaiveDate;
+use cs_analytics::{
+    linspace, DeltaVolSurface, IVSurface, OpportunityAnalyzer, OpportunityAnalyzerConfig,
+};
 use cs_domain::entities::{
     CalendarSpread, CalendarStraddle, IronButterfly, LongIronButterfly, LongStraddle, OptionLeg,
     ShortStraddle,
 };
 use cs_domain::strike_selection::{
-    find_closest_strike, select_expirations, ExpirationCriteria, SelectionError,
-    TradeSelectionCriteria, StrikeMatchMode,
+    find_closest_strike, select_expirations, ExpirationCriteria, SelectionError, StrikeMatchMode,
+    TradeSelectionCriteria,
 };
 use cs_domain::value_objects::SpotPrice;
-use super::{ATMStrategy, StrikeSelector};
-use chrono::NaiveDate;
-use cs_analytics::{DeltaVolSurface, IVSurface, OpportunityAnalyzer, OpportunityAnalyzerConfig, linspace};
 use finq_core::OptionType;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -71,7 +73,11 @@ impl DeltaStrategy {
         }
     }
 
-    pub fn scanning(delta_range: (f64, f64), steps: usize, criteria: TradeSelectionCriteria) -> Self {
+    pub fn scanning(
+        delta_range: (f64, f64),
+        steps: usize,
+        criteria: TradeSelectionCriteria,
+    ) -> Self {
         Self {
             criteria,
             target_delta: 0.50,
@@ -219,7 +225,14 @@ impl StrikeSelector for DeltaStrategy {
         max_dte: i32,
     ) -> Result<IronButterfly, SelectionError> {
         let atm_strategy = ATMStrategy::new(self.criteria.clone());
-        StrikeSelector::select_iron_butterfly(&atm_strategy, spot, surface, wing_width, min_dte, max_dte)
+        StrikeSelector::select_iron_butterfly(
+            &atm_strategy,
+            spot,
+            surface,
+            wing_width,
+            min_dte,
+            max_dte,
+        )
     }
 
     fn select_long_iron_butterfly(

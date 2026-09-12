@@ -44,7 +44,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get option bars at specific time (this is what the backtest uses)
     println!("Fetching option bars at time...");
-    let chain = match options_repo.get_option_bars_at_time(symbol, timestamp).await {
+    let chain = match options_repo
+        .get_option_bars_at_time(symbol, timestamp)
+        .await
+    {
         Ok(bars) => bars,
         Err(e) => {
             eprintln!("Failed to get option bars at time: {}", e);

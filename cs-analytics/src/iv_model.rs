@@ -134,10 +134,7 @@ fn interpolate_moneyness_at_expiry(points: &[&IVPoint], target_moneyness: f64) -
     }
 
     // Convert each point to (moneyness, iv)
-    let mut moneyness_iv: Vec<(f64, f64)> = points
-        .iter()
-        .map(|p| (p.moneyness(), p.iv))
-        .collect();
+    let mut moneyness_iv: Vec<(f64, f64)> = points.iter().map(|p| (p.moneyness(), p.iv)).collect();
 
     moneyness_iv.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -212,9 +209,8 @@ fn interpolate_expiration_by_moneyness(
         (Some((l_exp, l_iv)), Some((u_exp, u_iv))) => {
             // sqrt(time) weighted interpolation
             let as_of = surface.as_of_time().date_naive();
-            let sqrt_time = |exp: NaiveDate| -> f64 {
-                ((exp - as_of).num_days().max(1) as f64 / 365.0).sqrt()
-            };
+            let sqrt_time =
+                |exp: NaiveDate| -> f64 { ((exp - as_of).num_days().max(1) as f64 / 365.0).sqrt() };
 
             let sqrt_lower = sqrt_time(l_exp);
             let sqrt_upper = sqrt_time(u_exp);
@@ -321,8 +317,7 @@ impl PricingIVProvider for StickyDeltaPricing {
 
         // Get ATM vol as initial guess - required for iteration
         // Return None if no ATM vol available (insufficient surface data)
-        let mut sigma = delta_smile
-            .get_atm_iv(expiration, is_call)?;
+        let mut sigma = delta_smile.get_atm_iv(expiration, is_call)?;
 
         // Iterative solve: find σ such that σ = smile(Δ(K, σ))
         for _ in 0..self.max_iterations {
@@ -390,7 +385,11 @@ impl DeltaSmile {
         }
 
         // Sort by delta
-        matching.sort_by(|a, b| a.delta.partial_cmp(&b.delta).unwrap_or(std::cmp::Ordering::Equal));
+        matching.sort_by(|a, b| {
+            a.delta
+                .partial_cmp(&b.delta)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Find bracketing deltas
         let mut lower: Option<&DeltaIVPoint> = None;
@@ -475,7 +474,7 @@ impl PricingModel {
             "sticky_strike" | "strike" => PricingModel::StickyStrike,
             "sticky_moneyness" | "moneyness" => PricingModel::StickyMoneyness,
             "sticky_delta" | "delta" => PricingModel::StickyDelta,
-            _ => PricingModel::default(),  // Use code default for unrecognized strings
+            _ => PricingModel::default(), // Use code default for unrecognized strings
         }
     }
 
@@ -537,7 +536,11 @@ mod tests {
                 timestamp: now,
                 underlying_price: spot_dec,
                 is_call: false,
-                contract_ticker: format!("TEST{}P{}", exp_30d.format("%y%m%d"), (spot * 0.90) as i64),
+                contract_ticker: format!(
+                    "TEST{}P{}",
+                    exp_30d.format("%y%m%d"),
+                    (spot * 0.90) as i64
+                ),
             },
             IVPoint {
                 strike: Decimal::try_from(spot * 0.95).unwrap(), // Slightly OTM put
@@ -546,7 +549,11 @@ mod tests {
                 timestamp: now,
                 underlying_price: spot_dec,
                 is_call: false,
-                contract_ticker: format!("TEST{}P{}", exp_30d.format("%y%m%d"), (spot * 0.95) as i64),
+                contract_ticker: format!(
+                    "TEST{}P{}",
+                    exp_30d.format("%y%m%d"),
+                    (spot * 0.95) as i64
+                ),
             },
             IVPoint {
                 strike: spot_dec, // ATM
@@ -573,7 +580,11 @@ mod tests {
                 timestamp: now,
                 underlying_price: spot_dec,
                 is_call: true,
-                contract_ticker: format!("TEST{}C{}", exp_30d.format("%y%m%d"), (spot * 1.05) as i64),
+                contract_ticker: format!(
+                    "TEST{}C{}",
+                    exp_30d.format("%y%m%d"),
+                    (spot * 1.05) as i64
+                ),
             },
             IVPoint {
                 strike: Decimal::try_from(spot * 1.10).unwrap(), // OTM call
@@ -582,7 +593,11 @@ mod tests {
                 timestamp: now,
                 underlying_price: spot_dec,
                 is_call: true,
-                contract_ticker: format!("TEST{}C{}", exp_30d.format("%y%m%d"), (spot * 1.10) as i64),
+                contract_ticker: format!(
+                    "TEST{}C{}",
+                    exp_30d.format("%y%m%d"),
+                    (spot * 1.10) as i64
+                ),
             },
         ];
 
@@ -667,13 +682,34 @@ mod tests {
 
     #[test]
     fn test_pricing_model_from_string() {
-        assert_eq!(PricingModel::from_string("sticky_strike"), PricingModel::StickyStrike);
-        assert_eq!(PricingModel::from_string("sticky-strike"), PricingModel::StickyStrike);
-        assert_eq!(PricingModel::from_string("sticky_moneyness"), PricingModel::StickyMoneyness);
-        assert_eq!(PricingModel::from_string("moneyness"), PricingModel::StickyMoneyness);
-        assert_eq!(PricingModel::from_string("sticky_delta"), PricingModel::StickyDelta);
-        assert_eq!(PricingModel::from_string("delta"), PricingModel::StickyDelta);
-        assert_eq!(PricingModel::from_string("unknown"), PricingModel::StickyStrike);
+        assert_eq!(
+            PricingModel::from_string("sticky_strike"),
+            PricingModel::StickyStrike
+        );
+        assert_eq!(
+            PricingModel::from_string("sticky-strike"),
+            PricingModel::StickyStrike
+        );
+        assert_eq!(
+            PricingModel::from_string("sticky_moneyness"),
+            PricingModel::StickyMoneyness
+        );
+        assert_eq!(
+            PricingModel::from_string("moneyness"),
+            PricingModel::StickyMoneyness
+        );
+        assert_eq!(
+            PricingModel::from_string("sticky_delta"),
+            PricingModel::StickyDelta
+        );
+        assert_eq!(
+            PricingModel::from_string("delta"),
+            PricingModel::StickyDelta
+        );
+        assert_eq!(
+            PricingModel::from_string("unknown"),
+            PricingModel::StickyStrike
+        );
     }
 
     #[test]

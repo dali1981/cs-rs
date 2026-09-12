@@ -1,9 +1,11 @@
-use crate::entities::{LongStraddle, CalendarSpread, IronButterfly, Strangle, Butterfly, Condor, IronCondor};
-use crate::value_objects::{IronButterflyConfig, TradeDirection, MultiLegStrategyConfig};
+use crate::entities::{
+    Butterfly, CalendarSpread, Condor, IronButterfly, IronCondor, LongStraddle, Strangle,
+};
+use crate::value_objects::{IronButterflyConfig, MultiLegStrategyConfig, TradeDirection};
 use chrono::{DateTime, NaiveDate, Utc};
+use finq_core::OptionType;
 use rust_decimal::Decimal;
 use thiserror::Error;
-use finq_core::OptionType;
 
 /// Port for creating trades from market data
 ///

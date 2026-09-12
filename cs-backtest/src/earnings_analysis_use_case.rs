@@ -3,16 +3,20 @@
 // Analyzes expected vs actual moves on earnings events
 
 use chrono::NaiveDate;
-use rust_decimal::Decimal;
-use std::sync::Arc;
-use thiserror::Error;
 use cs_analytics::{AtmMethod, StraddlePriceComputer};
 use cs_domain::{
     entities::EarningsEvent,
-    repositories::{EarningsRepository, EquityDataRepository, OptionsDataRepository, RepositoryError},
+    repositories::{
+        EarningsRepository, EquityDataRepository, OptionsDataRepository, RepositoryError,
+    },
     timing::EarningsTradeTiming,
-    value_objects::{AtmIvConfig, CallPut, EarningsOutcome, EarningsSummaryStats, OptionBar, TimingConfig},
+    value_objects::{
+        AtmIvConfig, CallPut, EarningsOutcome, EarningsSummaryStats, OptionBar, TimingConfig,
+    },
 };
+use rust_decimal::Decimal;
+use std::sync::Arc;
+use thiserror::Error;
 
 /// Result of earnings analysis
 #[derive(Debug, serde::Serialize)]
@@ -73,7 +77,12 @@ where
         options_repo: Arc<O>,
         earnings_repo: Arc<R>,
     ) -> Self {
-        Self::new(equity_repo, options_repo, earnings_repo, TimingConfig::default())
+        Self::new(
+            equity_repo,
+            options_repo,
+            earnings_repo,
+            TimingConfig::default(),
+        )
     }
 
     /// Analyze all earnings events for a symbol over a date range
@@ -108,14 +117,17 @@ where
         let mut outcomes = Vec::new();
 
         for event in &events {
-            print!("Analyzing {} earnings on {}... ", event.symbol, event.earnings_date);
+            print!(
+                "Analyzing {} earnings on {}... ",
+                event.symbol, event.earnings_date
+            );
 
             match self.analyze_single_event(event, config).await {
                 Ok(outcome) => {
-                    println!("✓ Expected: {:.2}%, Actual: {:.2}%, Ratio: {:.2}x",
-                             outcome.expected_move_pct,
-                             outcome.actual_move_pct,
-                             outcome.move_ratio);
+                    println!(
+                        "✓ Expected: {:.2}%, Actual: {:.2}%, Ratio: {:.2}x",
+                        outcome.expected_move_pct, outcome.actual_move_pct, outcome.move_ratio
+                    );
                     outcomes.push(outcome);
                 }
                 Err(e) => {

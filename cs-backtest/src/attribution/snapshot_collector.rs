@@ -6,12 +6,12 @@
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use std::sync::Arc;
 
-use cs_domain::{
-    AttributionConfig, CompositeTrade, EquityDataRepository, HedgeAction,
-    OptionsDataRepository, PositionAttribution, PositionGreeks, PositionSnapshot,
-    SnapshotTimes, TradingCalendar, VolatilitySource,
-};
 use cs_analytics::{realized_volatility, PricingModel};
+use cs_domain::{
+    AttributionConfig, CompositeTrade, EquityDataRepository, HedgeAction, OptionsDataRepository,
+    PositionAttribution, PositionGreeks, PositionSnapshot, SnapshotTimes, TradingCalendar,
+    VolatilitySource,
+};
 use rust_decimal::Decimal;
 
 use super::greeks_computer::GreeksComputer;
@@ -218,7 +218,8 @@ impl<T: CompositeTrade + Clone> SnapshotCollector<T> {
         volatility: f64,
         timestamp: DateTime<Utc>,
     ) -> Result<(f64, PositionGreeks), String> {
-        let computer = GreeksComputer::new(&self.trade, self.contract_multiplier, self.risk_free_rate);
+        let computer =
+            GreeksComputer::new(&self.trade, self.contract_multiplier, self.risk_free_rate);
         let greeks = computer.compute_with_flat_vol(spot, volatility, timestamp);
         Ok((volatility, greeks))
     }
@@ -236,16 +237,18 @@ impl<T: CompositeTrade + Clone> SnapshotCollector<T> {
             .await
             .map_err(|e| e.to_string())?;
 
-        let surface = build_iv_surface_minute_aligned(&chain, self.equity_repo.as_ref(), &self.symbol)
-            .await
-            .ok_or("Failed to build IV surface")?;
+        let surface =
+            build_iv_surface_minute_aligned(&chain, self.equity_repo.as_ref(), &self.symbol)
+                .await
+                .ok_or("Failed to build IV surface")?;
 
         // Get pricing model provider
         let pricing_model = PricingModel::StickyMoneyness; // Could be configurable
         let provider = pricing_model.to_provider();
 
         // Compute average IV for the position (for vega attribution)
-        let computer = GreeksComputer::new(&self.trade, self.contract_multiplier, self.risk_free_rate);
+        let computer =
+            GreeksComputer::new(&self.trade, self.contract_multiplier, self.risk_free_rate);
         let iv = computer.compute_position_avg_iv(&surface, provider.as_ref(), timestamp);
 
         // Compute Greeks from surface
@@ -276,7 +279,8 @@ impl<T: CompositeTrade + Clone> SnapshotCollector<T> {
             .ok_or("Insufficient data for HV")?;
 
         // Compute Greeks with flat HV
-        let computer = GreeksComputer::new(&self.trade, self.contract_multiplier, self.risk_free_rate);
+        let computer =
+            GreeksComputer::new(&self.trade, self.contract_multiplier, self.risk_free_rate);
         let greeks = computer.compute_with_flat_vol(spot, hv, timestamp);
 
         Ok((hv, greeks))
@@ -297,14 +301,9 @@ impl<T: CompositeTrade + Clone> SnapshotCollector<T> {
             } => (*open_hour, *open_minute, *close_hour, *close_minute),
         };
 
-        let open_time = eastern_to_utc(
-            date,
-            NaiveTime::from_hms_opt(open_h, open_m, 0).unwrap(),
-        );
-        let close_time = eastern_to_utc(
-            date,
-            NaiveTime::from_hms_opt(close_h, close_m, 0).unwrap(),
-        );
+        let open_time = eastern_to_utc(date, NaiveTime::from_hms_opt(open_h, open_m, 0).unwrap());
+        let close_time =
+            eastern_to_utc(date, NaiveTime::from_hms_opt(close_h, close_m, 0).unwrap());
 
         (open_time, close_time)
     }

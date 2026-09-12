@@ -1,5 +1,5 @@
-use chrono::{Datelike, NaiveDate, Weekday};
 use crate::expiration::ExpirationPolicy;
+use chrono::{Datelike, NaiveDate, Weekday};
 use serde::{Deserialize, Serialize};
 
 /// Policy for rolling (renewing) positions
@@ -109,10 +109,19 @@ impl RollPolicy {
             // Move to next month if past 21st (can't be 3rd Friday)
             if date.day() > 21 {
                 date = NaiveDate::from_ymd_opt(
-                    if date.month() == 12 { date.year() + 1 } else { date.year() },
-                    if date.month() == 12 { 1 } else { date.month() + 1 },
+                    if date.month() == 12 {
+                        date.year() + 1
+                    } else {
+                        date.year()
+                    },
+                    if date.month() == 12 {
+                        1
+                    } else {
+                        date.month() + 1
+                    },
                     1,
-                ).unwrap();
+                )
+                .unwrap();
             }
 
             // Find 3rd Friday of this month
@@ -129,10 +138,19 @@ impl RollPolicy {
 
             // Move to next month
             date = NaiveDate::from_ymd_opt(
-                if date.month() == 12 { date.year() + 1 } else { date.year() },
-                if date.month() == 12 { 1 } else { date.month() + 1 },
+                if date.month() == 12 {
+                    date.year() + 1
+                } else {
+                    date.year()
+                },
+                if date.month() == 12 {
+                    1
+                } else {
+                    date.month() + 1
+                },
                 1,
-            ).unwrap();
+            )
+            .unwrap();
         }
     }
 
@@ -143,9 +161,7 @@ impl RollPolicy {
         match self {
             Self::None => None,
 
-            Self::Weekly { roll_day } => {
-                Some(next_weekday(from, *roll_day))
-            }
+            Self::Weekly { roll_day } => Some(next_weekday(from, *roll_day)),
 
             Self::Monthly { roll_week_offset } => {
                 let third_friday = Self::next_third_friday(from);
@@ -154,7 +170,8 @@ impl RollPolicy {
                 // Ensure roll date is after 'from'
                 if roll_date <= from {
                     // Get next month's 3rd Friday
-                    let next_third = Self::next_third_friday(third_friday + chrono::Duration::days(1));
+                    let next_third =
+                        Self::next_third_friday(third_friday + chrono::Duration::days(1));
                     Some(next_third + chrono::Duration::weeks(*roll_week_offset as i64))
                 } else {
                     Some(roll_date)
@@ -167,9 +184,7 @@ impl RollPolicy {
                 Some(from + chrono::Duration::days(calendar_days))
             }
 
-            Self::OnExpiration { .. } |
-            Self::DteThreshold { .. } |
-            Self::TimeInterval { .. } => {
+            Self::OnExpiration { .. } | Self::DteThreshold { .. } | Self::TimeInterval { .. } => {
                 // These need expiration/last_roll context, handled elsewhere
                 None
             }
@@ -198,13 +213,17 @@ impl RollPolicy {
                 }
             }
 
-            Self::Monthly { roll_week_offset: _ } => {
+            Self::Monthly {
+                roll_week_offset: _,
+            } => {
                 // Check if current_date is a monthly roll date
-                if let Some(next_roll) = self.next_roll_date(current_date - chrono::Duration::days(1)) {
+                if let Some(next_roll) =
+                    self.next_roll_date(current_date - chrono::Duration::days(1))
+                {
                     if next_roll == current_date {
                         match last_roll_date {
                             Some(last) => (current_date - last).num_days() >= 28, // At least ~1 month
-                            None => true, // First roll
+                            None => true,                                         // First roll
                         }
                     } else {
                         false
@@ -242,7 +261,7 @@ impl RollPolicy {
                         let days_since = (current_date - last).num_days();
                         days_since >= *interval_days as i64
                     }
-                    None => false // First position, no roll yet
+                    None => false, // First position, no roll yet
                 }
             }
         }
@@ -252,9 +271,9 @@ impl RollPolicy {
     pub fn expiration_policy(&self) -> Option<&ExpirationPolicy> {
         match self {
             Self::None => None,
-            Self::Weekly { .. } => None,  // No expiration policy, just rolls weekly
-            Self::Monthly { .. } => None,  // No expiration policy, just rolls monthly
-            Self::TradingDays { .. } => None,  // No expiration policy, just rolls by days
+            Self::Weekly { .. } => None, // No expiration policy, just rolls weekly
+            Self::Monthly { .. } => None, // No expiration policy, just rolls monthly
+            Self::TradingDays { .. } => None, // No expiration policy, just rolls by days
             Self::OnExpiration { to_next } => Some(to_next),
             Self::DteThreshold { to_policy, .. } => Some(to_policy),
             Self::TimeInterval { to_policy, .. } => Some(to_policy),
@@ -266,15 +285,13 @@ impl RollPolicy {
         match self {
             Self::None => "No rolling".to_string(),
             Self::Weekly { roll_day } => format!("Weekly on {:?}", roll_day),
-            Self::Monthly { roll_week_offset } => {
-                match roll_week_offset {
-                    0 => "Monthly on 3rd Friday".to_string(),
-                    1 => "Monthly 1 week after 3rd Friday".to_string(),
-                    -1 => "Monthly 1 week before 3rd Friday".to_string(),
-                    n if *n > 0 => format!("Monthly {} weeks after 3rd Friday", n),
-                    n => format!("Monthly {} weeks before 3rd Friday", n.abs()),
-                }
-            }
+            Self::Monthly { roll_week_offset } => match roll_week_offset {
+                0 => "Monthly on 3rd Friday".to_string(),
+                1 => "Monthly 1 week after 3rd Friday".to_string(),
+                -1 => "Monthly 1 week before 3rd Friday".to_string(),
+                n if *n > 0 => format!("Monthly {} weeks after 3rd Friday", n),
+                n => format!("Monthly {} weeks before 3rd Friday", n.abs()),
+            },
             Self::TradingDays { interval } => format!("Every {} trading days", interval),
             Self::OnExpiration { .. } => "On expiration".to_string(),
             Self::DteThreshold { min_dte, .. } => format!("When DTE < {}", min_dte),
@@ -287,7 +304,7 @@ impl RollPolicy {
 fn next_weekday(from: NaiveDate, target: Weekday) -> NaiveDate {
     let current = from.weekday();
     let days_ahead = (target.num_days_from_monday() + 7 - current.num_days_from_monday()) % 7;
-    let days_ahead = if days_ahead == 0 { 7 } else { days_ahead };  // If today is the target, next week
+    let days_ahead = if days_ahead == 0 { 7 } else { days_ahead }; // If today is the target, next week
     from + chrono::Duration::days(days_ahead as i64)
 }
 

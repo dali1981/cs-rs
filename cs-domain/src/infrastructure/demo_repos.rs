@@ -12,10 +12,12 @@ use rust_decimal::Decimal;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use crate::entities::EarningsEvent;
-use crate::repositories::{EarningsRepository, EquityDataRepository, OptionsDataRepository, RepositoryError};
-use crate::value_objects::{EarningsTime, EquityBar, OptionBar, SpotPrice, Strike};
 use super::option_bar_conversions::{dataframe_to_equity_bars, dataframe_to_option_bars};
+use crate::entities::EarningsEvent;
+use crate::repositories::{
+    EarningsRepository, EquityDataRepository, OptionsDataRepository, RepositoryError,
+};
+use crate::value_objects::{EarningsTime, EquityBar, OptionBar, SpotPrice, Strike};
 
 /// Get the fixtures directory path
 fn fixtures_dir() -> PathBuf {
@@ -48,7 +50,9 @@ impl DemoOptionsRepository {
 
 impl Default for DemoOptionsRepository {
     fn default() -> Self {
-        Self::new().expect("Failed to load demo options data. Ensure fixtures/nvda_options.parquet exists.")
+        Self::new().expect(
+            "Failed to load demo options data. Ensure fixtures/nvda_options.parquet exists.",
+        )
     }
 }
 
@@ -59,15 +63,21 @@ impl OptionsDataRepository for DemoOptionsRepository {
         underlying: &str,
         date: NaiveDate,
     ) -> Result<Vec<OptionBar>, RepositoryError> {
-        tracing::debug!("DemoOptionsRepository::get_option_bars({}, {})", underlying, date);
+        tracing::debug!(
+            "DemoOptionsRepository::get_option_bars({}, {})",
+            underlying,
+            date
+        );
 
         // Filter to requested underlying and date using polars
-        let filtered = self.options_df
+        let filtered = self
+            .options_df
             .clone()
             .lazy()
             .filter(
-                col("underlying").eq(lit(underlying))
-                    .and(col("timestamp").dt().date().eq(lit(date)))
+                col("underlying")
+                    .eq(lit(underlying))
+                    .and(col("timestamp").dt().date().eq(lit(date))),
             )
             .collect()
             .map_err(|e| RepositoryError::Polars(e.to_string()))?;
@@ -102,14 +112,19 @@ impl OptionsDataRepository for DemoOptionsRepository {
         let bars = self.get_option_bars(underlying, date).await?;
 
         // For each (strike, expiration, option_type), find the most recent bar at or before target_time
-        let mut latest: HashMap<(u64, NaiveDate, bool), (DateTime<Utc>, OptionBar)> = HashMap::new();
+        let mut latest: HashMap<(u64, NaiveDate, bool), (DateTime<Utc>, OptionBar)> =
+            HashMap::new();
 
         for bar in bars {
             let ts = match bar.timestamp {
                 Some(ts) if ts <= target_time => ts,
                 _ => continue,
             };
-            let key = (bar.strike.to_bits(), bar.expiration, matches!(bar.option_type, crate::value_objects::CallPut::Call));
+            let key = (
+                bar.strike.to_bits(),
+                bar.expiration,
+                matches!(bar.option_type, crate::value_objects::CallPut::Call),
+            );
             let should_update = latest.get(&key).map_or(true, |(prev_ts, _)| ts > *prev_ts);
             if should_update {
                 latest.insert(key, (ts, bar));
@@ -142,15 +157,22 @@ impl OptionsDataRepository for DemoOptionsRepository {
         let bars = self.get_option_bars(underlying, date).await?;
         let max_forward_time = target_time + chrono::Duration::minutes(max_forward_minutes as i64);
 
-        let mut earliest: HashMap<(u64, NaiveDate, bool), (DateTime<Utc>, OptionBar)> = HashMap::new();
+        let mut earliest: HashMap<(u64, NaiveDate, bool), (DateTime<Utc>, OptionBar)> =
+            HashMap::new();
 
         for bar in bars {
             let ts = match bar.timestamp {
                 Some(ts) if ts > target_time && ts <= max_forward_time => ts,
                 _ => continue,
             };
-            let key = (bar.strike.to_bits(), bar.expiration, matches!(bar.option_type, crate::value_objects::CallPut::Call));
-            let should_update = earliest.get(&key).map_or(true, |(prev_ts, _)| ts < *prev_ts);
+            let key = (
+                bar.strike.to_bits(),
+                bar.expiration,
+                matches!(bar.option_type, crate::value_objects::CallPut::Call),
+            );
+            let should_update = earliest
+                .get(&key)
+                .map_or(true, |(prev_ts, _)| ts < *prev_ts);
             if should_update {
                 earliest.insert(key, (ts, bar));
             }
@@ -164,7 +186,8 @@ impl OptionsDataRepository for DemoOptionsRepository {
         }
 
         // actual_snapshot_time = latest of the per-contract earliest timestamps
-        let actual_snapshot_time = earliest.values()
+        let actual_snapshot_time = earliest
+            .values()
             .map(|(ts, _)| *ts)
             .max()
             .unwrap_or(target_time);
@@ -179,7 +202,8 @@ impl OptionsDataRepository for DemoOptionsRepository {
         as_of_date: NaiveDate,
     ) -> Result<Vec<NaiveDate>, RepositoryError> {
         let bars = self.get_option_bars(underlying, as_of_date).await?;
-        let mut result: Vec<NaiveDate> = bars.iter()
+        let mut result: Vec<NaiveDate> = bars
+            .iter()
             .map(|b| b.expiration)
             .filter(|&exp| exp > as_of_date)
             .collect::<HashSet<_>>()
@@ -196,10 +220,13 @@ impl OptionsDataRepository for DemoOptionsRepository {
         as_of_date: NaiveDate,
     ) -> Result<Vec<Strike>, RepositoryError> {
         let bars = self.get_option_bars(underlying, as_of_date).await?;
-        let mut result: Vec<Strike> = bars.iter()
+        let mut result: Vec<Strike> = bars
+            .iter()
             .filter(|b| b.expiration == expiration)
             .filter_map(|b| {
-                Decimal::try_from(b.strike).ok().and_then(|d| Strike::new(d).ok())
+                Decimal::try_from(b.strike)
+                    .ok()
+                    .and_then(|d| Strike::new(d).ok())
             })
             .collect::<HashSet<_>>()
             .into_iter()
@@ -228,7 +255,8 @@ impl DemoEquityRepository {
 
 impl Default for DemoEquityRepository {
     fn default() -> Self {
-        Self::new().expect("Failed to load demo equity data. Ensure fixtures/nvda_equity.parquet exists.")
+        Self::new()
+            .expect("Failed to load demo equity data. Ensure fixtures/nvda_equity.parquet exists.")
     }
 }
 
@@ -242,13 +270,16 @@ impl EquityDataRepository for DemoEquityRepository {
         let date = target_time.date_naive();
         let bars = self.get_bars(symbol, date).await?;
 
-        let bar = bars.iter()
+        let bar = bars
+            .iter()
             .filter(|b| b.timestamp <= target_time)
             .max_by_key(|b| b.timestamp)
-            .ok_or_else(|| RepositoryError::NotFound(format!(
-                "No demo spot price for {} at {} (no bars before this time)",
-                symbol, target_time
-            )))?;
+            .ok_or_else(|| {
+                RepositoryError::NotFound(format!(
+                    "No demo spot price for {} at {} (no bars before this time)",
+                    symbol, target_time
+                ))
+            })?;
 
         Ok(SpotPrice {
             value: Decimal::try_from(bar.close)
@@ -262,12 +293,14 @@ impl EquityDataRepository for DemoEquityRepository {
         symbol: &str,
         date: NaiveDate,
     ) -> Result<Vec<EquityBar>, RepositoryError> {
-        let filtered = self.equity_df
+        let filtered = self
+            .equity_df
             .clone()
             .lazy()
             .filter(
-                col("ticker").eq(lit(symbol))
-                    .and(col("timestamp").dt().date().eq(lit(date)))
+                col("ticker")
+                    .eq(lit(symbol))
+                    .and(col("timestamp").dt().date().eq(lit(date))),
             )
             .collect()
             .map_err(|e| RepositoryError::Polars(e.to_string()))?;
@@ -296,44 +329,55 @@ impl DemoEarningsRepository {
         let df = LazyCsvReader::new(&path)
             .with_has_header(true)
             .finish()
-            .map_err(|e| RepositoryError::NotFound(format!("Failed to load demo earnings: {}. Make sure fixtures/earnings.csv exists.", e)))?
+            .map_err(|e| {
+                RepositoryError::NotFound(format!(
+                    "Failed to load demo earnings: {}. Make sure fixtures/earnings.csv exists.",
+                    e
+                ))
+            })?
             .collect()
             .map_err(|e| RepositoryError::Polars(e.to_string()))?;
 
         let mut earnings = Vec::new();
 
-        let symbols = df.column("symbol")
+        let symbols = df
+            .column("symbol")
             .map_err(|e| RepositoryError::Parse(e.to_string()))?
             .str()
             .map_err(|e| RepositoryError::Parse(e.to_string()))?;
 
-        let dates = df.column("earnings_date")
+        let dates = df
+            .column("earnings_date")
             .map_err(|e| RepositoryError::Parse(e.to_string()))?
             .str()
             .map_err(|e| RepositoryError::Parse(e.to_string()))?;
 
-        let times = df.column("earnings_time")
+        let times = df
+            .column("earnings_time")
             .map_err(|e| RepositoryError::Parse(e.to_string()))?
             .str()
             .map_err(|e| RepositoryError::Parse(e.to_string()))?;
 
-        let companies: Option<&StringChunked> = df.column("company_name").ok()
-            .and_then(|c| c.str().ok());
+        let companies: Option<&StringChunked> =
+            df.column("company_name").ok().and_then(|c| c.str().ok());
 
-        let market_caps: Option<&Int64Chunked> = df.column("market_cap").ok()
-            .and_then(|c| c.i64().ok());
+        let market_caps: Option<&Int64Chunked> =
+            df.column("market_cap").ok().and_then(|c| c.i64().ok());
 
         for i in 0..df.height() {
-            let symbol = symbols.get(i)
+            let symbol = symbols
+                .get(i)
                 .ok_or_else(|| RepositoryError::Parse("Missing symbol".into()))?
                 .to_string();
 
-            let date_str = dates.get(i)
+            let date_str = dates
+                .get(i)
                 .ok_or_else(|| RepositoryError::Parse("Missing date".into()))?;
             let earnings_date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
                 .map_err(|e| RepositoryError::Parse(format!("Invalid date: {}", e)))?;
 
-            let time_str = times.get(i)
+            let time_str = times
+                .get(i)
                 .ok_or_else(|| RepositoryError::Parse("Missing time".into()))?;
             let earnings_time = EarningsTime::from_str(time_str);
 
@@ -360,7 +404,8 @@ impl DemoEarningsRepository {
 
 impl Default for DemoEarningsRepository {
     fn default() -> Self {
-        Self::new().expect("Failed to load demo earnings data. Ensure fixtures/earnings.csv exists.")
+        Self::new()
+            .expect("Failed to load demo earnings data. Ensure fixtures/earnings.csv exists.")
     }
 }
 
@@ -372,14 +417,11 @@ impl EarningsRepository for DemoEarningsRepository {
         end_date: NaiveDate,
         symbols: Option<&[String]>,
     ) -> Result<Vec<EarningsEvent>, RepositoryError> {
-        let filtered: Vec<EarningsEvent> = self.earnings
+        let filtered: Vec<EarningsEvent> = self
+            .earnings
             .iter()
-            .filter(|e| {
-                e.earnings_date >= start_date && e.earnings_date <= end_date
-            })
-            .filter(|e| {
-                symbols.map_or(true, |s| s.contains(&e.symbol))
-            })
+            .filter(|e| e.earnings_date >= start_date && e.earnings_date <= end_date)
+            .filter(|e| symbols.map_or(true, |s| s.contains(&e.symbol)))
             .cloned()
             .collect();
 

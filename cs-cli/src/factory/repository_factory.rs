@@ -6,22 +6,18 @@ compile_error!("Features 'full' and 'demo' are mutually exclusive");
 use std::path::PathBuf;
 
 use cs_backtest::EarningsSourceConfig;
-use cs_domain::{
-    EarningsRepository, OptionsDataRepository, EquityDataRepository,
-
-};
+use cs_domain::{EarningsRepository, EquityDataRepository, OptionsDataRepository};
 
 // Full mode imports
 #[cfg(feature = "full")]
 use cs_domain::infrastructure::{
-    FinqOptionsRepository, FinqEquityRepository,
-    EarningsReaderAdapter, ParquetEarningsRepository,
+    EarningsReaderAdapter, FinqEquityRepository, FinqOptionsRepository, ParquetEarningsRepository,
 };
 
 // Demo mode imports
 #[cfg(feature = "demo")]
 use cs_domain::infrastructure::{
-    DemoOptionsRepository, DemoEquityRepository, DemoEarningsRepository,
+    DemoEarningsRepository, DemoEquityRepository, DemoOptionsRepository,
 };
 
 /// Provider trait for building data repositories (pluggable for tests/alt providers)
@@ -69,7 +65,7 @@ impl RepositoryFactory {
                 // Use earnings-rs adapter with configured source
                 Box::new(EarningsReaderAdapter::with_source(
                     dir.clone(),
-                    source.to_earnings_rs()
+                    source.to_earnings_rs(),
                 ))
             }
         }

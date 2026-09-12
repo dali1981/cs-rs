@@ -1,12 +1,12 @@
-use std::path::PathBuf;
-use serde::{Serialize, Deserialize};
 use chrono::NaiveDate;
-use cs_analytics::{PricingModel, InterpolationMode};
+use cs_analytics::{InterpolationMode, PricingModel};
 use cs_domain::{
-    TimingConfig, TradeSelectionCriteria, StrikeMatchMode, HedgeConfig, AttributionConfig,
-    TradingRange, TradingPeriodSpec, FilterCriteria, TradingCostConfig, FileRulesConfig, ReturnBasis,
-    MarginConfig,
+    AttributionConfig, FileRulesConfig, FilterCriteria, HedgeConfig, MarginConfig, ReturnBasis,
+    StrikeMatchMode, TimingConfig, TradeSelectionCriteria, TradingCostConfig, TradingPeriodSpec,
+    TradingRange,
 };
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use thiserror::Error;
 
 // Infrastructure config types (separated into submodules)
@@ -15,7 +15,7 @@ mod earnings_source;
 mod execution;
 
 pub use data_source::DataSourceConfig;
-pub use earnings_source::{EarningsSourceConfig, EarningsProvider};
+pub use earnings_source::{EarningsProvider, EarningsSourceConfig};
 pub use execution::ExecutionConfig;
 
 #[derive(Debug, Error)]
@@ -146,7 +146,7 @@ fn default_wing_width() -> f64 {
 }
 
 fn default_post_earnings_holding_days() -> usize {
-    5  // 1 trading week
+    5 // 1 trading week
 }
 
 fn default_straddle_entry_days() -> usize {
@@ -200,12 +200,18 @@ pub enum SpreadType {
 impl SpreadType {
     pub fn from_string(s: &str) -> Self {
         match s.to_lowercase().replace('-', "_").as_str() {
-            "iron_butterfly" | "ironbutterfly" | "butterfly" | "short_iron_butterfly" => SpreadType::IronButterfly,
-            "long_iron_butterfly" | "longironbutterfly" | "reverse_butterfly" => SpreadType::LongIronButterfly,
+            "iron_butterfly" | "ironbutterfly" | "butterfly" | "short_iron_butterfly" => {
+                SpreadType::IronButterfly
+            }
+            "long_iron_butterfly" | "longironbutterfly" | "reverse_butterfly" => {
+                SpreadType::LongIronButterfly
+            }
             "straddle" | "long_straddle" => SpreadType::Straddle,
             "short_straddle" | "shortstraddle" => SpreadType::ShortStraddle,
             "calendar_straddle" | "calendarstraddle" => SpreadType::CalendarStraddle,
-            "post_earnings_straddle" | "postearningstraddle" | "post_straddle" => SpreadType::PostEarningsStraddle,
+            "post_earnings_straddle" | "postearningstraddle" | "post_straddle" => {
+                SpreadType::PostEarningsStraddle
+            }
             _ => SpreadType::Calendar,
         }
     }
@@ -274,9 +280,9 @@ impl Default for BacktestConfig {
             max_entry_price: None, // No filtering by default
             post_earnings_holding_days: default_post_earnings_holding_days(),
             hedge_config: HedgeConfig::default(), // No hedging by default
-            attribution_config: None, // No attribution by default
+            attribution_config: None,             // No attribution by default
             trading_costs: TradingCostConfig::default(), // No costs by default (explicit opt-in)
-            rules: FileRulesConfig::default(), // No entry rules by default
+            rules: FileRulesConfig::default(),    // No entry rules by default
             return_basis: ReturnBasis::default(),
             margin: MarginConfig::default(),
         }
@@ -319,7 +325,7 @@ impl BacktestConfig {
     /// If new-style rules are defined in `[rules]` section, uses those.
     /// Otherwise, falls back to legacy filter fields for backward compatibility.
     pub fn build_rules_config(&self) -> cs_domain::RulesConfig {
-        use cs_domain::{RulesConfig, EventRule, MarketRule, TradeRule};
+        use cs_domain::{EventRule, MarketRule, RulesConfig, TradeRule};
 
         // Start with defaults (empty)
         let mut config = RulesConfig::default();
@@ -337,18 +343,18 @@ impl BacktestConfig {
                 }
             }
             if let Some(min_cap) = self.min_market_cap {
-                config.event.push(EventRule::MinMarketCap {
-                    threshold: min_cap,
-                });
+                config
+                    .event
+                    .push(EventRule::MinMarketCap { threshold: min_cap });
             }
         }
 
         // If no market rules from file, migrate legacy filters
         if config.market.is_empty() {
             if let Some(max_iv) = self.max_entry_iv {
-                config.market.push(MarketRule::MaxEntryIv {
-                    threshold: max_iv,
-                });
+                config
+                    .market
+                    .push(MarketRule::MaxEntryIv { threshold: max_iv });
             }
             if let Some(min_ratio) = self.selection.min_iv_ratio {
                 config.market.push(MarketRule::MinIvRatio {
@@ -386,26 +392,20 @@ impl BacktestConfig {
         use chrono::NaiveTime;
 
         // Helper to get entry/exit times from config
-        let entry_time = NaiveTime::from_hms_opt(
-            self.timing.entry_hour,
-            self.timing.entry_minute,
-            0,
-        )
-        .ok_or(TimingSpecError::InvalidTime {
-            field: "entry_time",
-            hour: self.timing.entry_hour,
-            minute: self.timing.entry_minute,
-        })?;
-        let exit_time = NaiveTime::from_hms_opt(
-            self.timing.exit_hour,
-            self.timing.exit_minute,
-            0,
-        )
-        .ok_or(TimingSpecError::InvalidTime {
-            field: "exit_time",
-            hour: self.timing.exit_hour,
-            minute: self.timing.exit_minute,
-        })?;
+        let entry_time =
+            NaiveTime::from_hms_opt(self.timing.entry_hour, self.timing.entry_minute, 0).ok_or(
+                TimingSpecError::InvalidTime {
+                    field: "entry_time",
+                    hour: self.timing.entry_hour,
+                    minute: self.timing.entry_minute,
+                },
+            )?;
+        let exit_time = NaiveTime::from_hms_opt(self.timing.exit_hour, self.timing.exit_minute, 0)
+            .ok_or(TimingSpecError::InvalidTime {
+                field: "exit_time",
+                hour: self.timing.exit_hour,
+                minute: self.timing.exit_minute,
+            })?;
 
         // 1. NEW PATH: Use generic timing_strategy if provided
         if let Some(strategy) = &self.timing_strategy {

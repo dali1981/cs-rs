@@ -1,6 +1,6 @@
 use chrono::NaiveDate;
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 /// Result of a rolling strategy (any trade type)
@@ -10,7 +10,7 @@ pub struct RollingResult {
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
     pub roll_policy: String,
-    pub trade_type: String,  // "straddle", "calendar_spread", etc.
+    pub trade_type: String, // "straddle", "calendar_spread", etc.
 
     // Individual roll periods
     pub rolls: Vec<RollPeriod>,
@@ -53,12 +53,8 @@ impl RollingResult {
         let num_rolls = rolls.len();
 
         let total_option_pnl: Decimal = rolls.iter().map(|r| r.pnl).sum();
-        let total_hedge_pnl: Decimal = rolls.iter()
-            .filter_map(|r| r.hedge_pnl)
-            .sum();
-        let total_transaction_cost: Decimal = rolls.iter()
-            .map(|r| r.transaction_cost)
-            .sum();
+        let total_hedge_pnl: Decimal = rolls.iter().filter_map(|r| r.hedge_pnl).sum();
+        let total_transaction_cost: Decimal = rolls.iter().map(|r| r.transaction_cost).sum();
         let total_pnl = total_option_pnl + total_hedge_pnl - total_transaction_cost;
 
         let winners = rolls.iter().filter(|r| r.pnl > Decimal::ZERO).count();
@@ -99,7 +95,8 @@ impl RollingResult {
         let volatility_summary = Self::compute_volatility_summary(&rolls);
 
         // Compute capital summary (Phase 2c)
-        let capital_summary = Self::compute_capital_summary(&rolls, total_pnl, start_date, end_date);
+        let capital_summary =
+            Self::compute_capital_summary(&rolls, total_pnl, start_date, end_date);
 
         // Compute attribution summary (Phase 3a)
         let attribution_summary = Self::compute_attribution_summary(&rolls);
@@ -127,7 +124,8 @@ impl RollingResult {
 
     /// Compute volatility summary from rolls
     fn compute_volatility_summary(rolls: &[RollPeriod]) -> Option<VolatilitySummary> {
-        let rolls_with_vol: Vec<_> = rolls.iter()
+        let rolls_with_vol: Vec<_> = rolls
+            .iter()
             .filter_map(|r| r.realized_vol_metrics.as_ref())
             .collect();
 
@@ -136,9 +134,7 @@ impl RollingResult {
         }
 
         let avg_entry_iv = {
-            let ivs: Vec<f64> = rolls_with_vol.iter()
-                .filter_map(|m| m.entry_iv)
-                .collect();
+            let ivs: Vec<f64> = rolls_with_vol.iter().filter_map(|m| m.entry_iv).collect();
             if ivs.is_empty() {
                 None
             } else {
@@ -147,9 +143,7 @@ impl RollingResult {
         };
 
         let avg_entry_hv = {
-            let hvs: Vec<f64> = rolls_with_vol.iter()
-                .filter_map(|m| m.entry_hv)
-                .collect();
+            let hvs: Vec<f64> = rolls_with_vol.iter().filter_map(|m| m.entry_hv).collect();
             if hvs.is_empty() {
                 None
             } else {
@@ -158,9 +152,7 @@ impl RollingResult {
         };
 
         let avg_realized_vol = {
-            let rvs: Vec<f64> = rolls_with_vol.iter()
-                .map(|m| m.realized_vol)
-                .collect();
+            let rvs: Vec<f64> = rolls_with_vol.iter().map(|m| m.realized_vol).collect();
             if rvs.is_empty() {
                 None
             } else {
@@ -169,7 +161,8 @@ impl RollingResult {
         };
 
         let avg_iv_premium = {
-            let prems: Vec<f64> = rolls_with_vol.iter()
+            let prems: Vec<f64> = rolls_with_vol
+                .iter()
                 .filter_map(|m| m.iv_premium_at_entry)
                 .collect();
             if prems.is_empty() {
@@ -180,7 +173,8 @@ impl RollingResult {
         };
 
         let avg_realized_vs_implied = {
-            let diffs: Vec<f64> = rolls_with_vol.iter()
+            let diffs: Vec<f64> = rolls_with_vol
+                .iter()
                 .filter_map(|m| m.realized_vs_implied)
                 .collect();
             if diffs.is_empty() {
@@ -216,7 +210,8 @@ impl RollingResult {
 
         // Issue C fix: Separate long option premium from short option margin
         // Long option premium = sum of positive entry_debits (cash outlay)
-        let long_option_premium: Decimal = rolls.iter()
+        let long_option_premium: Decimal = rolls
+            .iter()
             .map(|r| r.entry_debit)
             .filter(|d| *d > Decimal::ZERO)
             .sum();
@@ -224,26 +219,27 @@ impl RollingResult {
         // Short option margin = 3x the absolute credit received (conservative estimate)
         // This approximates typical broker margin requirements for short premium
         const SHORT_MARGIN_MULTIPLIER: i32 = 3;
-        let short_option_margin: Decimal = rolls.iter()
+        let short_option_margin: Decimal = rolls
+            .iter()
             .map(|r| r.entry_debit)
             .filter(|d| *d < Decimal::ZERO)
             .map(|d| d.abs() * Decimal::from(SHORT_MARGIN_MULTIPLIER))
             .sum();
 
         // Legacy field: net of all entry_debits (for backward compatibility)
-        let total_option_premium: Decimal = rolls.iter()
-            .map(|r| r.entry_debit)
-            .sum();
+        let total_option_premium: Decimal = rolls.iter().map(|r| r.entry_debit).sum();
 
         // Peak hedge capital across all rolls
-        let peak_hedge_capital: Decimal = rolls.iter()
+        let peak_hedge_capital: Decimal = rolls
+            .iter()
             .filter_map(|r| r.hedge_capital.as_ref())
             .map(|c| c.long_capital)
             .max()
             .unwrap_or(Decimal::ZERO);
 
         // Peak hedge margin across all rolls
-        let peak_hedge_margin: Decimal = rolls.iter()
+        let peak_hedge_margin: Decimal = rolls
+            .iter()
             .filter_map(|r| r.hedge_capital.as_ref())
             .map(|c| c.short_margin)
             .max()
@@ -259,9 +255,7 @@ impl RollingResult {
 
         // Return on capital
         let return_on_capital = if total_capital_required > Decimal::ZERO {
-            (total_pnl / total_capital_required)
-                .to_f64()
-                .unwrap_or(0.0) * 100.0
+            (total_pnl / total_capital_required).to_f64().unwrap_or(0.0) * 100.0
         } else {
             0.0
         };
@@ -289,7 +283,8 @@ impl RollingResult {
     /// Compute attribution summary from rolls (Phase 3b)
     fn compute_attribution_summary(rolls: &[RollPeriod]) -> Option<AttributionSummary> {
         // Collect all rolls with position attribution
-        let rolls_with_attr: Vec<_> = rolls.iter()
+        let rolls_with_attr: Vec<_> = rolls
+            .iter()
             .filter_map(|r| r.position_attribution.as_ref())
             .collect();
 
@@ -298,39 +293,30 @@ impl RollingResult {
         }
 
         // Sum up all the components
-        let total_gross_delta_pnl: Decimal = rolls_with_attr.iter()
+        let total_gross_delta_pnl: Decimal = rolls_with_attr
+            .iter()
             .map(|a| a.total_gross_delta_pnl)
             .sum();
 
-        let total_hedge_delta_pnl: Decimal = rolls_with_attr.iter()
+        let total_hedge_delta_pnl: Decimal = rolls_with_attr
+            .iter()
             .map(|a| a.total_hedge_delta_pnl)
             .sum();
 
-        let total_net_delta_pnl: Decimal = rolls_with_attr.iter()
-            .map(|a| a.total_net_delta_pnl)
-            .sum();
+        let total_net_delta_pnl: Decimal =
+            rolls_with_attr.iter().map(|a| a.total_net_delta_pnl).sum();
 
-        let total_gamma_pnl: Decimal = rolls_with_attr.iter()
-            .map(|a| a.total_gamma_pnl)
-            .sum();
+        let total_gamma_pnl: Decimal = rolls_with_attr.iter().map(|a| a.total_gamma_pnl).sum();
 
-        let total_theta_pnl: Decimal = rolls_with_attr.iter()
-            .map(|a| a.total_theta_pnl)
-            .sum();
+        let total_theta_pnl: Decimal = rolls_with_attr.iter().map(|a| a.total_theta_pnl).sum();
 
-        let total_vega_pnl: Decimal = rolls_with_attr.iter()
-            .map(|a| a.total_vega_pnl)
-            .sum();
+        let total_vega_pnl: Decimal = rolls_with_attr.iter().map(|a| a.total_vega_pnl).sum();
 
-        let total_unexplained: Decimal = rolls_with_attr.iter()
-            .map(|a| a.total_unexplained)
-            .sum();
+        let total_unexplained: Decimal = rolls_with_attr.iter().map(|a| a.total_unexplained).sum();
 
         // Average hedge efficiency
         let avg_hedge_efficiency = if !rolls_with_attr.is_empty() {
-            let sum: f64 = rolls_with_attr.iter()
-                .map(|a| a.hedge_efficiency)
-                .sum();
+            let sum: f64 = rolls_with_attr.iter().map(|a| a.hedge_efficiency).sum();
             sum / rolls_with_attr.len() as f64
         } else {
             0.0

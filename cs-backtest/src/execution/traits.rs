@@ -1,12 +1,12 @@
 //! Traits for generic trade execution
 
-use chrono::{DateTime, Utc};
-use cs_analytics::IVSurface;
-use cs_domain::{EarningsEvent, OptionBar, TradeResult, TradeType, ApplyCosts};
-use crate::spread_pricer::PricingError;
+use super::cost_helpers::ToTradingContext;
 use super::types::ExecutionError;
 use super::types::{ExecutionConfig, SimulationOutput};
-use super::cost_helpers::ToTradingContext;
+use crate::spread_pricer::PricingError;
+use chrono::{DateTime, Utc};
+use cs_analytics::IVSurface;
+use cs_domain::{ApplyCosts, EarningsEvent, OptionBar, TradeResult, TradeType};
 
 /// Generic pricing interface for trade pricers
 ///

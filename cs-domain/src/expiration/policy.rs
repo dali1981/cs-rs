@@ -1,7 +1,7 @@
-use chrono::NaiveDate;
-use serde::{Deserialize, Serialize};
 use super::ExpirationCycle;
 use crate::strike_selection::SelectionError;
+use chrono::NaiveDate;
+use serde::{Deserialize, Serialize};
 
 /// Policy for selecting option expirations
 ///
@@ -80,7 +80,10 @@ impl ExpirationPolicy {
 
     /// Create a policy that prefers monthly expirations
     pub fn prefer_monthly(min_date: NaiveDate, months_out: u8) -> Self {
-        Self::PreferMonthly { min_date, months_out }
+        Self::PreferMonthly {
+            min_date,
+            months_out,
+        }
     }
 
     /// Create a policy targeting a specific DTE
@@ -102,15 +105,18 @@ impl ExpirationPolicy {
         sorted.sort();
 
         match self {
-            Self::FirstAfter { min_date } => {
-                sorted.into_iter()
-                    .find(|&exp| exp > *min_date)
-                    .ok_or(SelectionError::NoExpirations)
-            }
+            Self::FirstAfter { min_date } => sorted
+                .into_iter()
+                .find(|&exp| exp > *min_date)
+                .ok_or(SelectionError::NoExpirations),
 
-            Self::PreferWeekly { min_date, fallback_to_monthly } => {
+            Self::PreferWeekly {
+                min_date,
+                fallback_to_monthly,
+            } => {
                 // First, try to find a weekly after min_date
-                let weekly = sorted.iter()
+                let weekly = sorted
+                    .iter()
                     .filter(|&&exp| exp > *min_date)
                     .find(|&&exp| ExpirationCycle::classify(exp).is_weekly())
                     .copied();
@@ -121,7 +127,8 @@ impl ExpirationPolicy {
 
                 // No weekly found - fallback?
                 if *fallback_to_monthly {
-                    sorted.into_iter()
+                    sorted
+                        .into_iter()
                         .find(|&exp| exp > *min_date)
                         .ok_or(SelectionError::NoExpirations)
                 } else {
@@ -129,29 +136,37 @@ impl ExpirationPolicy {
                 }
             }
 
-            Self::PreferMonthly { min_date, months_out } => {
-                let monthlies: Vec<NaiveDate> = sorted.into_iter()
+            Self::PreferMonthly {
+                min_date,
+                months_out,
+            } => {
+                let monthlies: Vec<NaiveDate> = sorted
+                    .into_iter()
                     .filter(|&exp| exp > *min_date)
                     .filter(|&exp| ExpirationCycle::classify(exp).is_monthly_or_longer())
                     .collect();
 
-                monthlies.get(*months_out as usize)
+                monthlies
+                    .get(*months_out as usize)
                     .copied()
                     .ok_or(SelectionError::NoExpirations)
             }
 
-            Self::TargetDte { target_dte, tolerance, entry_date } => {
-                sorted.into_iter()
-                    .filter(|&exp| {
-                        let dte = (exp - *entry_date).num_days() as i32;
-                        dte > 0 && (dte - target_dte).abs() <= *tolerance
-                    })
-                    .min_by_key(|&exp| {
-                        let dte = (exp - *entry_date).num_days() as i32;
-                        (dte - target_dte).abs()
-                    })
-                    .ok_or(SelectionError::NoExpirations)
-            }
+            Self::TargetDte {
+                target_dte,
+                tolerance,
+                entry_date,
+            } => sorted
+                .into_iter()
+                .filter(|&exp| {
+                    let dte = (exp - *entry_date).num_days() as i32;
+                    dte > 0 && (dte - target_dte).abs() <= *tolerance
+                })
+                .min_by_key(|&exp| {
+                    let dte = (exp - *entry_date).num_days() as i32;
+                    (dte - target_dte).abs()
+                })
+                .ok_or(SelectionError::NoExpirations),
 
             Self::Calendar { short, long: _ } => {
                 // For Calendar policy, select() returns the short leg
@@ -171,7 +186,8 @@ impl ExpirationPolicy {
                 let short_exp = short.select(expirations)?;
 
                 // For long leg, filter out short expiration and earlier
-                let long_candidates: Vec<NaiveDate> = expirations.iter()
+                let long_candidates: Vec<NaiveDate> = expirations
+                    .iter()
                     .filter(|&&exp| exp > short_exp)
                     .copied()
                     .collect();
@@ -191,13 +207,29 @@ impl ExpirationPolicy {
     /// Update the min_date constraint (useful for building policies dynamically)
     pub fn with_min_date(self, new_min_date: NaiveDate) -> Self {
         match self {
-            Self::FirstAfter { .. } => Self::FirstAfter { min_date: new_min_date },
-            Self::PreferWeekly { fallback_to_monthly, .. } =>
-                Self::PreferWeekly { min_date: new_min_date, fallback_to_monthly },
-            Self::PreferMonthly { months_out, .. } =>
-                Self::PreferMonthly { min_date: new_min_date, months_out },
-            Self::TargetDte { target_dte, tolerance, .. } =>
-                Self::TargetDte { target_dte, tolerance, entry_date: new_min_date },
+            Self::FirstAfter { .. } => Self::FirstAfter {
+                min_date: new_min_date,
+            },
+            Self::PreferWeekly {
+                fallback_to_monthly,
+                ..
+            } => Self::PreferWeekly {
+                min_date: new_min_date,
+                fallback_to_monthly,
+            },
+            Self::PreferMonthly { months_out, .. } => Self::PreferMonthly {
+                min_date: new_min_date,
+                months_out,
+            },
+            Self::TargetDte {
+                target_dte,
+                tolerance,
+                ..
+            } => Self::TargetDte {
+                target_dte,
+                tolerance,
+                entry_date: new_min_date,
+            },
             Self::Calendar { short, long } => Self::Calendar {
                 short: Box::new(short.with_min_date(new_min_date)),
                 long: Box::new(long.with_min_date(new_min_date)),
@@ -212,9 +244,9 @@ mod tests {
 
     fn sample_expirations() -> Vec<NaiveDate> {
         vec![
-            NaiveDate::from_ymd_opt(2025, 9, 12).unwrap(),  // Weekly
-            NaiveDate::from_ymd_opt(2025, 9, 19).unwrap(),  // Monthly (3rd Fri)
-            NaiveDate::from_ymd_opt(2025, 9, 26).unwrap(),  // Weekly
+            NaiveDate::from_ymd_opt(2025, 9, 12).unwrap(), // Weekly
+            NaiveDate::from_ymd_opt(2025, 9, 19).unwrap(), // Monthly (3rd Fri)
+            NaiveDate::from_ymd_opt(2025, 9, 26).unwrap(), // Weekly
             NaiveDate::from_ymd_opt(2025, 10, 17).unwrap(), // Monthly
             NaiveDate::from_ymd_opt(2025, 10, 24).unwrap(), // Weekly
         ]

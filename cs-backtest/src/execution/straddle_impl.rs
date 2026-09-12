@@ -1,15 +1,15 @@
 //! ExecutableTrade implementation for LongStraddle and ShortStraddle
 
-use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
-use cs_domain::{
-    LongStraddle, ShortStraddle, StraddleResult, StraddleDirection, PricingSource,
-    CONTRACT_MULTIPLIER, EarningsEvent,
-};
-use crate::composite_pricer::{CompositePricer, ShortStraddlePricer, CompositePricing};
-use super::types::ExecutionError;
 use super::traits::ExecutableTrade;
+use super::types::ExecutionError;
 use super::types::{ExecutionConfig, SimulationOutput};
+use crate::composite_pricer::{CompositePricer, CompositePricing, ShortStraddlePricer};
+use cs_domain::{
+    EarningsEvent, LongStraddle, PricingSource, ShortStraddle, StraddleDirection, StraddleResult,
+    CONTRACT_MULTIPLIER,
+};
+use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 
 impl ExecutableTrade for LongStraddle {
     type Pricer = CompositePricer;
@@ -67,7 +67,8 @@ impl ExecutableTrade for LongStraddle {
         let pnl_per_share = exit_pricing.net_cost - entry_pricing.net_cost;
         let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
         let pnl_pct = if entry_pricing.net_cost.abs() > Decimal::ZERO {
-            (pnl / (entry_pricing.net_cost.abs() * Decimal::from(CONTRACT_MULTIPLIER))) * Decimal::from(100)
+            (pnl / (entry_pricing.net_cost.abs() * Decimal::from(CONTRACT_MULTIPLIER)))
+                * Decimal::from(100)
         } else {
             Decimal::ZERO
         };
@@ -79,8 +80,16 @@ impl ExecutableTrade for LongStraddle {
         let net_vega = Some(entry_pricing.net_vega * CONTRACT_MULTIPLIER as f64);
 
         // IV
-        let iv_entry = if entry_pricing.avg_iv > 0.0 { Some(entry_pricing.avg_iv) } else { None };
-        let iv_exit = if exit_pricing.avg_iv > 0.0 { Some(exit_pricing.avg_iv) } else { None };
+        let iv_entry = if entry_pricing.avg_iv > 0.0 {
+            Some(entry_pricing.avg_iv)
+        } else {
+            None
+        };
+        let iv_exit = if exit_pricing.avg_iv > 0.0 {
+            Some(exit_pricing.avg_iv)
+        } else {
+            None
+        };
         let iv_change = match (iv_entry, iv_exit) {
             (Some(entry), Some(exit)) => Some(((exit - entry) / entry) * 100.0),
             _ => None,
@@ -155,7 +164,7 @@ impl ExecutableTrade for LongStraddle {
             hedge_pnl: None,
             total_pnl_with_hedge: None,
             position_attribution: None,
-            cost_summary: None,  // Costs applied separately via ApplyCosts trait
+            cost_summary: None, // Costs applied separately via ApplyCosts trait
             bpr_timeline: None,
             direction: Some(StraddleDirection::Long),
         }
@@ -276,7 +285,8 @@ impl ExecutableTrade for ShortStraddle {
         let pnl_per_share = exit_pricing.net_cost - entry_pricing.net_cost;
         let pnl = pnl_per_share * Decimal::from(CONTRACT_MULTIPLIER);
         let pnl_pct = if entry_pricing.net_cost.abs() > Decimal::ZERO {
-            (pnl / (entry_pricing.net_cost.abs() * Decimal::from(CONTRACT_MULTIPLIER))) * Decimal::from(100)
+            (pnl / (entry_pricing.net_cost.abs() * Decimal::from(CONTRACT_MULTIPLIER)))
+                * Decimal::from(100)
         } else {
             Decimal::ZERO
         };
@@ -288,8 +298,16 @@ impl ExecutableTrade for ShortStraddle {
         let net_vega = Some(entry_pricing.net_vega * CONTRACT_MULTIPLIER as f64);
 
         // IV
-        let iv_entry = if entry_pricing.avg_iv > 0.0 { Some(entry_pricing.avg_iv) } else { None };
-        let iv_exit = if exit_pricing.avg_iv > 0.0 { Some(exit_pricing.avg_iv) } else { None };
+        let iv_entry = if entry_pricing.avg_iv > 0.0 {
+            Some(entry_pricing.avg_iv)
+        } else {
+            None
+        };
+        let iv_exit = if exit_pricing.avg_iv > 0.0 {
+            Some(exit_pricing.avg_iv)
+        } else {
+            None
+        };
         let iv_change = match (iv_entry, iv_exit) {
             (Some(entry), Some(exit)) => Some(((exit - entry) / entry) * 100.0),
             _ => None,
@@ -452,7 +470,9 @@ fn calculate_pnl_attribution(
     let mut theta_sum = 0.0;
     let mut vega_sum = 0.0;
 
-    for ((entry_leg, position), (exit_leg, _)) in entry_pricing.legs.iter().zip(exit_pricing.legs.iter()) {
+    for ((entry_leg, position), (exit_leg, _)) in
+        entry_pricing.legs.iter().zip(exit_pricing.legs.iter())
+    {
         let sign = position.sign();
         let leg_pnl = cs_analytics::calculate_option_leg_pnl(
             entry_leg.greeks.as_ref(),

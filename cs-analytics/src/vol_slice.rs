@@ -64,7 +64,7 @@ impl VolSlice {
     ///
     /// Converts strike-space quotes to delta-space by computing Black-Scholes delta.
     pub fn from_points(
-        points: &[(f64, f64)],  // (strike, iv) pairs
+        points: &[(f64, f64)], // (strike, iv) pairs
         spot: f64,
         tte: f64,
         risk_free_rate: f64,
@@ -152,7 +152,8 @@ impl VolSlice {
         }
 
         // Convert (delta, iv) to (log_moneyness, total_variance)
-        let data: Vec<(f64, f64)> = self.smile
+        let data: Vec<(f64, f64)> = self
+            .smile
             .iter()
             .filter_map(|&(delta, iv)| {
                 // Get strike from delta
@@ -245,8 +246,8 @@ impl VolSlice {
                 let weight = (target_delta - d1) / (d2 - d1);
                 Some(iv1 + weight * (iv2 - iv1))
             }
-            (Some((_, iv)), None) => Some(iv),  // Extrapolate flat (use highest delta point)
-            (None, Some((_, iv))) => Some(iv),  // Extrapolate flat (use lowest delta point)
+            (Some((_, iv)), None) => Some(iv), // Extrapolate flat (use highest delta point)
+            (None, Some((_, iv))) => Some(iv), // Extrapolate flat (use lowest delta point)
             (None, None) => None,
         }
     }
@@ -281,14 +282,7 @@ impl VolSlice {
     /// The strike price corresponding to this delta, or None if IV unavailable
     pub fn delta_to_strike(&self, delta: f64, is_call: bool) -> Option<f64> {
         let iv = self.get_iv(delta)?;
-        delta_to_strike_with_iv(
-            delta,
-            iv,
-            self.spot,
-            self.tte,
-            self.risk_free_rate,
-            is_call,
-        )
+        delta_to_strike_with_iv(delta, iv, self.spot, self.tte, self.risk_free_rate, is_call)
     }
 
     /// Get IV at a specific strike (reverse lookup from delta-space)
@@ -319,7 +313,7 @@ impl VolSlice {
                     self.spot,
                     self.tte,
                     self.risk_free_rate,
-                    true,  // Use call delta consistently
+                    true, // Use call delta consistently
                 )?;
                 Some((strike, iv))
             })
@@ -352,8 +346,8 @@ impl VolSlice {
                 let weight = (target_strike - k1) / (k2 - k1);
                 Some(iv1 + weight * (iv2 - iv1))
             }
-            (Some((_, iv)), None) => Some(iv),  // Extrapolate flat (use highest strike)
-            (None, Some((_, iv))) => Some(iv),  // Extrapolate flat (use lowest strike)
+            (Some((_, iv)), None) => Some(iv), // Extrapolate flat (use highest strike)
+            (None, Some((_, iv))) => Some(iv), // Extrapolate flat (use lowest strike)
             (None, None) => None,
         }
     }
@@ -410,11 +404,11 @@ mod tests {
 
         // Typical smile: higher IV for OTM puts (low delta), lower for ATM
         let points = vec![
-            (90.0, 0.35),   // OTM put → low call delta
-            (95.0, 0.30),   // Slightly OTM put
-            (100.0, 0.25),  // ATM
-            (105.0, 0.28),  // Slightly OTM call
-            (110.0, 0.32),  // OTM call → high call delta
+            (90.0, 0.35),  // OTM put → low call delta
+            (95.0, 0.30),  // Slightly OTM put
+            (100.0, 0.25), // ATM
+            (105.0, 0.28), // Slightly OTM call
+            (110.0, 0.32), // OTM call → high call delta
         ];
 
         VolSlice::from_points(&points, spot, tte, rfr, expiration)
@@ -430,7 +424,10 @@ mod tests {
         // Points should be sorted by delta
         let points = slice.smile_points();
         for i in 1..points.len() {
-            assert!(points[i].0 >= points[i-1].0, "Smile should be sorted by delta");
+            assert!(
+                points[i].0 >= points[i - 1].0,
+                "Smile should be sorted by delta"
+            );
         }
     }
 
@@ -455,10 +452,7 @@ mod tests {
         let expiration = NaiveDate::from_ymd_opt(2025, 7, 20).unwrap();
 
         // Create simple two-point smile for predictable interpolation
-        let pairs = vec![
-            (0.25, 0.30),
-            (0.75, 0.20),
-        ];
+        let pairs = vec![(0.25, 0.30), (0.75, 0.20)];
         let slice = VolSlice::from_delta_iv_pairs(pairs, spot, tte, rfr, expiration);
 
         // Interpolate at midpoint
@@ -474,10 +468,7 @@ mod tests {
         let rfr = 0.05;
         let expiration = NaiveDate::from_ymd_opt(2025, 7, 20).unwrap();
 
-        let pairs = vec![
-            (0.25, 0.30),
-            (0.75, 0.20),
-        ];
+        let pairs = vec![(0.25, 0.30), (0.75, 0.20)];
         let slice = VolSlice::from_delta_iv_pairs(pairs, spot, tte, rfr, expiration);
 
         // Below range: should extrapolate flat using lowest point
@@ -524,7 +515,12 @@ mod tests {
 
         let strike = strike.unwrap();
         // For 50 delta, strike should be close to spot (slightly adjusted for drift)
-        assert!((strike - spot).abs() < 5.0, "50 delta strike {} should be near spot {}", strike, spot);
+        assert!(
+            (strike - spot).abs() < 5.0,
+            "50 delta strike {} should be near spot {}",
+            strike,
+            spot
+        );
     }
 
     #[test]
@@ -567,7 +563,12 @@ mod tests {
         let strike = strike.unwrap();
 
         // Put strike should be below spot for OTM put
-        assert!(strike < spot, "OTM put strike {} should be below spot {}", strike, spot);
+        assert!(
+            strike < spot,
+            "OTM put strike {} should be below spot {}",
+            strike,
+            spot
+        );
 
         // Verify by computing delta of resulting strike
         let computed_delta = bs_delta(spot, strike, tte, iv, false, rfr);
@@ -583,9 +584,9 @@ mod tests {
 
         // Create smile with known delta-IV pairs
         let pairs = vec![
-            (0.25, 0.35),  // Low delta (OTM put) → high IV
-            (0.50, 0.25),  // ATM → medium IV
-            (0.75, 0.30),  // High delta (ITM call) → slightly higher IV
+            (0.25, 0.35), // Low delta (OTM put) → high IV
+            (0.50, 0.25), // ATM → medium IV
+            (0.75, 0.30), // High delta (ITM call) → slightly higher IV
         ];
         let slice = VolSlice::from_delta_iv_pairs(pairs, spot, tte, rfr, expiration);
 
@@ -606,10 +607,7 @@ mod tests {
         let expiration = NaiveDate::from_ymd_opt(2025, 7, 20).unwrap();
 
         // Create smile with known delta-IV pairs
-        let pairs = vec![
-            (0.25, 0.35),
-            (0.75, 0.25),
-        ];
+        let pairs = vec![(0.25, 0.35), (0.75, 0.25)];
         let slice = VolSlice::from_delta_iv_pairs(pairs, spot, tte, rfr, expiration);
 
         // Get strikes for the delta points
@@ -623,7 +621,11 @@ mod tests {
 
         // Should be between 0.25 and 0.35
         let iv = iv_at_mid.unwrap();
-        assert!(iv >= 0.24 && iv <= 0.36, "IV {} should be in range [0.24, 0.36]", iv);
+        assert!(
+            iv >= 0.24 && iv <= 0.36,
+            "IV {} should be in range [0.24, 0.36]",
+            iv
+        );
     }
 
     #[test]
@@ -634,14 +636,14 @@ mod tests {
         let expiration = NaiveDate::from_ymd_opt(2025, 7, 20).unwrap();
 
         let pairs = vec![
-            (0.40, 0.30),  // Lower delta (OTM call) → higher strike
-            (0.60, 0.25),  // Higher delta (ITM call) → lower strike
+            (0.40, 0.30), // Lower delta (OTM call) → higher strike
+            (0.60, 0.25), // Higher delta (ITM call) → lower strike
         ];
         let slice = VolSlice::from_delta_iv_pairs(pairs, spot, tte, rfr, expiration);
 
         // Get strike range
-        let strike_40d = slice.delta_to_strike(0.40, true).unwrap();  // Higher strike
-        let strike_60d = slice.delta_to_strike(0.60, true).unwrap();  // Lower strike
+        let strike_40d = slice.delta_to_strike(0.40, true).unwrap(); // Higher strike
+        let strike_60d = slice.delta_to_strike(0.60, true).unwrap(); // Lower strike
 
         // Note: For calls, delta 0.60 gives LOWER strike than delta 0.40
         let min_strike = strike_60d.min(strike_40d);

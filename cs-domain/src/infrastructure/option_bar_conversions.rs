@@ -3,7 +3,6 @@
 /// These functions live in the infrastructure layer and are intentionally not public.
 /// They handle the impedance mismatch between storage formats (DataFrames, provider DTOs)
 /// and the domain types exposed by repository traits.
-
 use polars::prelude::*;
 
 use crate::datetime::{TradingDate, TradingTimestamp};
@@ -62,7 +61,11 @@ pub(crate) fn dataframe_to_option_bars(df: &DataFrame) -> Result<Vec<OptionBar>,
         .unwrap_or(false);
 
     let to_datetime = |ts_raw: i64| -> chrono::DateTime<chrono::Utc> {
-        let nanos = if ts_is_nanos { ts_raw } else { ts_raw * 1_000_000 };
+        let nanos = if ts_is_nanos {
+            ts_raw
+        } else {
+            ts_raw * 1_000_000
+        };
         TradingTimestamp::from_nanos(nanos).to_datetime_utc()
     };
 
@@ -136,7 +139,11 @@ pub(crate) fn dataframe_to_equity_bars(df: &DataFrame) -> Result<Vec<EquityBar>,
         .unwrap_or(false);
 
     let to_datetime = |ts_raw: i64| -> chrono::DateTime<chrono::Utc> {
-        let nanos = if ts_is_nanos { ts_raw } else { ts_raw * 1_000_000 };
+        let nanos = if ts_is_nanos {
+            ts_raw
+        } else {
+            ts_raw * 1_000_000
+        };
         TradingTimestamp::from_nanos(nanos).to_datetime_utc()
     };
 

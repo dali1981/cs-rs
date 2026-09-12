@@ -3,12 +3,12 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use std::sync::Arc;
 
-use cs_domain::{
-    EquityDataRepository, OptionsDataRepository,
-    SpotPrice, LongStraddle, CalendarSpread, IronButterfly, TradeFactory, TradeFactoryError,
-};
-use cs_domain::strike_selection::ExpirationCriteria;
 use crate::strike_selection::{ATMStrategy, StrikeSelector};
+use cs_domain::strike_selection::ExpirationCriteria;
+use cs_domain::{
+    CalendarSpread, EquityDataRepository, IronButterfly, LongStraddle, OptionsDataRepository,
+    SpotPrice, TradeFactory, TradeFactoryError,
+};
 use finq_core::OptionType;
 
 /// Default implementation of TradeFactory using ATM selection strategy
@@ -52,10 +52,13 @@ impl TradeFactory for DefaultTradeFactory {
         min_expiration: NaiveDate,
     ) -> Result<LongStraddle, TradeFactoryError> {
         // 1. Query option chain from repository
-        let chain = self.options_repo
+        let chain = self
+            .options_repo
             .get_option_bars_at_time(symbol, as_of)
             .await
-            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+            .map_err(|e| {
+                TradeFactoryError::DataError(format!("Failed to get option chain: {}", e))
+            })?;
 
         // 2. Build IV surface from option chain data
         // This extracts available strikes and expirations from real market data
@@ -66,7 +69,9 @@ impl TradeFactory for DefaultTradeFactory {
             symbol,
         )
         .await
-        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+        .ok_or_else(|| {
+            TradeFactoryError::SelectionError("Failed to build IV surface".to_string())
+        })?;
 
         // 3. Use strike selector to find ATM straddle with real expiration
         // The selector will:
@@ -81,7 +86,9 @@ impl TradeFactory for DefaultTradeFactory {
 
         self.selector
             .select_long_straddle(&spot_price, &surface, min_expiration)
-            .map_err(|e| TradeFactoryError::SelectionError(format!("Strike selection failed: {}", e)))
+            .map_err(|e| {
+                TradeFactoryError::SelectionError(format!("Strike selection failed: {}", e))
+            })
     }
 
     async fn create_calendar_spread(
@@ -94,10 +101,13 @@ impl TradeFactory for DefaultTradeFactory {
         option_type: OptionType,
     ) -> Result<CalendarSpread, TradeFactoryError> {
         // 1. Get option chain
-        let chain = self.options_repo
+        let chain = self
+            .options_repo
             .get_option_bars_at_time(symbol, as_of)
             .await
-            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+            .map_err(|e| {
+                TradeFactoryError::DataError(format!("Failed to get option chain: {}", e))
+            })?;
 
         // 2. Build IV surface
         let surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
@@ -106,7 +116,9 @@ impl TradeFactory for DefaultTradeFactory {
             symbol,
         )
         .await
-        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+        .ok_or_else(|| {
+            TradeFactoryError::SelectionError("Failed to build IV surface".to_string())
+        })?;
 
         // 3. Extract spot price
         let spot_price = SpotPrice::new(
@@ -125,13 +137,13 @@ impl TradeFactory for DefaultTradeFactory {
 
         // 5. Use selector to build calendar spread
         self.selector
-            .select_calendar_spread(
-                &spot_price,
-                &surface,
-                option_type,
-                &criteria,
-            )
-            .map_err(|e| TradeFactoryError::SelectionError(format!("Calendar spread selection failed: {}", e)))
+            .select_calendar_spread(&spot_price, &surface, option_type, &criteria)
+            .map_err(|e| {
+                TradeFactoryError::SelectionError(format!(
+                    "Calendar spread selection failed: {}",
+                    e
+                ))
+            })
     }
 
     async fn create_iron_butterfly(
@@ -142,10 +154,13 @@ impl TradeFactory for DefaultTradeFactory {
         wing_width: Decimal,
     ) -> Result<IronButterfly, TradeFactoryError> {
         // 1. Get option chain
-        let chain = self.options_repo
+        let chain = self
+            .options_repo
             .get_option_bars_at_time(symbol, as_of)
             .await
-            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+            .map_err(|e| {
+                TradeFactoryError::DataError(format!("Failed to get option chain: {}", e))
+            })?;
 
         // 2. Build IV surface
         let surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
@@ -154,7 +169,9 @@ impl TradeFactory for DefaultTradeFactory {
             symbol,
         )
         .await
-        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+        .ok_or_else(|| {
+            TradeFactoryError::SelectionError("Failed to build IV surface".to_string())
+        })?;
 
         // 3. Extract spot price
         let spot_price = SpotPrice::new(
@@ -174,7 +191,9 @@ impl TradeFactory for DefaultTradeFactory {
         // 5. Use selector to build iron butterfly
         self.selector
             .select_iron_butterfly(&spot_price, &surface, wing_width, min_dte, max_dte)
-            .map_err(|e| TradeFactoryError::SelectionError(format!("Iron butterfly selection failed: {}", e)))
+            .map_err(|e| {
+                TradeFactoryError::SelectionError(format!("Iron butterfly selection failed: {}", e))
+            })
     }
 
     async fn create_iron_butterfly_advanced(
@@ -186,10 +205,13 @@ impl TradeFactory for DefaultTradeFactory {
         direction: cs_domain::value_objects::TradeDirection,
     ) -> Result<IronButterfly, TradeFactoryError> {
         // 1. Get option chain
-        let chain = self.options_repo
+        let chain = self
+            .options_repo
             .get_option_bars_at_time(symbol, as_of)
             .await
-            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+            .map_err(|e| {
+                TradeFactoryError::DataError(format!("Failed to get option chain: {}", e))
+            })?;
 
         // 2. Build IV surface
         let surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
@@ -198,7 +220,9 @@ impl TradeFactory for DefaultTradeFactory {
             symbol,
         )
         .await
-        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+        .ok_or_else(|| {
+            TradeFactoryError::SelectionError("Failed to build IV surface".to_string())
+        })?;
 
         // 3. Extract spot price
         let spot_price = SpotPrice::new(
@@ -214,8 +238,20 @@ impl TradeFactory for DefaultTradeFactory {
 
         // 5. Use selector to build advanced iron butterfly
         self.selector
-            .select_iron_butterfly_with_config(&spot_price, &surface, config, direction, min_dte, max_dte)
-            .map_err(|e| TradeFactoryError::SelectionError(format!("Advanced iron butterfly selection failed: {}", e)))
+            .select_iron_butterfly_with_config(
+                &spot_price,
+                &surface,
+                config,
+                direction,
+                min_dte,
+                max_dte,
+            )
+            .map_err(|e| {
+                TradeFactoryError::SelectionError(format!(
+                    "Advanced iron butterfly selection failed: {}",
+                    e
+                ))
+            })
     }
 
     async fn available_expirations(
@@ -224,10 +260,13 @@ impl TradeFactory for DefaultTradeFactory {
         as_of: DateTime<Utc>,
     ) -> Result<Vec<NaiveDate>, TradeFactoryError> {
         // Query option chain
-        let chain = self.options_repo
+        let chain = self
+            .options_repo
             .get_option_bars_at_time(symbol, as_of)
             .await
-            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+            .map_err(|e| {
+                TradeFactoryError::DataError(format!("Failed to get option chain: {}", e))
+            })?;
 
         // Build IV surface to extract available expirations
         // The build function queries equity repo internally for spot price
@@ -237,7 +276,9 @@ impl TradeFactory for DefaultTradeFactory {
             symbol,
         )
         .await
-        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+        .ok_or_else(|| {
+            TradeFactoryError::SelectionError("Failed to build IV surface".to_string())
+        })?;
 
         // Return sorted list of expirations from the IV surface
         Ok(surface.expirations())
@@ -251,10 +292,13 @@ impl TradeFactory for DefaultTradeFactory {
         config: &cs_domain::value_objects::MultiLegStrategyConfig,
     ) -> Result<cs_domain::entities::Strangle, TradeFactoryError> {
         // 1. Get option chain
-        let chain = self.options_repo
+        let chain = self
+            .options_repo
             .get_option_bars_at_time(symbol, as_of)
             .await
-            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+            .map_err(|e| {
+                TradeFactoryError::DataError(format!("Failed to get option chain: {}", e))
+            })?;
 
         // 2. Build IV surface
         let surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
@@ -263,7 +307,9 @@ impl TradeFactory for DefaultTradeFactory {
             symbol,
         )
         .await
-        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+        .ok_or_else(|| {
+            TradeFactoryError::SelectionError("Failed to build IV surface".to_string())
+        })?;
 
         // 3. Extract spot price
         let spot_price = SpotPrice::new(
@@ -278,14 +324,21 @@ impl TradeFactory for DefaultTradeFactory {
         let max_dte = min_dte + 15;
 
         // 5. Use selector to build strangle
-        let selection = self.selector.select_multi_leg(&spot_price, &surface, config, min_dte, max_dte)
-            .map_err(|e| TradeFactoryError::SelectionError(format!("Strangle selection failed: {}", e)))?;
+        let selection = self
+            .selector
+            .select_multi_leg(&spot_price, &surface, config, min_dte, max_dte)
+            .map_err(|e| {
+                TradeFactoryError::SelectionError(format!("Strangle selection failed: {}", e))
+            })?;
 
         // 6. Extract strikes
-        let far_strikes = selection.far_strikes.ok_or_else(||
-            TradeFactoryError::SelectionError("No far strikes available for strangle".to_string()))?;
+        let far_strikes = selection.far_strikes.ok_or_else(|| {
+            TradeFactoryError::SelectionError("No far strikes available for strangle".to_string())
+        })?;
         if far_strikes.len() < 2 {
-            return Err(TradeFactoryError::SelectionError("Strangle requires 2 wing strikes".to_string()));
+            return Err(TradeFactoryError::SelectionError(
+                "Strangle requires 2 wing strikes".to_string(),
+            ));
         }
 
         let put_strike = far_strikes[0];
@@ -308,8 +361,9 @@ impl TradeFactory for DefaultTradeFactory {
 
         // 8. Construct and validate strangle
         // Note: Direction is handled at the trade execution level (which legs are bought vs sold)
-        cs_domain::entities::Strangle::new(call_leg, put_leg)
-            .map_err(|e| TradeFactoryError::SelectionError(format!("Strangle construction failed: {}", e)))
+        cs_domain::entities::Strangle::new(call_leg, put_leg).map_err(|e| {
+            TradeFactoryError::SelectionError(format!("Strangle construction failed: {}", e))
+        })
     }
 
     async fn create_butterfly(
@@ -320,10 +374,13 @@ impl TradeFactory for DefaultTradeFactory {
         config: &cs_domain::value_objects::MultiLegStrategyConfig,
     ) -> Result<cs_domain::entities::Butterfly, TradeFactoryError> {
         // 1. Get option chain
-        let chain = self.options_repo
+        let chain = self
+            .options_repo
             .get_option_bars_at_time(symbol, as_of)
             .await
-            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+            .map_err(|e| {
+                TradeFactoryError::DataError(format!("Failed to get option chain: {}", e))
+            })?;
 
         // 2. Build IV surface
         let surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
@@ -332,7 +389,9 @@ impl TradeFactory for DefaultTradeFactory {
             symbol,
         )
         .await
-        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+        .ok_or_else(|| {
+            TradeFactoryError::SelectionError("Failed to build IV surface".to_string())
+        })?;
 
         // 3. Extract spot price
         let spot_price = SpotPrice::new(
@@ -347,21 +406,30 @@ impl TradeFactory for DefaultTradeFactory {
         let max_dte = min_dte + 15;
 
         // 5. Use selector to build butterfly (2x ATM + wings)
-        let selection = self.selector.select_multi_leg(&spot_price, &surface, config, min_dte, max_dte)
-            .map_err(|e| TradeFactoryError::SelectionError(format!("Butterfly selection failed: {}", e)))?;
+        let selection = self
+            .selector
+            .select_multi_leg(&spot_price, &surface, config, min_dte, max_dte)
+            .map_err(|e| {
+                TradeFactoryError::SelectionError(format!("Butterfly selection failed: {}", e))
+            })?;
 
         // 6. Extract center strikes (should be 2 for butterfly)
         if selection.center_strikes.len() < 2 {
-            return Err(TradeFactoryError::SelectionError("Butterfly requires 2 center strikes".to_string()));
+            return Err(TradeFactoryError::SelectionError(
+                "Butterfly requires 2 center strikes".to_string(),
+            ));
         }
 
         let center_strike = selection.center_strikes[0];
 
         // 7. Extract wing strikes
-        let far_strikes = selection.far_strikes.ok_or_else(||
-            TradeFactoryError::SelectionError("No far strikes available for butterfly".to_string()))?;
+        let far_strikes = selection.far_strikes.ok_or_else(|| {
+            TradeFactoryError::SelectionError("No far strikes available for butterfly".to_string())
+        })?;
         if far_strikes.len() < 2 {
-            return Err(TradeFactoryError::SelectionError("Butterfly requires 2 wing strikes".to_string()));
+            return Err(TradeFactoryError::SelectionError(
+                "Butterfly requires 2 wing strikes".to_string(),
+            ));
         }
 
         let lower_wing_strike = far_strikes[0];
@@ -398,7 +466,9 @@ impl TradeFactory for DefaultTradeFactory {
 
         // 9. Construct and validate butterfly
         cs_domain::entities::Butterfly::new(short_call, short_put, long_upper_call, long_lower_put)
-            .map_err(|e| TradeFactoryError::SelectionError(format!("Butterfly construction failed: {}", e)))
+            .map_err(|e| {
+                TradeFactoryError::SelectionError(format!("Butterfly construction failed: {}", e))
+            })
     }
 
     async fn create_condor(
@@ -409,10 +479,13 @@ impl TradeFactory for DefaultTradeFactory {
         config: &cs_domain::value_objects::MultiLegStrategyConfig,
     ) -> Result<cs_domain::entities::Condor, TradeFactoryError> {
         // 1. Get option chain
-        let chain = self.options_repo
+        let chain = self
+            .options_repo
             .get_option_bars_at_time(symbol, as_of)
             .await
-            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+            .map_err(|e| {
+                TradeFactoryError::DataError(format!("Failed to get option chain: {}", e))
+            })?;
 
         // 2. Build IV surface
         let surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
@@ -421,7 +494,9 @@ impl TradeFactory for DefaultTradeFactory {
             symbol,
         )
         .await
-        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+        .ok_or_else(|| {
+            TradeFactoryError::SelectionError("Failed to build IV surface".to_string())
+        })?;
 
         // 3. Extract spot price
         let spot_price = SpotPrice::new(
@@ -436,24 +511,35 @@ impl TradeFactory for DefaultTradeFactory {
         let max_dte = min_dte + 15;
 
         // 5. Use selector to build condor (near straddle + far wings)
-        let selection = self.selector.select_multi_leg(&spot_price, &surface, config, min_dte, max_dte)
-            .map_err(|e| TradeFactoryError::SelectionError(format!("Condor selection failed: {}", e)))?;
+        let selection = self
+            .selector
+            .select_multi_leg(&spot_price, &surface, config, min_dte, max_dte)
+            .map_err(|e| {
+                TradeFactoryError::SelectionError(format!("Condor selection failed: {}", e))
+            })?;
 
         // 6. Extract center strike (should be 1 for condor)
-        let _center_strike = selection.center_strikes.first().cloned()
-            .ok_or_else(|| TradeFactoryError::SelectionError("No center strike available".to_string()))?;
+        let _center_strike = selection.center_strikes.first().cloned().ok_or_else(|| {
+            TradeFactoryError::SelectionError("No center strike available".to_string())
+        })?;
 
         // 7. Extract near and far wing strikes
-        let near_strikes = selection.near_strikes.ok_or_else(||
-            TradeFactoryError::SelectionError("No near strikes available for condor".to_string()))?;
+        let near_strikes = selection.near_strikes.ok_or_else(|| {
+            TradeFactoryError::SelectionError("No near strikes available for condor".to_string())
+        })?;
         if near_strikes.len() < 2 {
-            return Err(TradeFactoryError::SelectionError("Condor requires 2 near wing strikes".to_string()));
+            return Err(TradeFactoryError::SelectionError(
+                "Condor requires 2 near wing strikes".to_string(),
+            ));
         }
 
-        let far_strikes = selection.far_strikes.ok_or_else(||
-            TradeFactoryError::SelectionError("No far strikes available for condor".to_string()))?;
+        let far_strikes = selection.far_strikes.ok_or_else(|| {
+            TradeFactoryError::SelectionError("No far strikes available for condor".to_string())
+        })?;
         if far_strikes.len() < 2 {
-            return Err(TradeFactoryError::SelectionError("Condor requires 2 far wing strikes".to_string()));
+            return Err(TradeFactoryError::SelectionError(
+                "Condor requires 2 far wing strikes".to_string(),
+            ));
         }
 
         let near_put_strike = near_strikes[0];
@@ -492,7 +578,9 @@ impl TradeFactory for DefaultTradeFactory {
 
         // 9. Construct and validate condor
         cs_domain::entities::Condor::new(near_call, near_put, far_upper_call, far_lower_put)
-            .map_err(|e| TradeFactoryError::SelectionError(format!("Condor construction failed: {}", e)))
+            .map_err(|e| {
+                TradeFactoryError::SelectionError(format!("Condor construction failed: {}", e))
+            })
     }
 
     async fn create_iron_condor(
@@ -503,10 +591,13 @@ impl TradeFactory for DefaultTradeFactory {
         config: &cs_domain::value_objects::MultiLegStrategyConfig,
     ) -> Result<cs_domain::entities::IronCondor, TradeFactoryError> {
         // 1. Get option chain
-        let chain = self.options_repo
+        let chain = self
+            .options_repo
             .get_option_bars_at_time(symbol, as_of)
             .await
-            .map_err(|e| TradeFactoryError::DataError(format!("Failed to get option chain: {}", e)))?;
+            .map_err(|e| {
+                TradeFactoryError::DataError(format!("Failed to get option chain: {}", e))
+            })?;
 
         // 2. Build IV surface
         let surface = crate::iv_surface_builder::build_iv_surface_minute_aligned(
@@ -515,7 +606,9 @@ impl TradeFactory for DefaultTradeFactory {
             symbol,
         )
         .await
-        .ok_or_else(|| TradeFactoryError::SelectionError("Failed to build IV surface".to_string()))?;
+        .ok_or_else(|| {
+            TradeFactoryError::SelectionError("Failed to build IV surface".to_string())
+        })?;
 
         // 3. Extract spot price
         let spot_price = SpotPrice::new(
@@ -530,20 +623,34 @@ impl TradeFactory for DefaultTradeFactory {
         let max_dte = min_dte + 15;
 
         // 5. Use selector to build iron condor (near spread + far wings)
-        let selection = self.selector.select_multi_leg(&spot_price, &surface, config, min_dte, max_dte)
-            .map_err(|e| TradeFactoryError::SelectionError(format!("IronCondor selection failed: {}", e)))?;
+        let selection = self
+            .selector
+            .select_multi_leg(&spot_price, &surface, config, min_dte, max_dte)
+            .map_err(|e| {
+                TradeFactoryError::SelectionError(format!("IronCondor selection failed: {}", e))
+            })?;
 
         // 6. Extract near and far wing strikes
-        let near_strikes = selection.near_strikes.ok_or_else(||
-            TradeFactoryError::SelectionError("No near strikes available for iron condor".to_string()))?;
+        let near_strikes = selection.near_strikes.ok_or_else(|| {
+            TradeFactoryError::SelectionError(
+                "No near strikes available for iron condor".to_string(),
+            )
+        })?;
         if near_strikes.len() < 2 {
-            return Err(TradeFactoryError::SelectionError("IronCondor requires 2 near strikes".to_string()));
+            return Err(TradeFactoryError::SelectionError(
+                "IronCondor requires 2 near strikes".to_string(),
+            ));
         }
 
-        let far_strikes = selection.far_strikes.ok_or_else(||
-            TradeFactoryError::SelectionError("No far strikes available for iron condor".to_string()))?;
+        let far_strikes = selection.far_strikes.ok_or_else(|| {
+            TradeFactoryError::SelectionError(
+                "No far strikes available for iron condor".to_string(),
+            )
+        })?;
         if far_strikes.len() < 2 {
-            return Err(TradeFactoryError::SelectionError("IronCondor requires 2 far strikes".to_string()));
+            return Err(TradeFactoryError::SelectionError(
+                "IronCondor requires 2 far strikes".to_string(),
+            ));
         }
 
         let near_put_strike = near_strikes[0];
@@ -582,6 +689,8 @@ impl TradeFactory for DefaultTradeFactory {
 
         // 8. Construct and validate iron condor
         cs_domain::entities::IronCondor::new(near_call, near_put, far_upper_call, far_lower_put)
-            .map_err(|e| TradeFactoryError::SelectionError(format!("IronCondor construction failed: {}", e)))
+            .map_err(|e| {
+                TradeFactoryError::SelectionError(format!("IronCondor construction failed: {}", e))
+            })
     }
 }

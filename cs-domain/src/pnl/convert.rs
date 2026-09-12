@@ -31,12 +31,16 @@ impl ToPnlRecord for StraddleResult {
         let hedge_costs = self.total_costs().unwrap_or(Decimal::ZERO);
 
         // Peak capital: option premium + hedge capital (if hedging)
-        let hedge_capital = self.hedge_position.as_ref().map(|pos| {
-            let peak_shares = pos.peak_long_shares.max(pos.peak_short_shares);
-            let avg_price = Decimal::try_from(pos.avg_hedge_price).unwrap_or(Decimal::ZERO);
-            // 50% margin for Reg-T
-            Decimal::from(peak_shares) * avg_price * Decimal::new(50, 2)
-        }).unwrap_or(Decimal::ZERO);
+        let hedge_capital = self
+            .hedge_position
+            .as_ref()
+            .map(|pos| {
+                let peak_shares = pos.peak_long_shares.max(pos.peak_short_shares);
+                let avg_price = Decimal::try_from(pos.avg_hedge_price).unwrap_or(Decimal::ZERO);
+                // 50% margin for Reg-T
+                Decimal::from(peak_shares) * avg_price * Decimal::new(50, 2)
+            })
+            .unwrap_or(Decimal::ZERO);
 
         let peak_capital = option_premium + hedge_capital;
 
@@ -68,11 +72,15 @@ impl ToPnlRecord for CalendarSpreadResult {
         let hedge_costs = self.total_costs().unwrap_or(Decimal::ZERO);
 
         // Peak capital: option premium + hedge capital (if hedging)
-        let hedge_capital = self.hedge_position.as_ref().map(|pos| {
-            let peak_shares = pos.peak_long_shares.max(pos.peak_short_shares);
-            let avg_price = Decimal::try_from(pos.avg_hedge_price).unwrap_or(Decimal::ZERO);
-            Decimal::from(peak_shares) * avg_price * Decimal::new(50, 2)
-        }).unwrap_or(Decimal::ZERO);
+        let hedge_capital = self
+            .hedge_position
+            .as_ref()
+            .map(|pos| {
+                let peak_shares = pos.peak_long_shares.max(pos.peak_short_shares);
+                let avg_price = Decimal::try_from(pos.avg_hedge_price).unwrap_or(Decimal::ZERO);
+                Decimal::from(peak_shares) * avg_price * Decimal::new(50, 2)
+            })
+            .unwrap_or(Decimal::ZERO);
 
         let peak_capital = option_premium + hedge_capital;
 
@@ -105,11 +113,15 @@ impl ToPnlRecord for IronButterflyResult {
         let hedge_costs = self.total_costs().unwrap_or(Decimal::ZERO);
 
         // Peak capital
-        let hedge_capital = self.hedge_position.as_ref().map(|pos| {
-            let peak_shares = pos.peak_long_shares.max(pos.peak_short_shares);
-            let avg_price = Decimal::try_from(pos.avg_hedge_price).unwrap_or(Decimal::ZERO);
-            Decimal::from(peak_shares) * avg_price * Decimal::new(50, 2)
-        }).unwrap_or(Decimal::ZERO);
+        let hedge_capital = self
+            .hedge_position
+            .as_ref()
+            .map(|pos| {
+                let peak_shares = pos.peak_long_shares.max(pos.peak_short_shares);
+                let avg_price = Decimal::try_from(pos.avg_hedge_price).unwrap_or(Decimal::ZERO);
+                Decimal::from(peak_shares) * avg_price * Decimal::new(50, 2)
+            })
+            .unwrap_or(Decimal::ZERO);
 
         let peak_capital = option_premium + hedge_capital;
 
@@ -141,11 +153,15 @@ impl ToPnlRecord for CalendarStraddleResult {
         let hedge_costs = self.total_costs().unwrap_or(Decimal::ZERO);
 
         // Peak capital
-        let hedge_capital = self.hedge_position.as_ref().map(|pos| {
-            let peak_shares = pos.peak_long_shares.max(pos.peak_short_shares);
-            let avg_price = Decimal::try_from(pos.avg_hedge_price).unwrap_or(Decimal::ZERO);
-            Decimal::from(peak_shares) * avg_price * Decimal::new(50, 2)
-        }).unwrap_or(Decimal::ZERO);
+        let hedge_capital = self
+            .hedge_position
+            .as_ref()
+            .map(|pos| {
+                let peak_shares = pos.peak_long_shares.max(pos.peak_short_shares);
+                let avg_price = Decimal::try_from(pos.avg_hedge_price).unwrap_or(Decimal::ZERO);
+                Decimal::from(peak_shares) * avg_price * Decimal::new(50, 2)
+            })
+            .unwrap_or(Decimal::ZERO);
 
         let peak_capital = option_premium + hedge_capital;
 

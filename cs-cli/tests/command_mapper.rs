@@ -10,19 +10,19 @@
 //!    filters/risk).
 
 use chrono::NaiveDate;
-use cs_backtest::{BacktestConfig, DataSourceConfig, RunBacktestCommand};
 use cs_backtest::config::SpreadType;
+use cs_backtest::{BacktestConfig, DataSourceConfig, RunBacktestCommand};
 use cs_cli::mapping::map_config_to_command;
 
 fn sample_config() -> BacktestConfig {
     let mut config = BacktestConfig::default();
     config.start_date = NaiveDate::from_ymd_opt(2024, 8, 14).unwrap();
-    config.end_date   = NaiveDate::from_ymd_opt(2024, 8, 28).unwrap();
-    config.spread     = SpreadType::Straddle;
-    config.symbols    = Some(vec!["NVDA".to_string()]);
+    config.end_date = NaiveDate::from_ymd_opt(2024, 8, 28).unwrap();
+    config.spread = SpreadType::Straddle;
+    config.symbols = Some(vec!["NVDA".to_string()]);
     config.min_market_cap = Some(100_000_000_000);
     config.straddle_entry_days = 6;
-    config.straddle_exit_days  = 2;
+    config.straddle_exit_days = 2;
     config
 }
 
@@ -33,14 +33,23 @@ fn config_mapping_is_deterministic() {
     let cmd1 = map_config_to_command(&cfg);
     let cmd2 = map_config_to_command(&cfg);
 
-    assert_eq!(cmd1.period.start_date,  cmd2.period.start_date);
-    assert_eq!(cmd1.period.end_date,    cmd2.period.end_date);
+    assert_eq!(cmd1.period.start_date, cmd2.period.start_date);
+    assert_eq!(cmd1.period.end_date, cmd2.period.end_date);
     assert_eq!(cmd1.strategy.spread as u8, cmd2.strategy.spread as u8);
-    assert_eq!(cmd1.strategy.selection_strategy as u8, cmd2.strategy.selection_strategy as u8);
-    assert_eq!(cmd1.filters.symbols,        cmd2.filters.symbols);
+    assert_eq!(
+        cmd1.strategy.selection_strategy as u8,
+        cmd2.strategy.selection_strategy as u8
+    );
+    assert_eq!(cmd1.filters.symbols, cmd2.filters.symbols);
     assert_eq!(cmd1.filters.min_market_cap, cmd2.filters.min_market_cap);
-    assert_eq!(cmd1.strategy.straddle_entry_days, cmd2.strategy.straddle_entry_days);
-    assert_eq!(cmd1.strategy.straddle_exit_days,  cmd2.strategy.straddle_exit_days);
+    assert_eq!(
+        cmd1.strategy.straddle_entry_days,
+        cmd2.strategy.straddle_entry_days
+    );
+    assert_eq!(
+        cmd1.strategy.straddle_exit_days,
+        cmd2.strategy.straddle_exit_days
+    );
 }
 
 /// Business-intent fields land in the correct bounded sub-structure.
@@ -50,13 +59,19 @@ fn map_config_transfers_business_fields() {
     let cmd = map_config_to_command(&cfg);
 
     // Period
-    assert_eq!(cmd.period.start_date, NaiveDate::from_ymd_opt(2024, 8, 14).unwrap());
-    assert_eq!(cmd.period.end_date,   NaiveDate::from_ymd_opt(2024, 8, 28).unwrap());
+    assert_eq!(
+        cmd.period.start_date,
+        NaiveDate::from_ymd_opt(2024, 8, 14).unwrap()
+    );
+    assert_eq!(
+        cmd.period.end_date,
+        NaiveDate::from_ymd_opt(2024, 8, 28).unwrap()
+    );
 
     // Strategy
     assert!(matches!(cmd.strategy.spread, SpreadType::Straddle));
     assert_eq!(cmd.strategy.straddle_entry_days, 6);
-    assert_eq!(cmd.strategy.straddle_exit_days,  2);
+    assert_eq!(cmd.strategy.straddle_exit_days, 2);
 
     // Filters
     assert_eq!(cmd.filters.symbols, Some(vec!["NVDA".to_string()]));
@@ -73,8 +88,13 @@ fn map_config_transfers_business_fields() {
 #[test]
 fn command_has_five_top_level_fields() {
     let cfg = sample_config();
-    let RunBacktestCommand { period, strategy, execution, filters, risk } =
-        map_config_to_command(&cfg);
+    let RunBacktestCommand {
+        period,
+        strategy,
+        execution,
+        filters,
+        risk,
+    } = map_config_to_command(&cfg);
 
     // Every sub-structure is populated
     assert_eq!(period.start_date, cfg.start_date);

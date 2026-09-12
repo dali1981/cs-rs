@@ -1,6 +1,6 @@
-use chrono::NaiveDate;
-use crate::{EarningsEvent, TradingPeriodSpec};
 use super::TradableEvent;
+use crate::{EarningsEvent, TradingPeriodSpec};
+use chrono::NaiveDate;
 
 /// A date range during which we want to INITIATE trades
 ///
