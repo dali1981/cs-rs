@@ -706,10 +706,22 @@ mod tests {
             PricingModel::from_string("delta"),
             PricingModel::StickyDelta
         );
-        assert_eq!(
-            PricingModel::from_string("unknown"),
-            PricingModel::StickyStrike
-        );
+        // An unrecognised string falls back to the enum's own default rather than to a
+        // hardcoded variant. Asserted against `PricingModel::default()` so that changing
+        // the default cannot silently invalidate this case -- which is what happened: the
+        // default moved to StickyMoneyness and this assertion still read StickyStrike,
+        // and nobody saw it because the workspace test target had not compiled since.
+        assert_eq!(PricingModel::from_string("unknown"), PricingModel::default());
+
+        // And pin the default itself, so a deliberate change to it trips one clear
+        // assertion here instead of a confusing one above.
+        assert_eq!(PricingModel::default(), PricingModel::StickyMoneyness);
+
+        // NOTE: the fallback itself is worth revisiting. `from_string` maps any
+        // unrecognised input to the default, so `--pricing-model stikcy_strike` silently
+        // prices the whole backtest with a different model instead of failing. That is the
+        // silent-fallback anti-pattern; the fix is a `FromStr`/`ValueEnum` that errors, and
+        // it changes the CLI surface, so it is flagged rather than done here.
     }
 
     #[test]
